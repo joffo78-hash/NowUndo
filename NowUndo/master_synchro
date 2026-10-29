@@ -1,0 +1,300 @@
+desc:Nowundo Master Sync (Central Timebase)
+options:gmem=nowundo_sync
+
+slider1:host_sync_main=0<0,1,1>-Host Sync (Main)
+slider2:host_sync_chorus=0<0,1,1>-Host Sync (Chorus)
+slider3:host_sync_bridge=0<0,1,1>-Host Sync (Bridge)
+slider4:host_sync_meas=1<1,16,1>-Host Sync Measures (Reaper)
+slider5:ui_scale=100<25,150,25>UI Zoom (%)
+
+@init
+ext_noinit = 1;
+max_instances = 5;
+
+// Réinitialise à 100 si la valeur en mémoire est hors-bornes (notamment l'ancien 1)
+(slider5 < 25 || slider5 > 150) ? slider5 = 100;
+ui_scale = slider5 / 100.0;
+
+function handle_host_sync_all() local(beats_meas, host_bpm, b_len, m_len, total_beats, cur_beat, beat_in_cycle, phase_samples, mi, m_base, m_id, p, offset, enabled, main_locked, main_master_id, master_slot_idx, master_bpm_val, master_gmem_base, m_active_part, m_part_base, m_alias) (
+    host_bpm = max(tempo, 20.0);
+    beats_meas = ts_num > 0 ? ts_num : 4;
+    total_beats = beats_meas * max(1, floor(slider4));
+    
+    b_len = (srate * 60.0) / host_bpm;
+    m_len = b_len * total_beats;
+
+    cur_beat = beat_position >= 0 ? beat_position : 0;
+    beat_in_cycle = cur_beat % total_beats;
+    phase_samples = floor(beat_in_cycle * b_len);
+
+    p = 1;
+    loop(3,
+        offset = (p - 1) * 10;
+        enabled = (p == 1 ? slider1 : (p == 2 ? slider2 : slider3));
+
+        enabled ? (
+            gmem[offset] = 2; 
+            gmem[offset + 1] = 0; 
+            gmem[offset + 2] = m_len; 
+            gmem[offset + 3] = phase_samples; 
+        ) : (
+            gmem[offset] == 2 ? (
+                gmem[offset] = 0;
+            );
+        );
+        p += 1;
+    );
+
+    main_locked = gmem[0];
+    main_master_id = gmem[1];
+
+    master_slot_idx = -1; 
+    master_bpm_val = 0.0;
+
+    (main_locked == 1 && main_master_id > 0) ? (
+      mi = 0;
+      loop(max_instances,
+        m_base = 1000 + (mi * 600);
+        m_id = gmem[m_base];
+        m_alias = gmem[m_base + 1];
+        (m_id == main_master_id || m_alias == main_master_id) ? (
+          master_slot_idx = mi;
+        );
+        mi += 1;
+      );
+    );
+
+    gmem[910] = master_slot_idx;
+
+    (main_locked == 1 && master_slot_idx >= 0) ? (
+        master_gmem_base = 1000 + (master_slot_idx * 600);
+        m_active_part = gmem[master_gmem_base + 42];
+        m_active_part < 1 ? m_active_part = 1;
+        
+        m_part_base = master_gmem_base + (m_active_part - 1) * 200;
+        master_bpm_val = gmem[m_part_base + 150];
+    );
+
+    gmem[912] = master_bpm_val;
+);
+
+@slider
+(slider5 < 25 || slider5 > 150) ? slider5 = 100;
+ui_scale = slider5 / 100.0;
+handle_host_sync_all();
+
+@block
+handle_host_sync_all();
+
+@sample
+
+@gfx 330 210
+gfx_clear = 35 + 12 * 256 + 15 * 65536;
+
+(slider5 < 25 || slider5 > 150) ? slider5 = 100;
+ui_scale = max(0.25, min(2.0, slider5 / 100.0));
+
+// Fonctions graphiques adaptées à l'échelle
+function draw_rect(rx, ry, rw, rh) (
+    gfx_rect(floor(rx * ui_scale), floor(ry * ui_scale), max(1, floor(rw * ui_scale)), max(1, floor(rh * ui_scale)));
+);
+
+function draw_frame(rx, ry, rw, rh) (
+    gfx_rect(floor(rx * ui_scale), floor(ry * ui_scale), max(1, floor(rw * ui_scale)), max(1, floor(rh * ui_scale)), 0);
+);
+
+function set_pos(px, py) (
+    gfx_x = floor(px * ui_scale);
+    gfx_y = floor(py * ui_scale);
+);
+
+// Coordonnées souris virtuelles
+mx = mouse_x / ui_scale;
+my = mouse_y / ui_scale;
+
+mouse_down = mouse_cap & 1;
+mouse_click = mouse_down && !(last_mouse_cap & 1);
+
+// Polices adaptées à l'échelle
+f_title_sz = max(6, floor(13 * ui_scale));
+f_slot_sz  = max(6, floor(13 * ui_scale));
+f_ui_sz    = max(6, floor(10 * ui_scale));
+
+gfx_setfont(1, "Arial", f_title_sz, 'b');
+gfx_setfont(2, "Arial", f_ui_sz, 'b');
+gfx_setfont(3, "Arial", f_slot_sz, 'b');
+gfx_setfont(4, "Arial", f_ui_sz);
+
+// --- BOUTON AUTO-SYNC ---
+btn_auto_x = 155; btn_auto_y = 7; btn_auto_w = 100; btn_auto_h = 24;
+auto_hov = mx >= btn_auto_x && mx <= btn_auto_x + btn_auto_w && my >= btn_auto_y && my <= btn_auto_y + btn_auto_h;
+
+gmem[95] == 1 ? gfx_set(0.2, 0.6, 0.2, 1) : gfx_set(0.4, 0.1, 0.1, 1);
+auto_hov ? (gmem[95] == 1 ? gfx_set(0.3, 0.7, 0.3, 1) : gfx_set(0.5, 0.2, 0.2, 1)); 
+draw_rect(btn_auto_x, btn_auto_y, btn_auto_w, btn_auto_h);
+gfx_set(1, 1, 1, 0.2); 
+draw_frame(btn_auto_x, btn_auto_y, btn_auto_w, btn_auto_h);
+
+gfx_setfont(2, "Arial", f_ui_sz, 'b');
+gfx_set(1, 1, 1, 0.9);
+set_pos(btn_auto_x + 9, btn_auto_y + 7);
+gmem[95] == 1 ? gfx_drawstr("AUTO-SYNC: ON") : gfx_drawstr("AUTO-SYNC: OFF");
+
+mouse_click && auto_hov ? (
+    gmem[95] = 1 - gmem[95]; 
+);
+
+// --- BOUTON ZOOM CLICABLE (25% -> 50% -> 75% -> 100% -> 150%) ---
+btn_zoom_x = 262; btn_zoom_y = 7; btn_zoom_w = 58; btn_zoom_h = 24;
+zoom_hov = mx >= btn_zoom_x && mx <= btn_zoom_x + btn_zoom_w && my >= btn_zoom_y && my <= btn_zoom_y + btn_zoom_h;
+
+gfx_set(0.20, 0.25, 0.35, 1);
+zoom_hov ? gfx_set(0.28, 0.35, 0.48, 1);
+draw_rect(btn_zoom_x, btn_zoom_y, btn_zoom_w, btn_zoom_h);
+gfx_set(1, 1, 1, 0.2);
+draw_frame(btn_zoom_x, btn_zoom_y, btn_zoom_w, btn_zoom_h);
+
+gfx_setfont(2, "Arial", f_ui_sz, 'b');
+gfx_set(1, 1, 1, 0.9);
+set_pos(btn_zoom_x + 10, btn_zoom_y + 7);
+sprintf(#zoom_txt, "%d%%", floor(slider5 + 0.5));
+gfx_drawstr(#zoom_txt);
+
+// Clic : avance d'un cran et envoie le bon bitmask (16 = slider 5)
+mouse_click && zoom_hov ? (
+    slider5 < 40 ? slider5 = 50 :
+    slider5 < 65 ? slider5 = 75 :
+    slider5 < 90 ? slider5 = 100 :
+    slider5 < 125 ? slider5 = 150 :
+    slider5 = 25;
+    
+    sliderchange(16);
+    slider_automate(16);
+);
+
+// --- TITRE PRINCIPAL ---
+gfx_setfont(1, "Arial", f_title_sz, 'b');
+set_pos(12, 12); 
+gfx_set(1, 1, 1, 1);
+gfx_drawstr("NOWUNDO SYNC");
+
+// --- SLOTS DE SYNC ---
+function draw_slot(part_name, offset, y) local(locked, mid, mlen, btn_x, hov, slot_bpm, s_idx, si, s_b, s_part, s_part_base, inst_btn_w, inst_btn_x, inst_id_val, inst_alias_val, inst_hov, btn_host_hov, s_base, mask) (
+    locked = gmem[offset];
+    mid = gmem[offset + 1];
+    mlen = gmem[offset + 2];
+    mask = (offset == 0 ? 1 : (offset == 10 ? 2 : 4));
+    
+    gfx_set(0.18, 0.05, 0.07, 1); draw_rect(10, y, 310, 46);
+    gfx_set(0.28, 0.10, 0.12, 1); draw_frame(10, y, 310, 46);
+    
+    gfx_setfont(3, "Arial", f_slot_sz, 'b');
+    gfx_set(0.9, 0.8, 0.2, 1);
+    set_pos(20, y + 5); 
+    gfx_drawstr(part_name);
+    
+    slot_bpm = 0.0;
+    locked == 1 && mid > 0 ? (
+        s_idx = -1;
+        si = 0;
+        loop(max_instances,
+            s_b = 1000 + (si * 600);
+            (gmem[s_b] == mid || gmem[s_b + 1] == mid) ? s_idx = si;
+            si += 1;
+        );
+        s_idx >= 0 ? (
+            s_base = 1000 + (s_idx * 600);
+            s_part = gmem[s_base + 42];
+            s_part < 1 ? s_part = 1;
+            s_part_base = s_base + (s_part - 1) * 200;
+            slot_bpm = gmem[s_part_base + 150];
+        );
+    );
+
+    gfx_setfont(4, "Arial", f_ui_sz);
+    set_pos(20, y + 26);
+    locked == 0 ? (
+        gfx_set(0.2, 0.8, 0.3, 1); gfx_drawstr("FREE: Choisir source");
+    ) : locked == 1 ? (
+        gfx_set(0.9, 0.2, 0.2, 1); 
+        slot_bpm > 0 ? (
+            sprintf(#bpm_info, "MASTER (ID: %d) - %.1f BPM", mid, slot_bpm);
+            gfx_drawstr(#bpm_info);
+        ) : (
+            sprintf(#bpm_info, "MASTER (ID: %d) - En attente...", mid);
+            gfx_drawstr(#bpm_info);
+        );
+    ) : (
+        gfx_set(0.2, 0.6, 0.9, 1); gfx_drawstr("HOST SYNC (Reaper)");
+    );
+    
+    locked != 0 ? (
+        btn_x = 252;
+        hov = mx >= btn_x && mx <= btn_x + 58 && my >= y + 10 && my <= y + 36;
+        gfx_set(0.3, 0.1, 0.15, 1); hov ? gfx_set(0.4, 0.15, 0.2, 1);
+        draw_rect(btn_x, y + 10, 58, 26);
+        gfx_set(1, 1, 1, 0.1); draw_frame(btn_x, y + 10, 58, 26);
+        gfx_set(1, 1, 1, 0.8); 
+        set_pos(btn_x + 8, y + 16); 
+        gfx_drawstr("Unlock");
+        
+        mouse_click && hov ? (
+            gmem[offset] = 0;
+            offset == 0 ? slider1 = 0 : (offset == 10 ? slider2 = 0 : slider3 = 0);
+            sliderchange(mask);
+            slider_automate(mask);
+        );
+    ) : (
+        btn_host_hov = mx >= 125 && mx <= 162 && my >= y + 10 && my <= y + 36;
+        gfx_set(0.15, 0.3, 0.4, 1); btn_host_hov ? gfx_set(0.2, 0.4, 0.5, 1);
+        draw_rect(125, y + 10, 37, 26);
+        gfx_set(1, 1, 1, 0.1); draw_frame(125, y + 10, 37, 26);
+        gfx_set(1, 1, 1, 0.8); 
+        set_pos(129, y + 16); 
+        gfx_drawstr("Host");
+        
+        mouse_click && btn_host_hov ? (
+            offset == 0 ? slider1 = 1 : (offset == 10 ? slider2 = 1 : slider3 = 1);
+            sliderchange(mask);
+            slider_automate(mask);
+            handle_host_sync_all();
+        );
+        
+        inst_btn_x = 168;
+        inst_btn_w = 24;
+        si = 0;
+        loop(max_instances,
+            s_b = 1000 + (si * 600);
+            inst_id_val = gmem[s_b];
+            inst_alias_val = gmem[s_b + 1];
+            
+            inst_alias_val > 0 ? (
+                inst_hov = mx >= inst_btn_x && mx <= inst_btn_x + inst_btn_w && my >= y + 10 && my <= y + 36;
+                gfx_set(0.3, 0.15, 0.15, 1); inst_hov ? gfx_set(0.4, 0.2, 0.2, 1);
+                draw_rect(inst_btn_x, y + 10, inst_btn_w, 26);
+                gfx_set(1, 1, 1, 0.1); draw_frame(inst_btn_x, y + 10, inst_btn_w, 26);
+                gfx_set(1, 1, 1, 0.8); 
+                set_pos(inst_btn_x + 8, y + 16); 
+                
+                sprintf(#alias_txt, "%d", inst_alias_val % 10);
+                gfx_drawstr(#alias_txt);
+                
+                mouse_click && inst_hov ? (
+                    gmem[offset] = 1; 
+                    gmem[offset + 1] = inst_alias_val;
+                    offset == 0 ? slider1 = 0 : (offset == 10 ? slider2 = 0 : slider3 = 0);
+                    sliderchange(mask);
+                    slider_automate(mask);
+                );
+                inst_btn_x += inst_btn_w + 4;
+            );
+            si += 1;
+        );
+    );
+);
+
+draw_slot("MAIN", 0, 40);
+draw_slot("CHORUS", 10, 95);
+draw_slot("BRIDGE", 20, 150);
+
+last_mouse_cap = mouse_cap;

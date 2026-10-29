@@ -1,0 +1,1726 @@
+desc:aNowUndo V3.6.10 Looper (slicer: gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
+options:gmem=nowundo_sync
+options:maxmem=128000000
+slider1:speed=1.0<0.01,100.0,0.01>-Speed
+slider2:pitch=0.0<-48,48,0.01>-Pitch (st)
+slider3:mix=1.0<0,1,0.01>-Mix
+slider4:grain_ms=80.0<20,200,0.1>-Grain (ms)
+slider5:fade_ms=10.0<0,500,1>-Fade (ms)
+slider6:play_mode=0<0,2,1{Normal,Slicer,One-Shot}>-Playback Mode
+slider7:link_on=0<0,1,1{Off,On}>-Link P/S
+slider8:state_slider=2<0,8,1{Stop,Rec,Play,Dub,Replace,Auto-Rep,Multiply,Wait,Wait Sync}>-Transport State (interne)
+slider9:loop_pos_pct=0.0<0,100,0.1>-Pos (%)
+slider10:trans_sens=0.15<0.01,0.8,0.01>-Auto Thresh (Seuil)
+slider11:trans_hold_ms=120<30,1000,10>-Auto Hold (ms)
+slider12:grain_fade=25<5,50,1>-Grain Fade %
+slider13:slicer_mode=0<0,5,1{Random,Steps,Steps,Steps,Steps,All}>-Slicer Mode
+slider14:slicer_sub=0<0,5,1{1/4 (Noire),1/8 (Croche),1/12 (Triolet),1/16 (Double),1/24 (Triolet Double),1/32 (Triple)}>-Slicer Rate
+slider15:slice_decay_ms=150<10,2000,5>-Slice Decay (ms)
+slider16:rev_on=0<0,1,1{Off,On}>-Reverse
+slider17:pingpong_on=0<0,1,1{Off,On}>-Ping-Pong
+slider18:feedback=1.0<0,2,0.01>-Feedback
+slider19:degradation=1.0<0,1,0.01>-Degradation
+slider20:stereo_width=0.0<0,1,0.01>-Stereo Enhancer
+slider21:out_vol=1.0<0,2,0.01>-Output Volume
+slider22:ghost_pos_pct=0.0<0,100,0.1>-Clock (%)
+slider23:cloud_on=0<0,1,1{Off,On}>-Cloud Mode
+slider24:loop_quant=0<0,9,1{Free,1/2,1/3,1/4,1/6,1/8,1/12,1/16,1/32,1/64}>-Loop Quantize
+slider25:cloud_density=0.5<0,1,0.01>-Cloud Density
+slider26:cloud_chaos=0.0<0,1,0.01>-Cloud Chaos
+slider27:cloud_spread=0.1<0,1,0.01>-Cloud Spread
+slider28:dens_occ=100<0,100,0.1>-Density (%)
+slider29:dens_len=2<0,6,1{1/1,1/2,1/4,1/8,1/16,1/32,1/64}>-Rec Density Length
+slider30:loop_beats=0<0,64,1>-Loop Beats (0=Auto)
+slider31:slicer_src=0<0,1,1{Transients,Grid}>-Slice Source
+slider32:grid_sub=2<0,5,1{1/4 (Noire),1/8 (Croche),1/12 (Triolet),1/16 (Double),1/24 (Triolet Double),1/32 (Triple)}>-Grid Sub
+slider33:slicer_pitch_spread=0.0<0,100,0.01>-Pitch Spread (%)
+slider34:cloud_pitch_spread=0.0<0,100,0.01>-Cloud Pitch Spread (%)
+slider35:cloud_mix=1.0<0,1,0.01>-Cloud Mix
+slider36:cloud_pos_mode=1<0,1,1{Linked,Free}>-Cloud Pos Mode
+slider37:cloud_pos_pct=50.0<0,100,0.1>-Cloud Pos (%)
+slider38:cloud_lfo_shape=0<0,2,1{Sine,Saw,Inv Saw}>-Cloud LFO Shape
+slider39:cloud_lfo_rate=1.0<0.1,4.0,0.01>-Cloud LFO Rate (Hz)
+slider40:cloud_lfo_depth=0.0<0,100,0.01>-Cloud LFO Depth (%)
+slider41:looper_hue=0<0,8,1{Auto,Rouge,Orange,Jaune,Vert,Cyan,Bleu,Violet,Rose}>-Panel Color
+slider42:sampler_root=48<0,127,1>-Sampler Root Note (MIDI)
+slider43:sampler_pitch_mode=0<0,1,1{Varispeed,Granular}>-Sampler Pitch Mode (Loop Keys)
+slider44:sampler_release=0<0,3000,1>-Sampler Release (ms, 0 = off)
+slider45:manual_id=0<0,8,1>-Looper ID (0=Auto)
+slider46:clk_src=0<0,1,1{Master Looper,Own Loop}>-Slicer Clock
+slider47:slicer_steps=16<1,32,1>-Slicer Steps
+slider48:max_slices=0<0,64,1>-Max Slices (0=Off)
+slider49:slicer_preset=1<1,4,1>-Slicer Table Preset
+slider50:det_thresh=0.15<0.01,0.8,0.01>-Detect Thresh (Slicer)
+slider51:det_hold_ms=120<30,1000,10>-Detect Hold (ms, Slicer)
+slider52:dub_grain_ms=25<5,200,0.1>-Dub Grain (ms, compensation overdub)
+slider53:dub_align_ms=6<0,20,0.1>-Dub Align (ms, 0=off) [WSOLA]
+slider54:read_align_ms=6<0,20,0.1>-Read Align (ms, 0=off) [WSOLA lecture]
+
+@init
+ext_noinit = 1;
+
+function fast_tanh(x) local(x2, x3, x5) ( 
+  abs(x) > 3 ? ( x > 0 ? 1 : -1 ) : ( 
+    x2 = x * x; 
+    x3 = x2 * x; 
+    x5 = x3 * x2; 
+    x * (27 + x2) / (27 + 9 * x2) 
+  ); 
+);
+
+function host_measure_len() local(t, n) ( 
+  t = max(tempo, 20); 
+  n = ts_num > 0 ? ts_num : 4; 
+  srate * (60.0 / t) * n; 
+);
+
+// ---- IDENTIFICATION MANUELLE (slider45 + Sérialisation) ----
+manual_id > 0 ? (slider45 = manual_id;) : (manual_id = slider45;);
+
+instance_id = manual_id > 0 ? manual_id : 1;
+instance_alias = instance_id;
+inst_idx = instance_id - 1;
+max_inst = 8;
+
+max_loop_sec = 90;
+mem_budget = 120000000;
+
+single_buf_len = min(floor(srate * max_loop_sec), floor(mem_budget / 30)); 
+buf_len = single_buf_len;
+slot_size = single_buf_len * 2;
+
+buf_part1_l = 0; buf_part1_r = single_buf_len;
+buf_part2_l = slot_size; buf_part2_r = slot_size + single_buf_len;
+buf_part3_l = slot_size * 2; buf_part3_r = slot_size * 2 + single_buf_len;
+
+hist_mem_start = slot_size * 3;
+available_slots = floor((mem_budget - hist_mem_start - slot_size - 20000) / slot_size);
+max_history = max(2, min(8, available_slots + 1));
+
+base_backup_l = hist_mem_start + (max_history - 1) * slot_size;
+base_backup_r = base_backup_l + single_buf_len;
+
+hist_len = base_backup_r + single_buf_len + 1000;   
+i = 0; loop(16, hist_len[i] = 0; i += 1;);
+
+active_part = 1; 
+target_part = 1;
+pending_part_switch = 0;
+
+part_speed = hist_len + 50; part_pitch = part_speed + 3; part_rev = part_pitch + 3;
+part_pingpong = part_rev + 3; part_play_mode = part_pingpong + 3;
+part_cloud_on = part_play_mode + 3; part_link_on = part_cloud_on + 3;
+
+i = 0;
+loop(3,
+  part_speed[i] = 1.0; part_pitch[i] = 0.0; part_rev[i] = 0;
+  part_pingpong[i] = 0; part_play_mode[i] = 0; part_cloud_on[i] = 0; part_link_on[i] = 0;
+  i += 1;
+);
+
+len_part1 = 0; len_part2 = 0; len_part3 = 0;
+base_len_part1 = 0; base_len_part2 = 0; base_len_part3 = 0;
+history_head = 0; history_tail = 0; history_count = 1; active_history_idx = 0;
+hist_undo = 0; hist_redo = 0; dirty_len = 0; left_buf = buf_part1_l; right_buf = buf_part1_r;
+
+max_grains = 16; grain_data_size = 8; grain_mem = part_link_on + 100;
+max_transients = 256; trans_mem = grain_mem + (max_grains * grain_data_size) + 100;
+seq_mem = trans_mem + max_transients + 100; slice_pitch_mem = seq_mem + max_transients + 100;
+trans_count = 0;
+
+lut_size = 1024; lut_cos = slice_pitch_mem + max_transients + 100;
+i = 0; loop(lut_size, lut_cos[i] = 0.5 - 0.5 * cos(2 * $pi * (i / lut_size)); i += 1; );
+
+i = 0; 
+loop(max_grains,
+  base = grain_mem + (i * grain_data_size);
+  base[0] = 0; base[1] = 0; base[2] = 0; base[3] = srate * 0.1; base[4] = 0; base[5] = 0; base[6] = 0; base[7] = 0;
+  i += 1;
+);
+grain_dur = srate * 0.1; spawn_timer = 0;
+
+delay_len = 32; delay_buf_l = lut_cos + lut_size + 100; delay_buf_r = delay_buf_l + delay_len; delay_idx = 0;
+
+wg_mem = delay_buf_r + delay_len + 100; wg_stride = 5; max_wgrains = 16;
+acc_len = single_buf_len; acc_size = acc_len * 3;
+ih_size = 32768; ih_mask = 32767; ih_l = wg_mem + max_wgrains * wg_stride + 100; ih_r = ih_l + ih_size; memset(ih_l, 0, ih_size * 2); ih_n = 0; wg_prev_ok = 0; wg_prev_src = 0; wg_prev_n = 0; wg_Lcur = 0;
+rd_tmp = ih_r + ih_size + 10; rd_prev_ok = 0; rd_prev_start = 0; rd_prev_n = 0; rd_prev_dur = 0;
+acc_set0 = ih_r + ih_size + 400; acc_set1 = acc_set0 + acc_size; acc_end  = acc_set1 + acc_size;
+acc_ok = (acc_end + 100) < mem_budget; acc_ok ? memset(acc_set0, 0, acc_size * 2);
+acc_cur = 0; acc_cur_dirty = 0; acc_lo = 1000000000; acc_hi = -1;
+acc_wmin = 0.5; acc_wrep = 0.9; acc_mode = 1; cm_mode = 1; wg_rf = 1; wg_hop = 0.5; wg_fade = 0.5;
+wg_timer = 0; wg_es = 0; wg_el = 16; wg_gL = 1; wg_gR = 1;
+cm_active = 0; cm_k = 0; cm_dir = 1; cm_lo = 0; cm_hi = 0; cm_sb = 0;
+dub_gran = 0; dub_gran_prev = 0; gran_now = 0; auto_above_prev = 0;
+
+dens_bag = acc_end + 200; dens_bag_i = 16; dens_carry = 0; dens_last_occ = -1;
+dens_g = 1; dens_tgt = 1; dens_slot = -1; dens_rt = 0; dens_prev_state = -1; dens_force = 0; dens_len_f = dens_len;
+dens_slew = 1.0 / (srate * 0.005);
+sl_lo = 0; sl_hi = 0; sl_run = 1; sl_gate = 1; sl_slew = 1.0 / (srate * 0.003);
+slice_mute_gate = 1.0; slice_mute_step = 0; slice_mute_target = 1.0;
+
+current_slice_pitch = 0.0; cloud_lfo_phase = 0.0; cloud_center_draw = 0.0;
+wow_phase = 0.0; flutter_phase = 0.0;
+smp_nv = 16; smp_vs = 16; smp_voice = dens_bag + 16 + 100;
+smp_evmax = 512; smp_ev_off = smp_voice + smp_nv * smp_vs + 100; smp_ev_note = smp_ev_off + smp_evmax; smp_ev_vel = smp_ev_note + smp_evmax;
+memset(smp_voice, 0, smp_nv * smp_vs); memset(smp_ev_off, 0, smp_evmax * 3);
+trans_str = smp_ev_vel + smp_evmax + 100; pslot = 4 + max_transients * 2; preset_mem = trans_str + max_transients + 100;
+memset(trans_str, 0, max_transients); memset(preset_mem, 0, pslot * 4);
+preset_cur = -1; last_preset = -1; last_steps = slicer_steps; last_max_sl = max_slices; steps_f = slicer_steps; maxsl_f = max_slices;
+smp_att = 1.0 / (srate * 0.002); smp_tail = max(1, srate * 0.003); smp_choke_rel = 1.0 / (srate * 0.004); smp_quick_rel = 1.0 / (srate * 0.005);
+smp_l = 0; smp_r = 0; smp_rl = 0; smp_rr = 0; smp_age = 0; smp_armed = 0; smp_kmode = 0; smp_mode = 0; smp_prev_mode = 0; smp_G = 4096; smp_Gh = 2048; smp_ev_n = 0; smp_ev_i = 0; smp_blk = 0; smp_alloff = 0; smp_nact = 0;
+sampler_root_f = sampler_root; sampler_rel_u = sqrt(sampler_release / 3000);
+
+gm_pspread_slicer = 34;
+gm_pspread_cloud  = 35;
+gm_sampler_root   = 150;
+gm_sampler_armed  = 151;
+gm_sampler_voices = 152;
+gm_sampler_release = 154;
+gm_sampler_pmode  = 153;
+gm_bpm            = 155;
+
+function calc_sync_len(current_len, ms_len) local(t) (
+  ms_len > 0 ? (
+    t = ms_len * 0.125; current_len <= t ? t :
+    (t = ms_len * 0.25; current_len <= t ? t :
+    (t = ms_len * 0.5;  current_len <= t ? t :
+    (ceil(current_len / ms_len) * ms_len)
+    ));
+  ) : current_len;
+);
+
+function loop_beat_len() local(hb, nb) (
+  hb = (60 / max(tempo, 20)) * srate;
+  length > 0 ? (
+    nb = loop_beats >= 1 ? floor(loop_beats + 0.5) : max(1, floor(length / hb + 0.5));
+    hb = length / nb;
+  );
+  hb;
+);
+
+function dens_next() local(i, j, t, want, k) (
+  (dens_bag_i >= 16 || dens_occ != dens_last_occ) ? (
+    dens_occ != dens_last_occ ? dens_carry = 0;
+    dens_last_occ = dens_occ;
+    dens_occ <= 0.001 ? ( k = 0; dens_carry = 0; ) : (
+      want = dens_occ * 0.16 + dens_carry;
+      k = min(16, floor(want)); dens_carry = min(1, want - k);
+    );
+    i = 0; loop(16, dens_bag[i] = (i < k) ? 1 : 0; i += 1;);
+    i = 15; loop(15, j = floor(rand(i + 1)); t = dens_bag[i]; dens_bag[i] = dens_bag[j]; dens_bag[j] = t; i -= 1;);
+    dens_bag_i = 0;
+  );
+  dens_tgt = dens_bag[dens_bag_i]; dens_bag_i += 1;
+);
+
+write_ptr = 0; state = 0; state_target = 2; last_state_target = 2; rec_cmd = 0; pending_next_state = 2; target_sync_len = 0;
+pos = 0; old_pos_ptr = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; mult_len = 0;
+master_pos = 0; clk_cyc = 0; master_pos1 = 0; master_pos2 = 0; master_pos3 = 0;
+is_normal_playback = 0; prev_normal_playback = 0; can_sync = 0; last_ghost_pct = 0; prev_rev_on = 0;
+clk_cyc = 0; clk_cyc1 = 0; clk_cyc2 = 0; clk_cyc3 = 0; clk_len_ref = 0;
+sync_a = 0; sync_b = 0; sync_c_w = 0; sync_c_l = 0; sync_c_r = 0; prev_sync_key = 0; prev_cloud_on = 0; prev_xcl = 0;
+ml_ok = 0; ml_fwd_free = 0; ml_cool = 0;
+active_control = 0; smooth_start = 0; smooth_width = 0; param_smooth_coeff = 0.95;
+xfade_pos_active = 0; xfade_pos_len = srate * 0.015; xfade_pos_count = 0;
+slice_env = 1.0; slice_decay_samples = srate * 0.15; slice_decay_step = 1.0 / slice_decay_samples;
+replace_fade = 0; replace_fade_coeff = 1.0 / (srate * 0.02); state_transition_fade = 1.0;
+prev_in0 = 0; prev_in1 = 0; grain_mix = 0; xfade_coeff = 1.0 / (srate * 0.01); init_done = 0;
+tape_lpf_l = 0; tape_lpf_r = 0; tape_lpf_l_b = 0; tape_lpf_r_b = 0; tape_lpf_l_c = 0; tape_lpf_r_c = 0; tape_lpf_l_d = 0; tape_lpf_r_d = 0;
+slice_pan = 0; dub_pan = 0; last_slider9 = loop_pos_pct; last_sens = trans_sens; last_hold = trans_hold_ms; last_det_t = det_thresh; last_det_h = det_hold_ms;
+last_slicer_mode = slicer_mode; last_grid_sub = grid_sub; last_pitch_spread = slicer_pitch_spread;
+last_slicer_src = -1;
+slicer_sample_counter = 0; slicer_current_step = 0; auto_rep_hold_counter = 0; auto_rep_active = 0; input_env = 0; ping_pong_dir = 1;  last_slicer_step = -1;
+one_shot_playing = 0; one_shot_pp_state = 0;
+analysing = 0; ana_k = 0; ana_end = 0; ana_max_peak = 0.0001; ana_min_dist = 0; ana_win_size = 0; ana_env = 0; ana_last_trig = 0;
+ui_en = 1; ui_chg = 0; ui_hov = 0; ui_ar = 1; ui_ag = 1; ui_ab = 1; last_mouse_cap = 0; last_mouse_y = 0;
+auto_on = 0; clr_press_time = 0; clr_long_pressed = 0; input_signal_active = 0; hold_samples_left = 0;
+cloud_on = 0; cloud_density = 0.5; cloud_chaos = 0.0; cloud_spread = 0.1; cloud_pitch_spread = 0.0; cloud_mix = 1.0; cloud_pos_mode = 1; cloud_pos_pct = 50.0; cloud_lfo_shape = 0; cloud_lfo_rate = 1.0; cloud_lfo_depth = 0.0; loop_quant = 0;
+grid_pending = 0; grid_sig = -1;
+peak_in_vu = 0; peak_loop_vu = 0; vu_rel = exp(-1.0 / (srate * 0.4));
+
+prev_sm_speed = -1; prev_loop_start = -1; prev_loop_width = -1;
+prev_pitch_ratio_sig = -1; prev_pingpong_on = 0;
+prev_play_mode = -1; prev_state_for_sync = -1;
+sync_hard_resync = 0;
+loop_edit_mode = 0;
+rec_start_time = 0;
+
+function slicer_beats() ( slicer_sub == 0 ? 1.0 : (slicer_sub == 1 ? 0.5 : (slicer_sub == 2 ? 1.0/3.0 : (slicer_sub == 3 ? 0.25 : (slicer_sub == 4 ? 1.0/6.0 : 0.125)))); );
+function grid_beats() ( grid_sub == 0 ? 1.0 : (grid_sub == 1 ? 0.5 : (grid_sub == 2 ? 1.0/3.0 : (grid_sub == 3 ? 0.25 : (grid_sub == 4 ? 1.0/6.0 : 0.125)))); );
+function grid_signature() ( length + loop_start * 3 + loop_width * 7 + loop_beat_len() * 13 + grid_sub * 101 + loop_beats * 1009; );
+function grid_build() local(st, e) (
+  st = max(srate * 0.005, loop_beat_len() * grid_beats()); e = loop_start + loop_width - 1; trans_count = 0;
+  while (trans_count < max_transients && loop_start + trans_count * st < e) ( trans_mem[trans_count] = loop_start + trans_count * st; trans_count += 1; );
+  analysing = 0; grid_pending = 1; grid_sig = grid_signature();
+);
+function start_analysis() ( 
+  length > 0 ? ( 
+    slicer_src == 1 ? grid_build() : ( 
+      trans_count = 0; ana_max_peak = 0.0001; 
+      ana_k = floor(loop_start); ana_end = floor(loop_start + loop_width); 
+      ana_prev_l = 0; ana_prev_r = 0;
+      analysing = 1; 
+    ); 
+  ); 
+);
+function switch_history_slot(idx) (
+  active_history_idx = idx;
+  idx == 0 ? ( left_buf = active_part == 1 ? buf_part1_l : (active_part == 2 ? buf_part2_l : buf_part3_l); right_buf = active_part == 1 ? buf_part1_r : (active_part == 2 ? buf_part2_r : buf_part3_r);
+  ) : ( left_buf = hist_mem_start + (idx - 1) * slot_size; right_buf = left_buf + single_buf_len; );
+);
+function transparent_soft_clip(x) local(ax, excess) ( ax = abs(x); ax > 0.95 ? ( excess = ax - 0.95; (x > 0 ? 1 : -1) * (0.95 + 0.05 * (excess / (0.05 + excess))); ) : ( x; ); );
+function wg_splat(a, b, env, sb) local(lo, hi, span, k, k_end, steps, seg_a, seg_b, wgt, tn, vL, vR, kk, w_, mono, yr_b, w_b) (
+  lo = min(a, b); hi = max(a, b); span = max(hi - lo, 0.0001); k = floor(lo); k_end = floor(hi); steps = min(k_end - k + 1, 24); yr_b = sb + acc_len; w_b = sb + acc_len * 2;
+  loop(steps,
+    seg_a = max(lo, k); seg_b = min(hi, k + 1); wgt = seg_b - seg_a;
+    wgt > 0 ? (
+      tn = ((seg_a + seg_b) * 0.5 - lo) / span; a > b ? tn = 1.0 - tn;
+      vL = wg_p0 + (wg_c0 - wg_p0) * tn; vR = wg_p1 + (wg_c1 - wg_p1) * tn;
+      stereo_width > 0.0001 ? ( mono = (vL + vR) * 0.5; vL = mono * wg_gL; vR = mono * wg_gR; );
+      kk = k - wg_es; kk -= floor(kk / wg_el) * wg_el; kk += wg_es;
+      kk >= 0 && kk < (length > 0 ? length : buf_len) ? (
+        w_ = env * wgt * wg_rf; sb[kk] += vL * w_; yr_b[kk] += vR * w_; w_b[kk] += w_;
+        kk < acc_lo ? acc_lo = kk; kk > acc_hi ? acc_hi = kk;
+      );
+    ); k += 1;
+  );
+);
+// V3.6.10 WSOLA : cherche le decalage source (-Sn..+Sn) dont le debut de grain colle le mieux a la suite du grain precedent.
+function wg_pick(s_nom, t0, Sn, Wn) local(best, bestd, dd, k, c, num, en, sc, stp) (
+  stp = (Sn * Wn > 40000) ? 2 : 1; best = -1000000000; bestd = 0; dd = -Sn;
+  while (dd <= Sn) (
+    num = 0; en = 0.000000001; k = 0;
+    while (k < Wn) (
+      c = ih_l[(s_nom + dd + k) & ih_mask] + ih_r[(s_nom + dd + k) & ih_mask];
+      num += c * (ih_l[(t0 + k) & ih_mask] + ih_r[(t0 + k) & ih_mask]);
+      en += c * c; k += stp;
+    );
+    sc = num / sqrt(en); sc > best ? ( best = sc; bestd = dd; );
+    dd += stp;
+  );
+  bestd;
+);
+function ih_wrap() local(gi, gb) ( ih_n -= 1073741824; wg_prev_src -= 1073741824; wg_prev_n -= 1073741824; gi = 0; loop(max_wgrains, gb = wg_mem + gi * wg_stride; gb[3] -= 1073741824; gi += 1; ); );
+// V3.6.10 WSOLA LECTURE : le debut de chaque grain de lecture est decale (-Sn..+Sn) pour coller a la suite du grain precedent.
+function rd_tp(x) local(k) ( k = floor(x); k -= floor((k - floor(eff_start)) / max(floor(eff_end) - floor(eff_start), 1)) * max(floor(eff_end) - floor(eff_start), 1); k = max(floor(eff_start), min(floor(eff_end) - 1, k)); left_buf[k] + right_buf[k]; );
+function rd_score(p, stp, n) local(i, num, en, c) ( num = 0; en = 0.000000001; i = 0; while (i < n) ( c = rd_tp(p + stp * i * 4); num += c * rd_tmp[i]; en += c * c; i += 1; ); num / sqrt(en); );
+function rd_pick(p0, ts, ph_prev, Sn, Wn, rr, dir) local(k, n, dd, best, bestd, sc, st, en_) (
+  n = 0; k = 0; while (k < Wn) ( rd_tmp[n] = rd_tp(ts + dir * rr * (ph_prev + k)); n += 1; k += 4; );
+  best = -1000000000; bestd = 0; dd = -Sn;
+  while (dd <= Sn) ( sc = rd_score(p0 + dd, dir * rr, n); sc > best ? ( best = sc; bestd = dd; ); dd += 4; );
+  st = bestd; dd = st - 3;
+  while (dd <= st + 3) ( dd >= -Sn && dd <= Sn ? ( sc = rd_score(p0 + dd, dir * rr, n); sc > best ? ( best = sc; bestd = dd; ); ); dd += 1; );
+  bestd;
+);
+function dub_grain_tick(head, rev, spawn_ok) local(dur, hop_t, d, gi, gb, fslot, ph0, ph1, pn, e, a, b, sb, pa, rr, max_l, Sn, Wn, Ln, dl, s_nom, t0, ot, src, si, ip, ic) (
+  dur = srate * dub_grain_ms * 0.001; rr = pitch_ratio; d = rev ? -1 : 1;
+  hop_t = max(wg_hop * dur * rr / max(sm_speed, 0.0001), dur / (max_wgrains - 1)); max_l = length > 0 ? length : buf_len;
+  wg_es = floor(eff_start); wg_el = max(floor(eff_end) - wg_es, 16); sb = acc_cur ? acc_set1 : acc_set0; acc_mode = (state == 3) ? 1 : 2; wg_rf = (state == 3) ? 1.0 : replace_fade; wg_rf *= dens_g * sl_gate;
+  wg_fade = max(0.01, min(0.5, grain_fade * 0.01));
+ stereo_width > 0.0001 ? ( 
+  pa = (dub_pan * stereo_width + 1.0) * 0.25 * $pi; 
+  wg_gL = cos(pa) * 1.414; 
+  wg_gR = sin(pa) * 1.414; 
+) : ( 
+  wg_gL = 1.0; 
+  wg_gR = 1.0; 
+);
+  wg_timer += 1; wg_timer >= hop_t ? ( wg_timer = 0; spawn_ok ? ( gi = 0; fslot = -1; loop(max_wgrains, gb = wg_mem + gi * wg_stride; fslot < 0 && gb[2] == 0 ? fslot = gi; gi += 1; ); fslot >= 0 ? ( 
+    Sn = floor(dub_align_ms * 0.001 * srate + 0.5); Wn = min(512, floor(0.4 * dur)); Ln = 0; dl = 0;
+    (Sn > 0 && Wn >= 64) ? (
+      Ln = Sn + Wn; s_nom = ih_n - Ln;
+      wg_prev_ok ? ( ot = floor(sm_speed * (ih_n - wg_prev_n) / max(rr, 0.0001) + 0.5); t0 = wg_prev_src + ot; (ot > 0 && ot < dur - Wn && t0 + Wn <= ih_n) ? dl = wg_pick(s_nom, t0, Sn, Wn); );
+    ) : ( Sn = 0; s_nom = ih_n; );
+    src = s_nom + dl; wg_prev_src = src; wg_prev_n = ih_n; wg_prev_ok = 1; wg_Lcur = Ln;
+    gb = wg_mem + fslot * wg_stride; gb[0] = head - d * sm_speed * Ln; gb[1] = 0; gb[2] = 1; gb[3] = src; ); ); );
+  gi = 0; loop(max_wgrains, gb = wg_mem + gi * wg_stride; gb[2] == 1 ? ( ph0 = gb[1]; ph1 = ph0 + 1; pn = (ph0 + 0.5) / dur; e = 1.0; pn < wg_fade ? e = pn / wg_fade : (pn > 1.0 - wg_fade ? e = (1.0 - pn) / wg_fade); e = max(0, min(1, e)); e = 0.5 - 0.5 * cos(e * $pi); a = gb[0] + d * rr * ph0; b = gb[0] + d * rr * ph1; si = gb[3] + ph0; ip = (si - 1) & ih_mask; ic = si & ih_mask; wg_p0 = ih_l[ip]; wg_c0 = ih_l[ic]; wg_p1 = ih_r[ip]; wg_c1 = ih_r[ic]; wg_splat(a, b, e, sb); gb[1] = ph1; ph1 >= dur ? gb[2] = 0; ); gi += 1; );
+  acc_cur_dirty = 1;
+);
+function dub_merge_cell(k, sb) local(wv, c, dubL, dubR, oldL, oldR, fb, targetL, targetR, deg, deg_amt, cutoff, lpf_alpha, yl_b, yr_b, w_b, drive, souffle) (
+  w_b = sb + acc_len * 2; wv = w_b[k];
+  wv > 0.000001 ? (
+    yl_b = sb; yr_b = sb + acc_len; dubL = yl_b[k] / wv; dubR = yr_b[k] / wv; yl_b[k] = 0; yr_b[k] = 0; w_b[k] = 0; oldL = left_buf[k]; oldR = right_buf[k];
+    cm_mode == 2 ? ( c = min(1.0, wv / acc_wrep); targetL = oldL * (1.0 - c) + dubL * c; targetR = oldR * (1.0 - c) + dubR * c; ) : ( c = min(1.0, wv / acc_wmin); fb = 1.0 - c * (1.0 - feedback); targetL = oldL * fb + dubL * c; targetR = oldR * fb + dubR * c; );
+    deg = degradation;
+    deg > 0.0001 && abs(feedback - 1.0) > 0.001 ? (
+      deg_amt = deg * abs(feedback - 1.0);
+      drive = 1.0 + deg_amt * 4.0;
+      targetL = fast_tanh(targetL * drive) / drive;
+      targetR = fast_tanh(targetR * drive) / drive;
+      cutoff = max(200, 20000 * exp(-3.2 * deg_amt)); lpf_alpha = 1 - exp(-2 * $pi * cutoff / srate);
+      tape_lpf_l += lpf_alpha * (targetL - tape_lpf_l); tape_lpf_l_b += lpf_alpha * (tape_lpf_l - tape_lpf_l_b); tape_lpf_l_c += lpf_alpha * (tape_lpf_l_b - tape_lpf_l_c); tape_lpf_l_d += lpf_alpha * (tape_lpf_l_c - tape_lpf_l_d);
+      tape_lpf_r += lpf_alpha * (targetR - tape_lpf_r); tape_lpf_r_b += lpf_alpha * (tape_lpf_r - tape_lpf_r_b); tape_lpf_r_c += lpf_alpha * (tape_lpf_r_b - tape_lpf_r_c); tape_lpf_r_d += lpf_alpha * (tape_lpf_r_c - tape_lpf_r_d);
+      targetL = targetL * (1.0 - deg_amt) + tape_lpf_l_d * deg_amt; targetR = targetR * (1.0 - deg_amt) + tape_lpf_r_d * deg_amt;
+      souffle = (rand(2.0) - 1.0) * 0.0001 * deg_amt;
+      targetL += souffle; targetR += souffle;
+    );
+    left_buf[k] = targetL; right_buf[k] = targetR;
+  );
+);
+function dub_commit_step(n) local(cnt) ( cnt = 0; while (cm_active && cnt < n) ( dub_merge_cell(cm_k, cm_sb); cm_k += cm_dir; (cm_k < cm_lo || cm_k >= cm_hi) ? cm_active = 0; cnt += 1; ); );
+function dub_commit_begin(fwd) ( while (cm_active) ( dub_commit_step(262144); ); acc_cur_dirty && acc_hi >= acc_lo ? ( cm_sb = acc_cur ? acc_set1 : acc_set0; cm_mode = acc_mode; cm_lo = acc_lo; cm_hi = acc_hi + 1; cm_dir = fwd ? 1 : -1; cm_k = fwd ? cm_lo : acc_hi; cm_active = 1; acc_cur = 1 - acc_cur; ); acc_cur_dirty = 0; acc_lo = 1000000000; acc_hi = -1; );
+function dub_merge_behind(head) local(margin, safe_hi, k, sb, n) (
+  acc_cur_dirty && !cm_active && acc_hi >= acc_lo ? (
+    margin = max(64, floor(srate * dub_grain_ms * 0.001 * max(1.0, abs(pitch_ratio)) + delay_len + 32 + wg_Lcur * max(1.0, abs(sm_speed))));
+    safe_hi = floor(head) - margin;
+    safe_hi > acc_lo ? (
+      sb = acc_cur ? acc_set1 : acc_set0;
+      k = acc_lo; n = 0;
+      while (k < safe_hi && k <= acc_hi && n < 64) (
+        dub_merge_cell(k, sb);
+        k += 1; n += 1;
+      );
+      acc_lo = k;
+      acc_lo > acc_hi ? ( acc_cur_dirty = 0; acc_lo = 1000000000; acc_hi = -1; );
+    );
+  );
+);
+function dub_flush() local(gi, gb) ( dub_commit_begin(1); while (cm_active) ( dub_commit_step(262144); ); gi = 0; loop(max_wgrains, gb = wg_mem + gi * wg_stride; gb[2] = 0; gi += 1; ); wg_timer = 0; wg_prev_ok = 0; );
+function dub_discard() local(gi, gb) ( acc_ok && (acc_cur_dirty || cm_active) ? memset(acc_set0, 0, acc_size * 2); cm_active = 0; acc_cur_dirty = 0; acc_lo = 1000000000; acc_hi = -1; gi = 0; loop(max_wgrains, gb = wg_mem + gi * wg_stride; gb[2] = 0; gi += 1; ); wg_timer = 0; wg_prev_ok = 0; );
+
+function finish_rec(new_state) local(ms_off) (
+  length = max(pos, 1); base_loop_length = length; mult_len = length;
+  memcpy(base_backup_l, left_buf, length); memcpy(base_backup_r, right_buf, length);
+  active_part == 1 ? ( len_part1 = length; base_len_part1 = base_loop_length; );
+  active_part == 2 ? ( len_part2 = length; base_len_part2 = base_loop_length; );
+  active_part == 3 ? ( len_part3 = length; base_len_part3 = base_loop_length; );
+  hist_len[active_history_idx] = length; dirty_len = max(dirty_len, length);
+  loop_start = 0; loop_width = length; smooth_start = 0; smooth_width = length; pos = 0; master_pos = 0; clk_cyc = 0;
+  active_part == 1 ? master_pos1 = 0 : active_part == 2 ? master_pos2 = 0 : master_pos3 = 0;
+  xfade_pos_active = 0; memset(delay_buf_l, 0, delay_len * 2); delay_idx = 0;
+  state = new_state; start_analysis();
+  sync_hard_resync = 1;
+
+  ms_off = (active_part - 1) * 10;
+  gmem[ms_off] == 0 && length > 0 ? (
+      gmem[ms_off] = 1; gmem[ms_off+1] = instance_id;
+      gmem[ms_off+2] = base_loop_length; gmem[ms_off+3] = master_pos;
+  );
+);
+
+function try_finish_rec(target, from_auto) local(ms_off, locked, mid, is_self, is_host, master_len, has_ref, k) (
+  ms_off = (active_part - 1) * 10;
+  locked = gmem[ms_off];
+  mid = gmem[ms_off + 1];
+  is_self = (locked == 1 && (mid == instance_id || mid == instance_alias));
+  is_host = (locked == 2);
+  master_len = is_host ? host_measure_len() 
+             : (locked == 1 && !is_self && gmem[ms_off + 2] > 0) ? gmem[ms_off + 2] 
+             : 0;
+  has_ref = master_len > 0;
+  
+  has_ref ? (
+      from_auto ? ( 
+        k = max(1, floor(pos / master_len + 0.5)); 
+        target_sync_len = k * master_len;
+      ) : (
+        target_sync_len = calc_sync_len(pos, master_len);
+      );
+      state = 8; pending_next_state = target;
+  ) : (
+      finish_rec(target);
+  );
+);
+function switch_part(new_part) local(target_len, target_base_len, idx_old, idx_new) (
+  dub_flush(); state == 1 ? try_finish_rec(2, 0);
+  idx_old = active_part - 1; part_speed[idx_old] = speed; part_pitch[idx_old] = pitch; part_rev[idx_old] = rev_on; part_pingpong[idx_old] = pingpong_on; part_play_mode[idx_old] = play_mode; part_cloud_on[idx_old] = cloud_on; part_link_on[idx_old] = link_on;
+  active_part == 1 ? ( master_pos1 = master_pos; clk_cyc1 = clk_cyc; len_part1 = length; base_len_part1 = base_loop_length; left_buf != buf_part1_l ? (memcpy(buf_part1_l, left_buf, length); memcpy(buf_part1_r, right_buf, length);); ) :
+  active_part == 2 ? ( master_pos2 = master_pos; clk_cyc2 = clk_cyc; len_part2 = length; base_len_part2 = base_loop_length; left_buf != buf_part2_l ? (memcpy(buf_part2_l, left_buf, length); memcpy(buf_part2_r, right_buf, length);); ) :
+                     ( master_pos3 = master_pos; clk_cyc3 = clk_cyc; len_part3 = length; base_len_part3 = base_loop_length; left_buf != buf_part3_l ? (memcpy(buf_part3_l, left_buf, length); memcpy(buf_part3_r, right_buf, length);); );
+  active_part = new_part; history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0;
+  switch_history_slot(0);
+  new_part == 1 ? ( target_len = len_part1; target_base_len = base_len_part1; ) : new_part == 2 ? ( target_len = len_part2; target_base_len = base_len_part2; ) : ( target_len = len_part3; target_base_len = base_len_part3; );
+  length = target_len; base_loop_length = target_base_len; hist_len[0] = length;
+  idx_new = new_part - 1; speed = part_speed[idx_new]; slider1 = speed; pitch = part_pitch[idx_new]; slider2 = pitch; rev_on = part_rev[idx_new]; slider16 = rev_on; pingpong_on = part_pingpong[idx_new]; slider17 = pingpong_on; play_mode = part_play_mode[idx_new]; slider6 = play_mode; cloud_on = part_cloud_on[idx_new]; slider23 = cloud_on; link_on = part_link_on[idx_new]; slider7 = link_on;
+  loop_start = 0; loop_width = length > 0 ? length : 0; smooth_start = 0; smooth_width = loop_width; pos = 0;
+  
+  master_pos = 0;
+  new_part == 1 ? ( master_pos1 = 0; ) : 
+  new_part == 2 ? ( master_pos2 = 0; ) : 
+                  ( master_pos3 = 0; );
+
+  clk_len_ref = length; xfade_pos_active = 0;
+  sync_hard_resync = 1;
+  length <= 0 ? ( dirty_len = buf_len; state = 0; state_target = auto_on ? 7 : 1; master_pos = 0; clk_cyc = 0; ) : ( state = 2; state_target = 3; start_analysis(); );
+  last_state_target = -1;
+);
+function push_new_history_state() local(src_l, src_r, new_idx) (
+  new_idx = (active_history_idx + 1) % max_history; src_l = left_buf; src_r = right_buf; switch_history_slot(new_idx); history_head = new_idx;
+  memcpy(left_buf, src_l, length); memcpy(right_buf, src_r, length); hist_len[new_idx] = length; dirty_len = max(dirty_len, length); hist_undo = min(hist_undo + 1, max_history - 1); hist_redo = 0; history_count = hist_undo + 1;
+);
+function sync_length_from_history() local(nl) ( nl = hist_len[active_history_idx]; nl > 0 && nl != length ? ( length = nl; loop_start = 0; loop_width = length; smooth_start = 0; smooth_width = length; pos >= length ? pos = 0; master_pos = min(master_pos, length); xfade_pos_active = 0; start_analysis(); ); );
+function undo_state() ( 
+  dub_flush(); 
+  hist_undo > 0 ? ( 
+    active_history_idx = (active_history_idx - 1 + max_history) % max_history; 
+    switch_history_slot(active_history_idx); 
+    hist_undo -= 1; hist_redo += 1; 
+    sync_length_from_history(); 
+    sync_hard_resync = 1;
+  ); 
+);
+function redo_state() ( 
+  dub_flush(); 
+  hist_redo > 0 ? ( 
+    active_history_idx = (active_history_idx + 1) % max_history; 
+    switch_history_slot(active_history_idx); 
+    hist_redo -= 1; hist_undo += 1; 
+    sync_length_from_history(); 
+    sync_hard_resync = 1;
+  ); 
+);
+function get_slicer_len() ( slicer_mode == 5 ? max(1, trans_count) : (slicer_mode == 0 ? 16 : max(1, min(32, floor(slicer_steps + 0.5)))); );
+function update_slicer_pitches(step_len) local(i, ratio_p, impact_pct, ext_pct, idx_norm, active_double) ( i = 0; loop(step_len, ratio_p = slicer_pitch_spread * 0.01; ratio_p <= 0.0001 ? ( slice_pitch_mem[i] = 0.0; ) : ratio_p <= 0.5 ? ( impact_pct = ratio_p * 2.0; (i / step_len) < impact_pct ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ) : ( slice_pitch_mem[i] = 0.0; ); ) : ( ext_pct = (ratio_p - 0.5) * 2.0; idx_norm = i / step_len; idx_norm < 0.5 ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ) : ( active_double = 0.5 + ext_pct * 0.5; idx_norm < active_double ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -24.0 : 24.0); ) : ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ); ); ); i += 1; ); );
+function generate_slicer_sequence(step_len) local(i, rnd_idx, temp, p) ( trans_count > 0 ? ( slicer_mode == 5 ? ( i = 0; loop(step_len, seq_mem[i] = trans_mem[i % trans_count]; i += 1; ); i = 0; loop(step_len, p = floor(rand(step_len)); temp = seq_mem[i]; seq_mem[i] = seq_mem[p]; seq_mem[p] = temp; i += 1; ); ) : ( i = 0; loop(step_len, rnd_idx = floor(rand(trans_count)); seq_mem[i] = trans_mem[rnd_idx]; i += 1; ); ); update_slicer_pitches(step_len); ); );
+function calc_cloud_pitch(spread_val) local(ratio_p, impact_pct, ext_pct, r) ( ratio_p = spread_val * 0.01; ratio_p <= 0.0001 ? 0.0 : ( ratio_p <= 0.5 ? ( impact_pct = ratio_p * 2.0; rand(1.0) < impact_pct ? (rand(1.0) < 0.5 ? -12.0 : 12.0) : 0.0; ) : ( ext_pct = (ratio_p - 0.5) * 2.0; r = rand(1.0); r < 0.5 ? ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) : ( r < (0.5 + ext_pct * 0.5) ? ( rand(1.0) < 0.5 ? -24.0 : 24.0 ) : ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) ); ); ); );
+function tape_write_span(w_from, w_to, w_mode) local(k, k_end, seg_a, seg_b, wgt, tn, vL, vR, w2, oldL, oldR, steps, total_span, fb, targetL, targetR, dev, cutoff, lpf_alpha, deg, deg_amt, p_angle, gL, gR, mono_src, clippedL, clippedR, drive, souffle) (
+  deg = degradation; w_to > w_from ? ( k = floor(w_from); k_end = floor(w_to); k_end < k ? k_end = k; steps = min(k_end - k + 1, 24); total_span = max(w_to - w_from, 0.0001);
+    loop(steps, k < buf_len ? ( seg_a = max(w_from, k); seg_b = min(w_to, k + 1); wgt = (seg_b - seg_a) * dens_g * sl_gate; wgt > 0 ? (
+          tn = (((seg_a + seg_b) * 0.5) - w_from) / total_span; vL = prev_in0 + (in0 - prev_in0) * tn; vR = prev_in1 + (in1 - prev_in1) * tn;
+          stereo_width > 0.0001 ? ( p_angle = (dub_pan * stereo_width + 1.0) * 0.25 * $pi; gL = cos(p_angle) * 1.414; gR = sin(p_angle) * 1.414; mono_src = (vL + vR) * 0.5; vL = mono_src * gL; vR = mono_src * gR; );
+          w_mode == 2 ? ( w2 = wgt * replace_fade; oldL = left_buf[k]; oldR = right_buf[k]; targetL = oldL * (1.0 - w2) + vL * w2; targetR = oldR * (1.0 - w2) + vR * w2; ) : ( fb = 1.0 - wgt * (1.0 - feedback); oldL = left_buf[k]; oldR = right_buf[k]; targetL = oldL * fb + vL * wgt; targetR = oldR * fb + vR * wgt; );
+          deg > 0.0001 && abs(feedback - 1.0) > 0.001 ? ( 
+            deg_amt = deg * abs(feedback - 1.0);
+            drive = 1.0 + deg_amt * 4.0;
+            targetL = fast_tanh(targetL * drive) / drive;
+            targetR = fast_tanh(targetR * drive) / drive;
+            cutoff = max(200, 20000 * exp(-3.2 * deg_amt)); lpf_alpha = 1 - exp(-2 * $pi * cutoff / srate); 
+            tape_lpf_l += lpf_alpha * (targetL - tape_lpf_l); tape_lpf_l_b += lpf_alpha * (tape_lpf_l - tape_lpf_l_b); tape_lpf_l_c += lpf_alpha * (tape_lpf_l_b - tape_lpf_l_c); tape_lpf_l_d += lpf_alpha * (tape_lpf_l_c - tape_lpf_l_d); 
+            tape_lpf_r += lpf_alpha * (targetR - tape_lpf_r); tape_lpf_r_b += lpf_alpha * (tape_lpf_r - tape_lpf_r_b); tape_lpf_r_c += lpf_alpha * (tape_lpf_r_b - tape_lpf_r_c); tape_lpf_r_d += lpf_alpha * (tape_lpf_r_c - tape_lpf_r_d); 
+            targetL = targetL * (1.0 - deg_amt) + tape_lpf_l_d * deg_amt; targetR = targetR * (1.0 - deg_amt) + tape_lpf_r_d * deg_amt; 
+            souffle = (rand(2.0) - 1.0) * 0.0001 * deg_amt;
+            targetL += souffle; targetR += souffle;
+          );
+          left_buf[k]  = targetL; right_buf[k] = targetR; ); ); k += 1; ); );
+);
+function write_move(o, n, wrapped, rev, wmode) ( wrapped ? ( pingpong_on ? ( rev ? ( tape_write_span(eff_start, o, wmode); tape_write_span(eff_start, n, wmode); ) : ( tape_write_span(o, eff_end - 0.0001, wmode); tape_write_span(n, eff_end - 0.0001, wmode); ); ) : ( rev ? ( tape_write_span(n, eff_end - 0.0001, wmode); tape_write_span(eff_start, o, wmode); ) : ( tape_write_span(o, eff_end - 0.0001, wmode); tape_write_span(eff_start, n, wmode); ); ); ) : ( rev ? tape_write_span(max(n, eff_start), min(o, eff_end - 0.0001), wmode) : tape_write_span(max(o, eff_start), min(n, eff_end - 0.0001), wmode); ); );
+function hermite(frac, y0, y1, y2, y3) local(c0, c1, c2, c3) ( c0 = y1; c1 = 0.5 * (y2 - y0); c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3; c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2); c0 + frac * (c1 + frac * (c2 + frac * c3)); );
+function trigger_pos_jump(new_target) ( 
+  length > 0 ? ( 
+    old_pos_ptr = pos; 
+    pos = max(loop_start, min(loop_start + loop_width, new_target)); 
+    xfade_pos_active = 0; 
+    xfade_pos_count = 0; 
+    slice_env = 1.0; 
+    slice_decay_samples = max(2, srate * (slice_decay_ms * 0.001)); 
+    slice_decay_step = slice_decay_ms > 1950 ? 0 : 1.0 / slice_decay_samples; 
+    slice_pan = (rand(2.0) - 1.0); 
+  ); 
+);
+function slicer_fire(tp, p_offset) local(i, nx, st) ( nx = loop_start + loop_width; i = 0; loop(trans_count, (trans_mem[i] > tp + 1 && trans_mem[i] < nx) ? nx = trans_mem[i]; i += 1; ); sl_lo = tp; sl_hi = max(nx, tp + srate * 0.005); st = effective_rev ? sl_hi : sl_lo; trigger_pos_jump(st); current_slice_pitch = p_offset; sl_run = 1; );
+function dub_slice_restart(fwd) local(gi, gb) ( dub_commit_begin(fwd); gi = 0; loop(max_wgrains, gb = wg_mem + gi * wg_stride; gb[2] = 0; gi += 1; ); wg_timer = 1000000000; wg_prev_ok = 0; );
+function sync_eval() local(a, b, ratio, best_err, err) (
+  sync_a = 0; sync_b = 0; best_err = 1000000;
+  rate_t > 0.0001 && loop_width > 0 && length > 0 ? (
+    b = 1;
+    while (b <= 16) (
+      a = 1;
+      while (a <= 16) (
+        err = abs(b * loop_width - a * length * rate_t);
+        err < 8 && err < best_err ? (
+          best_err = err;
+          sync_a = a;
+          sync_b = b;
+        );
+        a += 1;
+      );
+      b += 1;
+    );
+    best_err >= 12 ? (sync_a = 0; sync_b = 0;);
+  );
+);
+function sync_expected() local(E, o, w, sa, is_rev) ( 
+  w = max(loop_width, 1); 
+  sa = max(sync_a, 1);
+  E = (clk_cyc % sa) * length + master_pos; 
+  o = E * rate_t; 
+  o -= floor(o / w) * w; 
+  is_rev = (rev_on != (pingpong_on && ping_pong_dir < 0));
+  is_rev ? max(loop_start, loop_start + w - max(o, 0.0001) - 1) 
+         : loop_start + min(o, w - 0.0001); 
+);
+function trigger_restart() ( length > 0 ? ( one_shot_playing = 1; one_shot_pp_state = 0; ping_pong_dir = 1; target_p = (rev_on) ? (eff_end - 0.0001) : eff_start; trigger_pos_jump(target_p); ) : 0; );
+function slicer_regen() local(sl_len) ( sl_len = get_slicer_len(); generate_slicer_sequence(sl_len); slicer_current_step = 0; last_slicer_mode = slicer_mode; );
+function trans_cap(maxn) local(i, w, wi, j) (
+  maxn >= 2 && trans_count > maxn ? (
+    while (trans_count > maxn) (
+      w = 1000000; wi = 0; i = 0;
+      while (i < trans_count) ( trans_str[i] < w ? ( w = trans_str[i]; wi = i; ); i += 1; );
+      j = wi; while (j < trans_count - 1) ( trans_mem[j] = trans_mem[j + 1]; trans_str[j] = trans_str[j + 1]; j += 1; );
+      trans_count -= 1;
+    );
+  );
+);
+function slicer_fill(a, b) local(i) ( trans_count > 0 ? ( i = a; while (i < b) ( seq_mem[i] = trans_mem[floor(rand(trans_count))]; i += 1; ); ); );
+function slicer_resize(old_n, new_n) local(i) (
+  new_n > old_n ? (
+    slicer_fill(old_n, new_n);
+    slicer_pitch_spread > 0.0001 ? update_slicer_pitches(new_n) : ( i = old_n; while (i < new_n) ( slice_pitch_mem[i] = 0; i += 1; ); );
+  );
+);
+function preset_store(k) local(pm, n) (
+  pm = preset_mem + k * pslot; n = min(get_slicer_len(), max_transients);
+  pm[0] = 1; pm[1] = n; pm[2] = slicer_mode; pm[3] = slicer_steps;
+  memcpy(pm + 4, seq_mem, n); memcpy(pm + 4 + max_transients, slice_pitch_mem, n);
+);
+function preset_load(k) local(pm, n, ln) (
+  pm = preset_mem + k * pslot; n = pm[1];
+  slicer_mode = pm[2]; slider13 = slicer_mode; slicer_steps = pm[3]; slider47 = slicer_steps;
+  memcpy(seq_mem, pm + 4, n); memcpy(slice_pitch_mem, pm + 4 + max_transients, n);
+  ln = get_slicer_len(); ln > n ? slicer_resize(n, ln);
+  last_slicer_mode = slicer_mode; last_steps = slicer_steps;
+);
+function preset_switch(k) local(pm) (
+  preset_cur >= 0 ? preset_store(preset_cur);
+  preset_cur = k; pm = preset_mem + k * pslot;
+  pm[0] ? preset_load(k) : preset_store(k);
+);
+function multiply_extend() local(old_len, n, t) ( 
+  old_len = length; 
+  memcpy(left_buf + old_len, base_backup_l, mult_len); 
+  memcpy(right_buf + old_len, base_backup_r, mult_len); 
+  length = old_len + mult_len; 
+  dirty_len = max(dirty_len, length); 
+  hist_len[active_history_idx] = length; 
+  loop_start = 0; loop_width = length; smooth_start = 0; smooth_width = length; 
+  eff_start = 0; eff_end = length; eff_len = max(length, 16); 
+  analysing == 0 ? ( n = trans_count; t = 0; loop(n, (trans_mem[t] < mult_len && trans_count < max_transients) ? ( trans_mem[trans_count] = trans_mem[t] + old_len; trans_str[trans_count] = trans_str[t]; trans_count += 1; ); t += 1; ); slicer_mode == 5 ? slicer_regen(); ); 
+  sync_hard_resync = 1;
+);
+function do_clear(clear_type) local(ms_off) (
+  dub_discard(); speed = 1.0; slider1 = speed; pitch = 0.0; slider2 = pitch; rev_on = 0; slider16 = rev_on; pingpong_on = 0; slider17 = pingpong_on; grain_ms = 80.0; slider4 = grain_ms; grain_fade = 25; slider12 = grain_fade; wg_fade = 0.25; fade_ms = 10; slider5 = fade_ms; auto_on = 0;
+  cloud_on = 0; slider23 = cloud_on; cloud_density = 0.5; slider25 = cloud_density; cloud_chaos = 0.0; slider26 = cloud_chaos; cloud_spread = 0.1; slider27 = cloud_spread; cloud_pitch_spread = 0.0; slider34 = cloud_pitch_spread; cloud_mix = 1.0; slider35 = cloud_mix; cloud_pos_mode = 1; slider36 = cloud_pos_mode; cloud_pos_pct = 50.0; slider37 = cloud_pos_pct; cloud_lfo_shape = 0; slider38 = cloud_lfo_shape; cloud_lfo_rate = 1.0; slider39 = cloud_lfo_rate; cloud_lfo_depth = 0.0; slider40 = cloud_lfo_depth;
+  play_mode = 0; slider6 = play_mode; dens_occ = 100; slider28 = dens_occ; loop_beats = 0; slider30 = loop_beats; loop_quant = 0; slider24 = loop_quant; slicer_pitch_spread = 0.0; slider33 = slicer_pitch_spread;
+  state_target = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; trans_count = 0; analysing = 0; one_shot_playing = 0; history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0;
+  clear_type == 1 ? (
+    len_part1 = 0; len_part2 = 0; len_part3 = 0; base_len_part1 = 0; base_len_part2 = 0; base_len_part3 = 0; master_pos1 = 0; master_pos2 = 0; master_pos3 = 0; active_part = 1; target_part = 1; pending_part_switch = 0;
+    i = 0; loop(3, part_speed[i] = 1.0; part_pitch[i] = 0.0; part_rev[i] = 0; part_pingpong[i] = 0; part_play_mode[i] = 0; part_cloud_on[i] = 0; part_link_on[i] = 0; i += 1; ); switch_history_slot(0); memset(0, 0, hist_mem_start + (max_history * slot_size));
+    (gmem[0] == 1 && (gmem[1] == instance_id || gmem[1] == instance_alias)) ? gmem[0] = 0;
+    (gmem[10] == 1 && (gmem[11] == instance_id || gmem[11] == instance_alias)) ? gmem[10] = 0;
+    (gmem[20] == 1 && (gmem[21] == instance_id || gmem[21] == instance_alias)) ? gmem[20] = 0;
+  ) : (
+    active_part == 1 ? (len_part1 = 0; base_len_part1 = 0; master_pos1 = 0;) : active_part == 2 ? (len_part2 = 0; base_len_part2 = 0; master_pos2 = 0;) : (len_part3 = 0; base_len_part3 = 0; master_pos3 = 0;);
+    idx_clr = active_part - 1; part_speed[idx_clr] = 1.0; part_pitch[idx_clr] = 0.0; part_rev[idx_clr] = 0; part_pingpong[idx_clr] = 0; part_play_mode[idx_clr] = 0; part_cloud_on[idx_clr] = 0; part_link_on[idx_clr] = 0; switch_history_slot(0); memset(left_buf, 0, slot_size); pending_part_switch = 0;
+    ms_off = (active_part - 1) * 10; (gmem[ms_off] == 1 && (gmem[ms_off+1] == instance_id || gmem[ms_off+1] == instance_alias)) ? gmem[ms_off] = 0;
+  );
+  last_state_target = 0; state = 0;
+  sync_hard_resync = 1;
+);
+function slicer_mode_name(m) ( m == 0 ? "Random" : (m == 5 ? "All" : "Steps"); );
+function slicer_rate_name(m) ( m == 0 ? "1/4" : (m == 1 ? "1/8" : (m == 2 ? "1/12" : (m == 3 ? "1/16" : (m == 4 ? "1/24" : "1/32")))); );
+function lfo_shape_name(s) ( s == 0 ? "Sine" : (s == 1 ? "Saw" : "Inv Saw"); );
+function quant_name(q) ( q == 0 ? "Free" : q == 1 ? "1/2" : q == 2 ? "1/3" : q == 3 ? "1/4" : q == 4 ? "1/6" : q == 5 ? "1/8" : q == 6 ? "1/12" : q == 7 ? "1/16" : q == 8 ? "1/32" : "1/64"; );
+function quant_val(q) ( q == 0 ? 0 : q == 1 ? 2 : q == 2 ? 3 : q == 3 ? 4 : q == 4 ? 6 : q == 5 ? 8 : q == 6 ? 12 : q == 7 ? 16 : q == 8 ? 32 : 64; );
+function loop_max_len() ( length > 0 ? length : (state == 1 ? pos : buf_len); );
+function quant_grid() local(ml, qv) ( ml = loop_max_len(); qv = quant_val(loop_quant); (qv > 0 && ml > 0) ? ml / qv : 0; );
+function min_width() local(g) ( g = quant_grid(); g > 0 ? g : srate * 0.05; );
+function apply_quant_start(val_s) local(ml, g) ( ml = loop_max_len(); g = quant_grid(); g > 0 ? val_s = floor(val_s / g + 0.5) * g; max(0, min(val_s, ml - min_width())); );
+function apply_quant_width(val_w, s_pos) local(ml, g, mw) ( ml = loop_max_len(); g = quant_grid(); mw = min_width(); g > 0 ? val_w = floor(val_w / g + 0.5) * g; max(mw, min(val_w, max(mw, ml - s_pos))); );
+function fmt_note(dst, n) local(nm, oc) (
+  nm = floor(n) % 12; oc = floor(n / 12) - 1;
+  sprintf(dst, "%s%d", nm == 0 ? "C" : (nm == 1 ? "C#" : (nm == 2 ? "D" : (nm == 3 ? "D#" : (nm == 4 ? "E" : (nm == 5 ? "F" : (nm == 6 ? "F#" : (nm == 7 ? "G" : (nm == 8 ? "G#" : (nm == 9 ? "A" : (nm == 10 ? "A#" : "B")))))))))), oc);
+);
+function sampler_mode_now() ( (state == 0 && length > 0) ? ( play_mode == 1 ? (trans_count > 0 ? 1 : 0) : 2 ) : 0; );
+function sampler_slice_end(st) local(i, nx) (
+  nx = min(loop_start + loop_width, length);
+  nx <= st + 16 ? nx = length;
+  i = 0; loop(trans_count, (trans_mem[i] > st + 1 && trans_mem[i] < nx) ? nx = trans_mem[i]; i += 1; );
+  nx;
+);
+function sampler_release_all(step) local(v, vb) (
+  v = 0; loop(smp_nv, vb = smp_voice + v * smp_vs; vb[0] == 1 ? ( vb[0] = 2; vb[9] = step; ); v += 1; );
+);
+function sampler_note_off(note) local(v, vb, rt) (
+  rt = sampler_release; v = 0;
+  loop(smp_nv,
+    vb = smp_voice + v * smp_vs;
+    (vb[0] == 1 && vb[6] == note && (vb[11] > 0 || rt > 0)) ? ( vb[0] = 2; vb[9] = 1.0 / (max(5, rt) * 0.001 * srate); );
+    v += 1;
+  );
+);
+function sampler_note_on(note, vel) local(k, kmode, ok, st, en, v, vb, fr, old, old_age) (
+  kmode = (smp_mode == 2);
+  k = note - sampler_root;
+  ok = kmode ? 1 : (k >= 0 && k < trans_count);
+  ok ? (
+    kmode ? ( st = floor(loop_start); en = floor(min(loop_start + loop_width, length)); ) : ( st = floor(trans_mem[k]); en = floor(sampler_slice_end(st)); );
+    en > st + 8 ? (
+      fr = -1; old = 0; old_age = 1000000000000; v = 0;
+      loop(smp_nv,
+        vb = smp_voice + v * smp_vs;
+        (vb[0] == 1 && vb[6] == note) ? ( vb[0] = 2; vb[9] = smp_choke_rel; );
+        (vb[0] == 0 && fr < 0) ? fr = v;
+        (vb[0] > 0 && vb[8] < old_age) ? ( old_age = vb[8]; old = v; );
+        v += 1;
+      );
+      fr < 0 ? fr = old;
+      vb = smp_voice + fr * smp_vs; smp_age += 1;
+      vb[0] = 1; vb[1] = rev_on ? en - 1 : st; vb[2] = st; vb[3] = en; vb[4] = vel / 127;
+      vb[5] = 0; vb[6] = note; vb[7] = rev_on ? -1 : 1; vb[8] = 0; vb[9] = 0;
+      vb[10] = kmode ? 2 ^ (k / 12) : 1;
+      vb[11] = kmode ? (sampler_pitch_mode == 0 ? 1 : 2) : 0;
+      vb[12] = vb[1]; vb[13] = 0; vb[14] = vb[1]; vb[15] = 1;
+    );
+  );
+);
+function sampler_read(p, st, en) local(i, fr, mx, a, b, c, d) (
+  i = floor(p); fr = p - i; mx = en - 1;
+  a = max(st, min(mx, i - 1)); b = max(st, min(mx, i)); c = max(st, min(mx, i + 1)); d = max(st, min(mx, i + 2));
+  smp_rl = hermite(fr, left_buf[a], left_buf[b], left_buf[c], left_buf[d]);
+  smp_rr = hermite(fr, right_buf[a], right_buf[b], right_buf[c], right_buf[d]);
+);
+function sampler_render() local(v, vb, p, d, m, i, rem, g, dead, ph, ageb, wa, wb, sa, sb, r, slice_env_smp, slice_decay_step_smp) (
+  smp_l = 0; smp_r = 0; smp_nact = 0; v = 0;
+  smp_G = max(64, floor(srate * grain_ms * 0.001)); smp_Gh = smp_G * 0.5;
+  loop(smp_nv,
+    vb = smp_voice + v * smp_vs;
+    vb[0] > 0 ? (
+      smp_nact += 1; p = vb[1]; d = vb[7]; m = vb[11]; i = floor(p);
+      
+      dead = (d > 0 ? p >= vb[3] : p < vb[2]) || vb[3] > length;
+      dead ? ( vb[0] = 0; ) : (
+        vb[0] == 1 ? ( vb[5] = min(1, vb[5] + smp_att); ) : ( vb[5] -= vb[9]; vb[5] <= 0 ? ( vb[5] = 0; vb[0] = 0; ); );
+        rem = (d > 0 ? vb[3] - p : p - vb[2] + 1) / (m == 1 ? vb[10] : 1);
+        g = (vb[0] == 2 ? vb[5] * vb[5] : vb[5]) * vb[4]; 
+        rem < smp_tail ? g *= max(0, rem / smp_tail);
+        
+        slice_decay_ms < 1950 ? ( 
+          vb[8] += 1.0;
+          g *= max(0, 1.0 - vb[8] * (1.0 / max(2, srate * (slice_decay_ms * 0.001))));
+        );
+        
+        m == 0 ? (
+          smp_l += left_buf[i] * g; smp_r += right_buf[i] * g;
+          vb[1] = p + d;
+        ) : m == 1 ? (
+          sampler_read(p, vb[2], vb[3]); smp_l += smp_rl * g; smp_r += smp_rr * g;
+          vb[1] = p + d * vb[10];
+        ) : (
+          r = vb[10]; ph = vb[13] + 1;
+          ph >= smp_G ? ( ph -= smp_G; vb[12] = p; vb[15] = 0; );
+          (vb[13] < smp_Gh && ph >= smp_Gh) ? vb[14] = p;
+          vb[13] = ph;
+          ageb = ph >= smp_Gh ? ph - smp_Gh : ph + smp_Gh;
+          wa = (vb[15] && ph < smp_Gh) ? 1 : lut_cos[floor(ph / smp_G * lut_size) % lut_size];
+          wb = (vb[15] && ph < smp_Gh) ? 0 : lut_cos[floor(ageb / smp_G * lut_size) % lut_size];
+          sa = vb[12] + d * r * ph; sb = vb[14] + d * r * ageb;
+          (wa > 0.0001 && sa >= vb[2] && sa < vb[3]) ? ( sampler_read(sa, vb[2], vb[3]); smp_l += smp_rl * g * wa; smp_r += smp_rr * g * wa; );
+          (wb > 0.0001 && sb >= vb[2] && sb < vb[3]) ? ( sampler_read(sb, vb[2], vb[3]); smp_l += smp_rl * g * wb; smp_r += smp_rr * g * wb; );
+          vb[1] = p + d;
+        );
+      );
+    );
+    v += 1;
+  );
+);
+function ui_arc(cx, cy, r, a0, a1) local(n, step, aa, bb) ( n = max(1, ceil(abs(a1 - a0) / 0.12)); step = (a1 - a0) / n; aa = a0; loop(n, bb = aa + step; gfx_line(cx + cos(aa) * r, cy + sin(aa) * r, cx + cos(bb) * r, cy + sin(bb) * r); gfx_line(cx + cos(aa) * (r - 1), cy + sin(aa) * (r - 1), cx + cos(bb) * (r - 1), cy + sin(bb) * (r - 1)); aa = bb; ); );
+function ui_text(x, y, str, r, g, b, a, align) local(tw, th) ( gfx_set(r, g, b, a); gfx_measurestr(str, tw, th); gfx_x = align == 1 ? x - tw : x; gfx_y = y; gfx_drawstr(str); );
+function ui_panel(x, y, w, h, title) ( gfx_set(r_bg * 0.68, g_bg * 0.68, b_bg * 0.68); gfx_rect(x, y, w, h); gfx_set(r_bg * 0.68 + 0.10, g_bg * 0.68 + 0.10, b_bg * 0.68 + 0.10); gfx_rect(x, y, w, h, 0); gfx_set(ui_ar, ui_ag, ui_ab); gfx_rect(x, y, w, 2); gfx_setfont(2); gfx_set(ui_ar, ui_ag, ui_ab, 0.95); gfx_x = x + 10; gfx_y = y + 5; gfx_drawstr(title); gfx_setfont(1); );
+function ui_btn(x, y, w, h, label, on, cr, cg, cb) local(hov, tw, th, ua) ( ua = ui_en ? 1 : 0.4; hov = ui_en && mouse_x >= x && mouse_x < x + w && mouse_y >= y && mouse_y < y + h; ui_hov = hov; on ? gfx_set(cr, cg, cb, ua) : (hov ? gfx_set(0.32, 0.12, 0.15, ua) : gfx_set(0.22, 0.07, 0.09, ua)); gfx_rect(x, y, w, h); gfx_set(1, 1, 1, on ? 0.2 : 0.06); gfx_line(x, y, x + w - 1, y); gfx_set(cr, cg, cb, (on ? 0 : 0.8) * ua); gfx_rect(x, y + h - 2, w, 2); gfx_set(0, 0, 0, 0.4); gfx_rect(x, y, w, h, 0); gfx_setfont(1); gfx_set(1, 1, 1, (on ? 1 : 0.82) * ua); gfx_measurestr(label, tw, th); gfx_x = x + (w - tw) * 0.5; gfx_y = y + (h - th) * 0.5; gfx_drawstr(label); mouse_click && hov; );
+function ui_knob(id, cx, cy, r, val, mn, mx, label, fmt, def) local(rng, hot, d, norm, ang, ua, tw, th, act) ( ui_chg = 0; rng = max(mx - mn, 0.000001); hot = ui_en && abs(mouse_x - cx) <= r + 5 && abs(mouse_y - cy) <= r + 5; ui_en && mouse_click && active_control == 0 && hot ? ( (mouse_cap & 4) ? ( val = def; ui_chg = 1; ) : ( active_control = id; ); ); ui_en && active_control == id ? ( d = last_mouse_y - mouse_y; (mouse_cap & 8) ? d *= 0.2; d != 0 ? ( val = max(mn, min(mx, val + d * rng / 200)); ui_chg = 1; ); ); ua = ui_en ? 1 : 0.4; act = (active_control == id); norm = max(0, min(1, (val - mn) / rng)); ang = 0.75 * $pi + norm * 1.5 * $pi; gfx_set(0.12, 0.04, 0.05, ua); gfx_circle(cx, cy, r - 2, 1); gfx_set(0.30, 0.12, 0.15, ua); gfx_circle(cx, cy, r - 2, 0); gfx_set(0.24, 0.09, 0.11, ua); ui_arc(cx, cy, r + 3, 0.75 * $pi, 2.25 * $pi); norm > 0.004 ? ( gfx_set(ui_ar, ui_ag, ui_ab, ua); ui_arc(cx, cy, r + 3, 0.75 * $pi, ang); ); gfx_set(1, 1, 1, ua * (act ? 1 : 0.9)); gfx_line(cx + cos(ang) * r * 0.3, cy + sin(ang) * r * 0.3, cx + cos(ang) * (r - 4), cy + sin(ang) * (r - 4)); gfx_setfont(1); gfx_set(0.85, 0.75, 0.78, ua); gfx_measurestr(label, tw, th); gfx_x = cx - tw * 0.5; gfx_y = cy - r - 18; gfx_drawstr(label); ui_ds_on ? strcpy(#knobval, #ui_ds) : sprintf(#knobval, fmt, ui_dv_on ? ui_dv : val); ui_dv_on = 0; ui_ds_on = 0; (act || hot) ? gfx_set(1, 1, 1, ua) : gfx_set(0.9, 0.82, 0.84, ua); gfx_measurestr(#knobval, tw, th); gfx_x = cx - tw * 0.5; gfx_y = cy + r + 7; gfx_drawstr(#knobval); val; );
+function ui_hbar(id, x, y, w, h, val, mn, mx, def, fmt) local(hot, nv, tw, th, tx) (
+  ui_chg = 0; hot = mouse_x >= x && mouse_x < x + w && mouse_y >= y - 3 && mouse_y <= y + h + 3;
+  mouse_click && active_control == 0 && hot ? ( (mouse_cap & 4) ? ( val = def; ui_chg = 1; ) : ( active_control = id; ); );
+  active_control == id ? ( nv = mn + max(0, min(1, (mouse_x - x) / w)) * (mx - mn); nv != val ? ( val = nv; ui_chg = 1; ); );
+  gfx_set(0.24, 0.09, 0.11, 1); gfx_rect(x, y, w, h);
+  gfx_set(0.95, 0.5, 0.25, 1); gfx_rect(x, y, w * max(0, min(1, (val - mn) / (mx - mn))), h);
+  (hot || active_control == id) ? ( sprintf(#hbtip, fmt, val); gfx_setfont(1); gfx_measurestr(#hbtip, tw, th); tx = min(x, 746 - tw - 8); gfx_set(0.05, 0.02, 0.03, 0.95); gfx_rect(tx - 3, y - th - 8, tw + 8, th + 4); gfx_set(1, 1, 1, 1); gfx_x = tx; gfx_y = y - th - 6; gfx_drawstr(#hbtip); );
+  val;
+);
+function ui_log_knob(id, cx, cy, r, val, mn, mx, label, fmt, def) local(log_mn, log_mx, log_rng, log_val, hot, d, norm, ang, ua, tw, th, act) ( ui_chg = 0; log_mn = log(mn); log_mx = log(mx); log_rng = max(log_mx - log_mn, 0.000001); log_val = log(max(val, mn)); hot = ui_en && abs(mouse_x - cx) <= r + 5 && abs(mouse_y - cy) <= r + 5; ui_en && mouse_click && active_control == 0 && hot ? ( (mouse_cap & 4) ? ( val = def; ui_chg = 1; ) : ( active_control = id; ); ); ui_en && active_control == id ? ( d = last_mouse_y - mouse_y; (mouse_cap & 8) ? d *= 0.2; d != 0 ? ( log_val = max(log_mn, min(log_mx, log_val + d * log_rng / 200)); val = exp(log_val); ui_chg = 1; ); ); ua = ui_en ? 1 : 0.4; act = (active_control == id); norm = max(0, min(1, (log_val - log_mn) / log_rng)); ang = 0.75 * $pi + norm * 1.5 * $pi; gfx_set(0.12, 0.04, 0.05, ua); gfx_circle(cx, cy, r - 2, 1); gfx_set(0.30, 0.12, 0.15, ua); gfx_circle(cx, cy, r - 2, 0); gfx_set(0.24, 0.09, 0.11, ua); ui_arc(cx, cy, r + 3, 0.75 * $pi, 2.25 * $pi); norm > 0.004 ? ( gfx_set(ui_ar, ui_ag, ui_ab, ua); ui_arc(cx, cy, r + 3, 0.75 * $pi, ang); ); gfx_set(1, 1, 1, ua * (act ? 1 : 0.9)); gfx_line(cx + cos(ang) * r * 0.3, cy + sin(ang) * r * 0.3, cx + cos(ang) * (r - 4), cy + sin(ang) * (r - 4)); gfx_setfont(1); gfx_set(0.85, 0.75, 0.78, ua); gfx_measurestr(label, tw, th); gfx_x = cx - tw * 0.5; gfx_y = cy - r - 18; gfx_drawstr(label); sprintf(#knobval, fmt, val); (act || hot) ? gfx_set(1, 1, 1, ua) : gfx_set(0.9, 0.82, 0.84, ua); gfx_measurestr(#knobval, tw, th); gfx_x = cx - tw * 0.5; gfx_y = cy + r + 7; gfx_drawstr(#knobval); val; );
+
+@serialize
+file_var(0, manual_id);
+
+@block
+smp_ev_n = 0; smp_ev_i = 0;
+// V3.6.10: Cloud et Slicer exclusifs. Le dernier active gagne.
+(play_mode == 1 && cloud_on) ? ( cloud_on != prev_xcl ? ( play_mode = 0; slider6 = 0; ) : ( cloud_on = 0; slider23 = 0; ); );
+prev_xcl = cloud_on;
+
+// ---- SLICER CLOCK : suivi de la position du looper master ----
+blk_ms = (active_part - 1) * 10;
+mclk_on = (clk_src == 0 && gmem[blk_ms] == 1 && gmem[blk_ms + 1] != instance_id && gmem[blk_ms + 1] != instance_alias && gmem[blk_ms + 2] > 0);
+mclk_on ? (
+  mclk_len = gmem[blk_ms + 2]; mclk_m = gmem[blk_ms + 3];
+  (!mclk_valid || mclk_len != mclk_len_prev) ? (
+    mclk_pos = mclk_m; mclk_cyc = gmem[blk_ms + 4] % 840; mclk_valid = 1; mclk_len_prev = mclk_len; last_slicer_step = -1;
+  ) : (
+    mclk_d = mclk_m - mclk_pos; mclk_d -= mclk_len * floor(mclk_d / mclk_len + 0.5);
+    mclk_np = mclk_pos + (abs(mclk_d) > 4096 ? mclk_d : mclk_d * 0.1);
+    mclk_np >= mclk_len ? ( mclk_np -= mclk_len; mclk_cyc = (mclk_cyc + 1) % 840; ) : ( mclk_np < 0 ? ( mclk_np += mclk_len; mclk_cyc = (mclk_cyc + 839) % 840; ); );
+    mclk_pos = mclk_np;
+  );
+) : ( mclk_valid = 0; );
+while (midirecv(mo_off, mo_m1, mo_m2, mo_m3)) (
+  midisend(mo_off, mo_m1, mo_m2, mo_m3);
+  mo_t = mo_m1 & 240;
+  (mo_t == 144 && mo_m3 > 0) ? (
+    smp_ev_n < smp_evmax ? ( smp_ev_off[smp_ev_n] = mo_off; smp_ev_note[smp_ev_n] = mo_m2; smp_ev_vel[smp_ev_n] = mo_m3; smp_ev_n += 1; );
+  ) : ((mo_t == 128 || mo_t == 144) ? (
+    smp_ev_n < smp_evmax ? ( smp_ev_off[smp_ev_n] = mo_off; smp_ev_note[smp_ev_n] = mo_m2; smp_ev_vel[smp_ev_n] = 0; smp_ev_n += 1; );
+  ) : (
+    (mo_t == 176 && (mo_m2 == 123 || mo_m2 == 120)) ? smp_alloff = 1;
+  ));
+);
+
+(slicer_src != last_slicer_src || grid_sub != last_grid_sub) ? ( last_slicer_src = slicer_src; last_grid_sub = grid_sub; grid_sig = -1; length > 0 ? start_analysis(); );
+slicer_pitch_spread != last_pitch_spread ? ( last_pitch_spread = slicer_pitch_spread; update_slicer_pitches(get_slicer_len()); );
+(slicer_src == 1 && length > 0 && grid_signature() != grid_sig) ? start_analysis();
+grid_pending ? ( generate_slicer_sequence(get_slicer_len()); slicer_current_step = 0; grid_pending = 0; );
+// ---- STEPS libres + PRESETS de table + MAX SLICES ----
+slicer_steps != last_steps ? (
+  slicer_mode == 1 ? slicer_resize(floor(last_steps + 0.5), floor(slicer_steps + 0.5));
+  last_steps = slicer_steps;
+);
+preset_cur < 0 ? (
+  preset_cur = max(0, min(3, floor(slicer_preset + 0.5) - 1)); last_preset = slicer_preset;
+) : (
+  slicer_preset != last_preset ? ( last_preset = slicer_preset; preset_switch(max(0, min(3, floor(slicer_preset + 0.5) - 1))); );
+);
+(max_slices != last_max_sl && active_control != 48) ? ( last_max_sl = max_slices; start_analysis(); );
+analysing == 1 ? (
+  i = 0; while(i < 16384 && ana_k < ana_end) ( s_l = left_buf[ana_k]; s_r = right_buf[ana_k]; hfc = abs(s_l - (ana_prev_l ? ana_prev_l : s_l)) + abs(s_r - (ana_prev_r ? ana_prev_r : s_r)); ana_prev_l = s_l; ana_prev_r = s_r; hfc > ana_max_peak ? ana_max_peak = hfc; ana_k += 1; i += 1; );
+  ana_k >= ana_end ? ( ana_min_dist = srate * (det_hold_ms * 0.001); ana_last_trig = -ana_min_dist; ana_win_size = floor(srate * 0.004); ana_k = floor(loop_start); ana_env = 0; ana_prev_l = 0; ana_prev_r = 0; analysing = 2; );
+) : analysing == 2 ? (
+  i = 0; while(i < 64 && ana_k < ana_end - ana_win_size) (
+    hfc_win = 0; j = 0; loop(ana_win_size, s_l = left_buf[ana_k + j]; s_r = right_buf[ana_k + j]; hfc = abs(s_l - (ana_prev_l ? ana_prev_l : s_l)) + abs(s_r - (ana_prev_r ? ana_prev_r : s_r)); ana_prev_l = s_l; ana_prev_r = s_r; hfc > hfc_win ? hfc_win = hfc; j += 1; );
+    norm_s = hfc_win / max(ana_max_peak, 0.0001); prev_env = ana_env; ana_env = ana_env * 0.5 + norm_s * 0.5;
+    (norm_s > det_thresh && (ana_env - prev_env) > (det_thresh * 0.15) && (ana_k - ana_last_trig) > ana_min_dist && trans_count < max_transients) ? ( trans_mem[trans_count] = ana_k; trans_str[trans_count] = norm_s; trans_count += 1; ana_last_trig = ana_k; );
+    ana_k += ana_win_size; i += 1; );
+  ana_k >= ana_end - ana_win_size ? ( slicer_src == 0 ? trans_cap(floor(max_slices + 0.5)); step_len = get_slicer_len(); generate_slicer_sequence(step_len); analysing = 0; );
+);
+
+// MAJ DE L'ID (slider manuel)
+instance_id = manual_id > 0 ? manual_id : 1;
+instance_alias = instance_id;
+inst_idx = instance_id - 1;
+
+gmem[100 + inst_idx] = instance_id;
+gmem[130 + inst_idx] = time_precise();
+gmem[160 + inst_idx] = looper_hue;
+
+p = 0;
+loop(3,
+  gmem_base = 1000 + (inst_idx * 600) + p * 200;
+  
+  cmd = gmem[gmem_base + 48];
+  cmd > 0 ? (
+    p != (active_part - 1) ? switch_part(p + 1);
+    cmd == 1 ? ( length > 0 && state != 1 && state != 8 ? state_target = (state == 3 ? 2 : 3) : rec_cmd = 1; ) :
+    cmd == 2 ? ( do_clear(0); state_target = 0; ) :
+    cmd == 3 ? ( state_target = (state == 0 || state == 7) ? 2 : 0; ) :
+    cmd == 4 ? ( rev_on = !rev_on; slider16 = rev_on; ) :
+    cmd == 5 ? ( pingpong_on = !pingpong_on; slider17 = pingpong_on; ) :
+    cmd == 6 ? ( play_mode = (play_mode == 1 ? 0 : 1); slider6 = play_mode; play_mode == 1 ? ( cloud_on = 0; slider23 = 0; ); ) :
+    cmd == 7 ? ( cloud_on = !cloud_on; slider23 = cloud_on; cloud_on && play_mode == 1 ? ( play_mode = 0; slider6 = 0; ); ) :
+    cmd == 8 ? ( link_on = !link_on; slider7 = link_on; ) :
+    cmd == 9 ? ( state_target = (state == 4 ? 2 : 4); ) :
+    cmd == 10 ? ( state_target = (state == 5 ? 2 : 5); ) :
+    cmd == 11 ? ( do_clear(1); state_target = 0; ) :
+    cmd == 12 ? 0; // pure part switch (already done above)
+    gmem[gmem_base + 48] = 0;
+  );
+
+  // Dashboard Twister In/Out/Width:
+  // 160=1 +161=in  -> set In, keep Out fixed (mode Out)
+  // 160=5 +161=in  -> set In, keep Width fixed (mode Width) ; shrink width if hits end
+  // 160=2 +162=out -> set Out absolute
+  // 160=3 +162=w   -> set Width
+  // 160=4          -> reset full loop
+  edit_cmd = gmem[gmem_base + 160];
+  edit_cmd > 0 ? (
+    p != (active_part - 1) ? switch_part(p + 1);
+    length > 0 ? (
+      edit_cmd == 1 ? (
+        // Mode Out: move In, preserve end
+        new_in = gmem[gmem_base + 161];
+        new_in = apply_quant_start(max(0, min(new_in, length - min_width())));
+        old_end = loop_start + loop_width;
+        loop_start = new_in;
+        loop_width = max(min_width(), old_end - loop_start);
+        loop_width = min(loop_width, length - loop_start);
+        sync_hard_resync = 1;
+      ) :
+      edit_cmd == 5 ? (
+        // Mode Width: move In, preserve width (shrink only if right edge hits length)
+        new_in = gmem[gmem_base + 161];
+        keep_w = loop_width;
+        new_in = apply_quant_start(max(0, min(new_in, length - min_width())));
+        loop_start = new_in;
+        loop_width = max(min_width(), min(keep_w, length - loop_start));
+        sync_hard_resync = 1;
+      ) :
+      
+      edit_cmd == 2 ? (
+        new_out = gmem[gmem_base + 162];
+        gq = quant_grid();
+        gq > 0 ? new_out = floor(new_out / gq + 0.5) * gq;
+        new_out = max(loop_start + min_width(), min(new_out, length));
+        loop_width = new_out - loop_start;
+        sync_hard_resync = 1;
+      ) :
+      edit_cmd == 3 ? (
+        new_w = gmem[gmem_base + 162];
+        loop_width = apply_quant_width(new_w, loop_start);
+        sync_hard_resync = 1;
+      ) :
+      edit_cmd == 4 ? (
+        loop_start = 0;
+        loop_width = length;
+        sync_hard_resync = 1;
+      );
+    );
+    gmem[gmem_base + 160] = 0;
+    gmem[gmem_base + 161] = 0;
+    gmem[gmem_base + 162] = 0;
+  );
+
+  // Remote param write (ReaImGui / external): +180 = param id, +181 = value
+  // Applied only on the active part; id mirrors export offsets.
+  wr_id = gmem[gmem_base + 180];
+  wr_id > 0 ? (
+    p != (active_part - 1) ? switch_part(p + 1);
+    wr_v = gmem[gmem_base + 181];
+    wr_id == 3  ? ( speed = max(0.01, min(100, wr_v)); slider1 = speed; ) :
+    wr_id == 4  ? ( pitch = max(-48, min(48, wr_v)); slider2 = pitch; ) :
+    wr_id == 5  ? ( mix = max(0, min(1, wr_v)); slider3 = mix; ) :
+    wr_id == 6  ? ( grain_ms = max(20, min(200, wr_v)); slider4 = grain_ms; ) :
+    wr_id == 7  ? ( fade_ms = max(0, min(500, wr_v)); slider5 = fade_ms; ) :
+    wr_id == 10 ? ( length > 0 ? ( req_p = (max(0, min(100, wr_v)) * 0.01) * length; trigger_pos_jump(req_p); slider9 = (pos / length) * 100; last_slider9 = slider9; ); ) :
+    wr_id == 13 ? ( grain_fade = max(5, min(50, wr_v)); slider12 = grain_fade; ) :
+    wr_id == 19 ? ( feedback = max(0, min(2, wr_v)); slider18 = feedback; ) :
+    wr_id == 20 ? ( degradation = max(0, min(1, wr_v)); slider19 = degradation; ) :
+    wr_id == 21 ? ( stereo_width = max(0, min(1, wr_v)); slider20 = stereo_width; ) :
+    wr_id == 22 ? ( out_vol = max(0, min(2, wr_v)); slider21 = out_vol; ) :
+    wr_id == 26 ? ( cloud_density = max(0, min(1, wr_v)); slider25 = cloud_density; ) :
+    wr_id == 27 ? ( cloud_chaos = max(0, min(1, wr_v)); slider26 = cloud_chaos; ) :
+    wr_id == 28 ? ( cloud_spread = max(0, min(1, wr_v)); slider27 = cloud_spread; ) :
+    wr_id == 29 ? ( dens_occ = max(0, min(100, wr_v)); slider28 = dens_occ; ) :
+    wr_id == 34 ? ( slicer_pitch_spread = max(0, min(100, wr_v)); slider33 = slicer_pitch_spread; ) :
+    wr_id == 35 ? ( cloud_pitch_spread = max(0, min(100, wr_v)); slider34 = cloud_pitch_spread; ) :
+    wr_id == 36 ? ( cloud_mix = max(0, min(1, wr_v)); slider35 = cloud_mix; ) :
+    wr_id == 38 ? ( cloud_pos_pct = max(0, min(100, wr_v)); slider37 = cloud_pos_pct; ) :
+    wr_id == 40 ? ( cloud_lfo_rate = max(0.1, min(4, wr_v)); slider39 = cloud_lfo_rate; ) :
+    wr_id == 41 ? ( cloud_lfo_depth = max(0, min(100, wr_v)); slider40 = cloud_lfo_depth; ) :
+    0;
+    gmem[gmem_base + 180] = 0;
+    gmem[gmem_base + 181] = 0;
+  );
+  
+  gmem[gmem_base + 0]  = instance_id;
+  gmem[gmem_base + 1]  = instance_alias;
+  
+  is_active = (p == (active_part - 1));
+  is_active ? (
+    gmem[gmem_base + 2]  = state;
+    gmem[gmem_base + 3]  = speed;
+    gmem[gmem_base + 4]  = pitch;
+    gmem[gmem_base + 5]  = mix;
+    gmem[gmem_base + 6]  = grain_ms;
+    gmem[gmem_base + 7]  = fade_ms;
+    gmem[gmem_base + 8]  = play_mode;
+    gmem[gmem_base + 9]  = link_on;
+    gmem[gmem_base + 10] = loop_pos_pct;
+    gmem[gmem_base + 47] = length > 0 ? (pos / length) * 100.0 : 0;
+    gmem[gmem_base + 11] = trans_sens;
+    gmem[gmem_base + 12] = trans_hold_ms;
+    gmem[gmem_base + 13] = grain_fade;
+    gmem[gmem_base + 14] = slicer_mode;
+    gmem[gmem_base + 15] = slicer_sub;
+    gmem[gmem_base + 16] = slice_decay_ms;
+    gmem[gmem_base + 17] = rev_on;
+    gmem[gmem_base + 18] = pingpong_on;
+    gmem[gmem_base + 19] = feedback;
+    gmem[gmem_base + 20] = degradation;
+    gmem[gmem_base + 21] = stereo_width;
+    gmem[gmem_base + 22] = out_vol;
+    gmem[gmem_base + 23] = length > 0 ? (master_pos / length) * 100.0 : 0;
+    gmem[gmem_base + 24] = cloud_on;
+    gmem[gmem_base + 25] = loop_quant;
+    gmem[gmem_base + 26] = cloud_density;
+    gmem[gmem_base + 27] = cloud_chaos;
+    gmem[gmem_base + 28] = cloud_spread;
+    gmem[gmem_base + 29] = dens_occ;
+    gmem[gmem_base + 30] = dens_len;
+    gmem[gmem_base + 31] = loop_beats;
+    gmem[gmem_base + 32] = slicer_src;
+    gmem[gmem_base + 33] = grid_sub;
+    gmem[gmem_base + gm_pspread_slicer] = slicer_pitch_spread;
+    gmem[gmem_base + gm_pspread_cloud] = cloud_pitch_spread;
+    gmem[gmem_base + 36] = cloud_mix;
+    gmem[gmem_base + 37] = cloud_pos_mode;
+    gmem[gmem_base + 38] = cloud_pos_pct;
+    gmem[gmem_base + 39] = cloud_lfo_shape;
+    gmem[gmem_base + 40] = cloud_lfo_rate;
+    gmem[gmem_base + 41] = cloud_lfo_depth;
+    gmem[gmem_base + 42] = active_part;
+    gmem[gmem_base + 43] = auto_on;
+    gmem[gmem_base + 44] = loop_start;
+    gmem[gmem_base + 45] = loop_width;
+    gmem[gmem_base + 46] = length;
+    gmem[gmem_base + gm_sampler_root] = sampler_root;
+    gmem[gmem_base + gm_sampler_armed] = smp_mode;
+    gmem[gmem_base + gm_sampler_pmode] = sampler_pitch_mode;
+    gmem[gmem_base + gm_sampler_release] = sampler_release;
+    gmem[gmem_base + gm_sampler_voices] = smp_nact;
+    gmem[gmem_base + gm_bpm] = (length > 0) ? (60.0 * srate / loop_beat_len()) : 0;
+    
+    wave_export_slots = 100;
+    max_len_exp = (length > 0) ? length : (state == 1 || state == 8 ? pos : 0);
+    max_len_exp > 0 ? (
+      wi_ex = 0; w_step_ex = max_len_exp / wave_export_slots;
+      loop(wave_export_slots,
+        w_val_ex = 0; wk_ex = 0;
+        loop(4,
+          w_idx_ex = floor(wi_ex * w_step_ex + wk_ex * w_step_ex * 0.25);
+          w_tmp_ex = max(abs(left_buf[w_idx_ex]), abs(right_buf[w_idx_ex]));
+          w_tmp_ex > w_val_ex ? w_val_ex = w_tmp_ex;
+          wk_ex += 1;
+        );
+        gmem[gmem_base + 50 + wi_ex] = w_val_ex;
+        wi_ex += 1;
+      );
+    ) : (
+      wi_ex = 0; loop(100, gmem[gmem_base + 50 + wi_ex] = 0; wi_ex += 1;);
+    );
+  ) : (
+    gmem[gmem_base + 2] = 0;
+    p_len = (p == 0 ? len_part1 : (p == 1 ? len_part2 : len_part3));
+    gmem[gmem_base + 46] = p_len;
+    gmem[gmem_base + 10] = 0;
+    gmem[gmem_base + 23] = 0;
+    gmem[gmem_base + 42] = active_part;
+    
+    p_len == 0 ? (
+      wi_ex = 0; loop(100, gmem[gmem_base + 50 + wi_ex] = 0; wi_ex += 1;);
+    );
+  );
+  p += 1;
+);
+
+@slider
+manual_id != slider45 ? manual_id = slider45;
+loop_pos_pct != last_slider9 ? ( length > 0 ? ( req_p = (loop_pos_pct * 0.01) * length; abs(req_p - pos) > 10 ? trigger_pos_jump(req_p); ); last_slider9 = loop_pos_pct; );
+(det_thresh != last_det_t || det_hold_ms != last_det_h) ? ( start_analysis(); last_det_t = det_thresh; last_det_h = det_hold_ms; ) : slicer_mode != last_slicer_mode ? ( step_len = get_slicer_len(); generate_slicer_sequence(step_len); last_slicer_mode = slicer_mode; slicer_current_step = 0; );
+slicer_pitch_spread != last_pitch_spread ? ( last_pitch_spread = slicer_pitch_spread; update_slicer_pitches(get_slicer_len()); );
+cloud_on = slider23; loop_quant = slider24; cloud_density = slider25; cloud_chaos = slider26; cloud_spread = slider27; cloud_pitch_spread = slider34; cloud_mix = slider35; cloud_pos_mode = slider36; cloud_pos_pct = slider37; cloud_lfo_shape = slider38; cloud_lfo_rate = slider39; cloud_lfo_depth = slider40; grid_sub = slider32; looper_hue = slider41;
+loop_start != prev_loop_start || loop_width != prev_loop_width ? sync_hard_resync = 1;
+
+@sample
+in0 = spl0; in1 = spl1; wet_s0 = 0; wet_s1 = 0;
+pos_step = 0;
+peak_in_vu = max(peak_in_vu * vu_rel, max(abs(in0), abs(in1)));
+
+ms_off = (active_part - 1) * 10;
+is_slave = (gmem[ms_off] > 0 && gmem[ms_off + 1] != instance_id && gmem[ms_off + 1] != instance_alias);
+
+is_slave && length > 0 ? (
+    master_pos += 1.0;
+    master_pos >= length ? (
+        master_pos -= length;
+        clk_cyc = (clk_cyc + 1) % 840;
+        slicer_sample_counter = 1000000000;
+    );
+    active_part == 1 ? master_pos1 = master_pos : (active_part == 2 ? master_pos2 = master_pos : master_pos3 = master_pos);
+) : (
+    len_part1 > 0 ? (
+      master_pos1 += 1.0;
+      master_pos1 >= len_part1 ? (master_pos1 -= len_part1; active_part == 1 ? (clk_cyc = (clk_cyc + 1) % 840; slicer_sample_counter = 1000000000;));
+      (gmem[0] == 1 && (gmem[1] == instance_id || gmem[1] == instance_alias)) ? (
+        gmem[2] = (base_len_part1 > 0 ? base_len_part1 : len_part1);
+        gmem[3] = master_pos1; gmem[4] = (active_part == 1 ? clk_cyc : clk_cyc1);
+      );
+    );
+    len_part2 > 0 ? (
+      master_pos2 += 1.0;
+      master_pos2 >= len_part2 ? (master_pos2 -= len_part2; active_part == 2 ? (clk_cyc = (clk_cyc + 1) % 840; slicer_sample_counter = 1000000000;));
+      (gmem[10] == 1 && (gmem[11] == instance_id || gmem[11] == instance_alias)) ? (
+        gmem[12] = (base_len_part2 > 0 ? base_len_part2 : len_part2);
+        gmem[13] = master_pos2; gmem[14] = (active_part == 2 ? clk_cyc : clk_cyc2);
+      );
+    );
+    len_part3 > 0 ? (
+      master_pos3 += 1.0;
+      master_pos3 >= len_part3 ? (master_pos3 -= len_part3; active_part == 3 ? (clk_cyc = (clk_cyc + 1) % 840; slicer_sample_counter = 1000000000;));
+      (gmem[20] == 1 && (gmem[21] == instance_id || gmem[21] == instance_alias)) ? (
+        gmem[22] = (base_len_part3 > 0 ? base_len_part3 : len_part3);
+        gmem[23] = master_pos3; gmem[24] = (active_part == 3 ? clk_cyc : clk_cyc3);
+      );
+    );
+    active_part == 1 ? master_pos = master_pos1 : (active_part == 2 ? master_pos = master_pos2 : master_pos = master_pos3);
+);
+
+curr_peak = max(abs(in0), abs(in1));
+ih_n += 1; ih_n >= 1073741824 ? ih_wrap(); ih_l[ih_n & ih_mask] = in0; ih_r[ih_n & ih_mask] = in1;
+curr_peak >= trans_sens ? ( input_signal_active = 1; hold_samples_left = srate * (trans_hold_ms * 0.001); ) : ( hold_samples_left > 0 ? ( hold_samples_left -= 1; input_signal_active = 1; ) : ( input_signal_active = 0; ); );
+init_done == 0 ? ( sm_pitch = pitch; sm_speed = speed; init_done = 1; );
+sm_pitch += (pitch - sm_pitch) * 0.005; sm_speed += (speed - sm_speed) * 0.005;
+pitch_ratio = 2 ^ (sm_pitch / 12); varispeed = sm_speed * pitch_ratio; rec_speed = varispeed;
+is_one_shot_mode = (play_mode == 2);
+
+mclk_on && mclk_valid ? ( mclk_pos += 1.0; mclk_pos >= mclk_len ? ( mclk_pos -= mclk_len; mclk_cyc = (mclk_cyc + 1) % 840; ); );
+state >= 2 && play_mode == 1 && trans_count > 0 ? (
+  beats_per_step = slicer_sub == 0 ? 1.0 : (slicer_sub == 1 ? 0.5 : (slicer_sub == 2 ? 1.0/3.0 : (slicer_sub == 3 ? 0.25 : (slicer_sub == 4 ? 1.0/6.0 : 0.125))));
+  mclk_on && mclk_valid ? (
+    mclk_hb = (60 / max(tempo, 20)) * srate;
+    mclk_hb = mclk_len / max(1, floor(mclk_len / mclk_hb + 0.5));
+    samples_per_step = max(1, mclk_hb * beats_per_step);
+    clock_abs_pos = mclk_cyc * mclk_len + mclk_pos;
+  ) : (
+    samples_per_step = max(1, loop_beat_len() * beats_per_step);
+    clock_abs_pos = (clk_cyc * length) + master_pos;
+  );
+  
+  current_step_calc = floor(clock_abs_pos / samples_per_step);
+  
+  (current_step_calc != last_slicer_step) ? (
+    last_slicer_step = current_step_calc;
+    play_this_slice = 1;
+    (dens_occ < 100) ? (
+      play_this_slice = (rand(1.0) < (dens_occ * 0.01));
+    );
+    slice_mute_target = play_this_slice ? 1.0 : 0.0;
+    slice_mute_step = 1.0 / max(2, srate * 0.003);
+    dens_next();
+    slicer_mode == 0 ? ( 
+      rnd_idx = floor(rand(trans_count)); target_pos = trans_mem[rnd_idx]; 
+      rand_pitch_idx = floor(rand(get_slicer_len())); p_off = slice_pitch_mem[rand_pitch_idx]; 
+      slicer_fire(target_pos, p_off); 
+      dub_gran ? dub_slice_restart(!effective_rev); 
+    ) : ( 
+      step_len = get_slicer_len(); target_pos = seq_mem[abs(current_step_calc) % step_len]; p_off = slice_pitch_mem[abs(current_step_calc) % step_len]; slicer_current_step = (abs(current_step_calc) % step_len + 1) % step_len; 
+      slicer_fire(target_pos, p_off); 
+      dub_gran ? dub_slice_restart(!effective_rev); 
+    );
+  );
+) : ( last_slicer_step = -1 );
+ ( slicer_sample_counter = 0; );
+
+slice_mute_gate += max(-slice_mute_step, min(slice_mute_step, slice_mute_target - slice_mute_gate));
+
+slice_pitch_mult = play_mode == 1 && trans_count > 0 ? (2 ^ (current_slice_pitch / 12)) : 1.0; effective_pitch_ratio = pitch_ratio * slice_pitch_mult;
+(play_mode == 1 && trans_count > 0) ? ( sl_gate += max(-sl_slew, min(sl_slew, sl_run - sl_gate)); sl_gate = max(0, min(1, sl_gate)); ) : ( sl_gate = 1; sl_run = 1; );
+
+dens_on = dens_occ < 99.99;
+dens_on ? (
+  state != dens_prev_state ? ( dens_prev_state = state; dens_slot = -1; dens_rt = 0; dens_force = 0; ); dens_frac = 2 ^ (-floor(dens_len + 0.5));
+  state == 1 || state == 8 ? ( dens_sl = max(1, loop_beat_len() * 4 * dens_frac); dens_ns = floor(dens_rt / dens_sl); dens_rt += 1; dens_ns != dens_slot ? ( dens_first = dens_slot < 0; dens_slot = dens_ns; dens_next(); dens_first ? dens_g = dens_tgt; ); ) : (state >= 3 && state <= 6 && length > 0) ? ( (play_mode == 1 && trans_count > 0) ? ( dens_slot < 0 ? ( dens_slot = 0; dens_next(); ); ) : ( dens_sl = max(1, loop_beat_len() * 4 * dens_frac); dens_ns = floor(max(0, pos - eff_start) / dens_sl); (dens_ns != dens_slot || dens_force) ? ( dens_slot = dens_ns; dens_force = 0; dens_next(); ); ); ); 
+  dens_g += max(-dens_slew, min(dens_slew, dens_tgt - dens_g));
+) : ( dens_g = 1; dens_prev_state = -1; );
+
+rec_cmd ? (
+  rec_cmd = 0;
+  state == 1 || state == 8 ? (
+    pos > srate * 0.3 ? ( state_target = 2; last_state_target = -1; );
+  ) : state == 7 ? ( state_target = 0; last_state_target = -1;
+  ) : ( state_target = auto_on ? 7 : 1; last_state_target = -1; );
+);
+
+state_target != last_state_target ? (
+  (state == 3 || state == 4 || state == 5) ? dub_flush();
+  state_target == 0 ? ( 
+    state == 1 || state == 8 ? finish_rec(0) : ( pos = 0; analysing = 0; );
+    state = 0; one_shot_playing = 0;
+  ) : state_target == 1 ? ( 
+    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( 
+      analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; memset(left_buf, 0, dirty_len); memset(right_buf, 0, dirty_len); dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 1; trans_count = 0; 
+    ); 
+  ) : state_target == 2 ? (
+    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( length > 0 ? state = 2 );
+  ) : state_target == 3 ? (
+    state == 3 ? state = 2 : ( state == 1 || state == 8 ? try_finish_rec(3, 0) : ( push_new_history_state(); state = 3; ); dub_pan = (rand(2.0) - 1.0); );
+    (state != 3 && state != 8) ? state_target = 2;
+  ) : state_target == 4 ? (
+    state == 4 ? state = 2 : ( state == 1 || state == 8 ? try_finish_rec(4, 0) : ( push_new_history_state(); state = 4; ); dub_pan = (rand(2.0) - 1.0); );
+    (state != 4 && state != 8) ? state_target = 2;
+  ) : state_target == 5 ? (
+    state == 5 ? state = 2 : ( state == 1 || state == 8 ? try_finish_rec(5, 0) : ( push_new_history_state(); state = 5; ); dub_pan = (rand(2.0) - 1.0); );
+    (state != 5 && state != 8) ? state_target = 2;
+  ) : state_target == 6 ? (
+    state == 6 ? state = 2 : ( state == 1 || state == 8 ? try_finish_rec(6, 0) : ( push_new_history_state(); state = 6; memcpy(base_backup_l, left_buf, length); memcpy(base_backup_r, right_buf, length); mult_len = length; ); dub_pan = (rand(2.0) - 1.0); );
+    (state != 6 && state != 8) ? state_target = 2;
+  ) : state_target == 7 ? (
+    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; memset(left_buf, 0, dirty_len); memset(right_buf, 0, dirty_len); dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 7; trans_count = 0; );
+  );
+  last_state_target = state_target;
+);
+
+state < 2 ? prev_normal_playback = 0;
+
+state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - replace_fade_coeff);
+) : state == 7 ? ( 
+  wet_s0 = 0; wet_s1 = 0; 
+  replace_fade = max(0, replace_fade - replace_fade_coeff); 
+  (!auto_on || curr_peak > trans_sens) ? ( 
+    state = 1; state_target = 1; last_state_target = 1; 
+    rec_start_time = time_precise();
+    old_pos = pos; pos += rec_speed; dirty_len = max(dirty_len, pos); 
+    tape_write_span(old_pos, pos, 1); 
+  );
+) : state == 1 ? (
+  old_pos = pos; pos += rec_speed; dirty_len = max(dirty_len, pos);
+  pos >= buf_len ? ( 
+    tape_write_span(old_pos, buf_len - 0.0001, 1); pos = buf_len; 
+    try_finish_rec(2, 0); state_target = 2; 
+  ) : tape_write_span(old_pos, pos, 1);
+  wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - replace_fade_coeff);
+) : state == 8 ? (
+  old_pos = pos; pos += rec_speed; dirty_len = max(dirty_len, pos);
+  pos >= target_sync_len ? (
+      tape_write_span(old_pos, target_sync_len - 0.0001, 1); 
+      pos = target_sync_len;
+      finish_rec(pending_next_state); state_target = pending_next_state; last_state_target = pending_next_state;
+  ) : ( tape_write_span(old_pos, pos, 1); );
+  wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - replace_fade_coeff);
+) : state >= 2 && length > 0 ? (
+  rate_t = link_on ? varispeed : sm_speed; rate_t *= (play_mode == 1 ? slice_pitch_mult : 1.0);
+  degradation > 0.0001 && abs(feedback - 1.0) > 0.001 ? (
+    wow_phase += 0.5 / srate; wow_phase >= 1.0 ? wow_phase -= 1.0;
+    flutter_phase += 6.0 / srate; flutter_phase >= 1.0 ? flutter_phase -= 1.0;
+    wow_mod = sin(2 * $pi * wow_phase) * (degradation * 0.003);
+    flutter_mod = sin(2 * $pi * flutter_phase) * (degradation * 0.001);
+    // V3.6.10: wow/flutter ne doit PAS modifier rate_t (sert uniquement au calcul de sync clock). Sinon sync_eval() perd le lock des que feedback != 1.
+  );
+
+  abs(length - clk_len_ref) > 0.5 ? ( 
+    clk_len_ref = length; 
+    sync_hard_resync = 1;
+    sync_c_w = -1; sync_c_l = -1;
+  );
+  
+  (abs(sm_speed - prev_sm_speed) > 0.00005 || abs(pitch_ratio - prev_pitch_ratio_sig) > 0.00005) ? (
+    prev_sm_speed = sm_speed; prev_pitch_ratio_sig = pitch_ratio;
+    sync_hard_resync = 1;
+  );
+  
+  (abs(loop_start - prev_loop_start) > 0.5 || abs(loop_width - prev_loop_width) > 0.5) ? (
+    prev_loop_start = loop_start; prev_loop_width = loop_width;
+    sync_hard_resync = 1;
+  );
+  
+  (rev_on != prev_rev_on || pingpong_on != prev_pingpong_on) ? (
+    prev_pingpong_on = pingpong_on;
+    sync_hard_resync = 1;
+  );
+
+  // Sortie Slicer / One-Shot -> Normal : même force que reverse
+  play_mode_changed = (play_mode != prev_play_mode);
+  leave_slicer = (prev_play_mode == 1 && play_mode == 0);
+  leave_oneshot = (prev_play_mode == 2 && play_mode == 0);
+  (leave_slicer || leave_oneshot || play_mode_changed) ? sync_hard_resync = 1;
+
+  // Redémarrage lecture après Stop/Wait : recalage instantané sur l'horloge
+  leave_stop = (prev_state_for_sync < 2 && state >= 2);
+  leave_stop ? sync_hard_resync = 1;
+  
+  (abs(loop_width - sync_c_w) > 0.01 || abs(length - sync_c_l) > 0.01 || abs(rate_t - sync_c_r) > 0.000000001) ? ( 
+    sync_c_w = loop_width; sync_c_l = length; sync_c_r = rate_t; 
+    sync_eval(); 
+  );
+  
+  prev_cloud_on && !cloud_on && sync_a == 0 ? trigger_pos_jump(master_pos);
+  prev_cloud_on = cloud_on;
+  
+  is_normal_playback = (play_mode == 0 && !is_one_shot_mode && sync_a > 0 
+                        && (state != 6 || (sync_a == 1 && sync_b == 1))
+                        && (sync_a == 1 || !pingpong_on));
+  
+  sync_key = sync_a * 16 + sync_b;
+  
+  rev_changed = (rev_on != prev_rev_on);
+  // force_mode_exit : sortie reverse / slicer / one-shot / stop -> même priorité
+  force_mode_exit = (rev_changed || leave_slicer || leave_oneshot || leave_stop);
+  need_resync = is_normal_playback && ( !prev_normal_playback 
+                                      || force_mode_exit
+                                      || sync_key != prev_sync_key 
+                                      || sync_hard_resync );
+  
+  // Jump forcé (comme reverse) dès que play_mode normal, même si sync_a pas encore stabilisé un instant
+  (need_resync || (force_mode_exit && length > 0 && loop_width > 0 && play_mode == 0 && !is_one_shot_mode)) ? ( 
+    trigger_pos_jump(sync_expected()); 
+    sync_hard_resync = 0;
+  ) : ( 
+    is_normal_playback && wrapped ? ( 
+      sync_exp = sync_expected(); 
+      sync_dev = pos - sync_exp; 
+      sync_dev -= loop_width * floor(sync_dev / loop_width + 0.5); 
+      abs(sync_dev) > 1 ? trigger_pos_jump(sync_exp); 
+    ); 
+  );
+  
+  prev_normal_playback = is_normal_playback; 
+  prev_sync_key = sync_key; 
+  prev_rev_on = rev_on;
+  prev_play_mode = play_mode;
+  prev_state_for_sync = state;
+
+  smooth_start = smooth_start * param_smooth_coeff + loop_start * (1.0 - param_smooth_coeff); smooth_width = smooth_width * param_smooth_coeff + loop_width * (1.0 - param_smooth_coeff);
+  eff_start = smooth_start; eff_end = smooth_start + smooth_width; eff_end > length ? eff_end = length; eff_end < eff_start ? eff_end = eff_start; eff_len = max(eff_end - eff_start, 16); 
+  effective_rev = (rev_on != (pingpong_on && ping_pong_dir < 0));
+  ml_ok = state == 6 && mult_len > 256 && loop_start < 1 && (loop_start + loop_width) >= length - 1 && (length + mult_len) <= buf_len; ml_fwd_free = ml_ok && !effective_rev;   
+  safe_pos = pos + delay_len * (effective_rev ? -1 : 1); safe_pos >= eff_end ? safe_pos -= eff_len; safe_pos < eff_start ? safe_pos += eff_len;
+  p1 = floor(safe_pos); p1 < eff_start ? p1 = eff_start; p1 >= eff_end ? p1 = eff_end - 1; frac = safe_pos - p1;
+  p0 = p1 - 1; p0 < eff_start ? p0 += eff_len; p2 = p1 + 1; p2 >= eff_end ? p2 -= eff_len; p3 = p2 + 1; p3 >= eff_end ? p3 -= eff_len;
+  s0_safe = hermite(frac, left_buf[p0], left_buf[p1], left_buf[p2], left_buf[p3]); s1_safe = hermite(frac, right_buf[p0], right_buf[p1], right_buf[p2], right_buf[p3]);
+  xfade_pos_active ? (
+    old_safe_pos = old_pos_ptr + delay_len * (effective_rev ? -1 : 1); old_safe_pos >= eff_end ? old_safe_pos -= eff_len; old_safe_pos < eff_start ? old_safe_pos += eff_len;
+    op1 = floor(old_safe_pos); op1 < eff_start ? op1 = eff_start; op1 >= eff_end ? op1 = eff_end - 1; ofrac = old_safe_pos - op1;
+    op0 = op1 - 1; op0 < eff_start ? op0 += eff_len; op2 = op1 + 1; op2 >= eff_end ? op2 -= eff_len; op3 = op2 + 1; op3 >= eff_end ? op3 -= eff_len;
+    old_s0 = hermite(ofrac, left_buf[op0], left_buf[op1], left_buf[op2], left_buf[op3]); old_s1 = hermite(ofrac, right_buf[op0], right_buf[op1], right_buf[op2], right_buf[op3]);
+    xfade_gain = xfade_pos_count / xfade_pos_len; s0_safe = old_s0 * (1.0 - xfade_gain) + s0_safe * xfade_gain; s1_safe = old_s1 * (1.0 - xfade_gain) + s1_safe * xfade_gain;
+    old_pos_ptr += pos_step * (effective_rev ? -1 : 1); old_pos_ptr < eff_start ? old_pos_ptr += eff_len : old_pos_ptr >= eff_end ? old_pos_ptr -= eff_len;
+    xfade_pos_count += 1; xfade_pos_count >= xfade_pos_len ? xfade_pos_active = 0;
+  );
+  play_mode == 1 ? ( slice_env = max(0, slice_env - slice_decay_step); s0_safe *= slice_env * sl_gate * slice_mute_gate; s1_safe *= slice_env * sl_gate * slice_mute_gate; ) : ( slice_env = 1.0; );
+  fade_samps = min((fade_ms * 0.001) * srate, eff_len * 0.5); rel_pos = safe_pos - eff_start; loop_envelope = 1.0;
+  fade_samps > 0 && rel_pos < fade_samps ? loop_envelope = min(loop_envelope, rel_pos / fade_samps); dist_from_end = eff_end - safe_pos; fade_samps > 0 && dist_from_end < fade_samps && !ml_fwd_free ? loop_envelope = min(loop_envelope, dist_from_end / fade_samps);
+  s0_safe *= loop_envelope; s1_safe *= loop_envelope;
+  delay_buf_l[delay_idx] = s0_safe; delay_buf_r[delay_idx] = s1_safe; read_idx = delay_idx + 1; read_idx >= delay_len ? read_idx = 0; s0 = delay_buf_l[read_idx]; s1 = delay_buf_r[read_idx]; delay_idx += 1; delay_idx >= delay_len ? delay_idx = 0;
+  // V3.6.10: overdub/replace en lecture granulaire (pitch et/ou speed sans Link).
+  // La couche entrante est ecrite par le moteur de grains avec compensation (espacement = pitch_ratio sur la bande),
+  // de sorte qu'a la relecture granulaire elle ressort telle que jouee, sans le pitch/speed en cours.
+  // Reverse : deja compense par le sens d'ecriture (effective_rev). Multiply (state 6) reste en ecriture directe.
+  gran_now = (!link_on && play_mode != 1 && (abs(sm_speed - 1.0) > 0.0005 || abs(sm_pitch) > 0.005));
+  is_dubbing = (state == 3 || state == 4 || state == 5 || state == 6);
+  dub_gran = (acc_ok && gran_now && (state == 3 || state == 4 || state == 5));
+  dub_gran_prev && !dub_gran ? dub_flush(); dub_gran_prev = dub_gran;
+  is_recording = is_dubbing;
+  link_on ? (
+    pos_step = varispeed * (play_mode == 1 ? slice_pitch_mult : 1.0);
+    grain_target = 0;
+  ) : (
+    pos_step = sm_speed * (play_mode == 1 ? slice_pitch_mult : 1.0);
+    grain_target = gran_now ? 1 : 0;
+  );
+  grain_target != grain_mix ? ( grain_mix += (grain_target > grain_mix ? 1 : -1) * xfade_coeff; grain_mix < 0 ? grain_mix = 0 : grain_mix > 1 ? grain_mix = 1; );
+  (grain_mix > 0.001 || cloud_on) && play_mode != 1 && (!is_one_shot_mode || one_shot_playing) ? (
+    cloud_on ? (
+      d_norm = cloud_density; c_factor = cloud_chaos; target_grain_ms = 2.0 + (d_norm ^ 2.0) * 798.0; grain_dur = srate * target_grain_ms * 0.001;
+      base_gt_ms = 28.0 + (1.0 - d_norm) * 52.0; rnd_factor = (rand(2.0) - 1.0) * c_factor; target_gt_ms = max(28.0, base_gt_ms + rnd_factor * 26.0);
+      d_norm > 0.5 ? ( num_active_voices = 1.0 + (d_norm - 0.5) * 2.0 * 15.0; target_gt_ms = min(target_gt_ms, (target_grain_ms / num_active_voices)); );
+      gT = srate * target_gt_ms * 0.001; cloud_lfo_rate > 0.001 && cloud_lfo_depth > 0.001 ? ( cloud_lfo_phase += cloud_lfo_rate / srate; cloud_lfo_phase >= 1.0 ? cloud_lfo_phase -= 1.0; );
+      lfo_val = cloud_lfo_shape == 0 ? sin(2 * $pi * cloud_lfo_phase) : ( cloud_lfo_shape == 1 ? (cloud_lfo_phase * 2.0 - 1.0) : (1.0 - cloud_lfo_phase * 2.0) );
+      base_cloud_center = (cloud_pos_mode == 0) ? pos : (eff_start + (cloud_pos_pct * 0.01) * eff_len); lfo_offset = lfo_val * (cloud_lfo_depth * 0.01) * eff_len * 0.5; cloud_center = base_cloud_center + lfo_offset; cloud_center_draw = cloud_center;
+    ) : ( grain_dur = srate * grain_ms * 0.001; gT = grain_dur * effective_pitch_ratio / max(pos_step, 0.0001); gT = max(min(gT, grain_dur * 0.5), grain_dur * 0.15); );
+    spawn_timer += 1;
+    spawn_timer >= gT ? ( spawn_timer = 0; gi = 0; loop(max_grains, g_base = grain_mem + (gi * grain_data_size); g_base[2] == 0 ? (
+          cloud_on ? ( spread_offset = (rand(2.0) - 1.0) * (cloud_spread * eff_len * 0.5); spawn_target_pos = cloud_center + spread_offset; c_factor > 0.001 ? spawn_target_pos += (rand(2.0) - 1.0) * (cloud_spread * eff_len * 0.5 * c_factor);
+            spawn_target_pos -= eff_start; spawn_target_pos -= floor(spawn_target_pos / eff_len) * eff_len; spawn_target_pos += eff_start;
+            g_base[0] = spawn_target_pos; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = (rand(2.0) - 1.0) * cloud_spread; g_base[5] = cloud_density; g_base[6] = spawn_target_pos; g_base[7] = calc_cloud_pitch(cloud_pitch_spread);
+          ) : ( rd_dl = 0; rd_Sn = floor(read_align_ms * 0.001 * srate + 0.5); rd_Wn = min(512, floor(0.4 * grain_dur));
+          (rd_Sn > 0 && rd_Wn >= 64 && rd_prev_ok) ? ( rd_ph = ih_n - rd_prev_n; (rd_ph > 0 && rd_ph + rd_Wn < rd_prev_dur) ? rd_dl = rd_pick(pos, rd_prev_start, rd_ph, rd_Sn, rd_Wn, effective_pitch_ratio, effective_rev ? -1 : 1); );
+          g_base[0] = pos + rd_dl; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = 0; g_base[5] = 0; g_base[6] = pos; g_base[7] = 0; rd_prev_start = g_base[0]; rd_prev_n = ih_n; rd_prev_dur = grain_dur; rd_prev_ok = 1; ); gi = max_grains; ); gi += 1; ); );
+    granular_l = 0; granular_r = 0; total_w = 0; gi = 0; g_dir = effective_rev ? -1 : 1;
+    loop(max_grains, g_base = grain_mem + (gi * grain_data_size); g_base[2] == 1 ? (
+        g_phase = g_base[1]; g_dur = g_base[3]; g_pan = g_base[4]; g_dens = g_base[5]; g_pitch_off = g_base[7]; g_phase >= g_dur ? (g_base[2] = 0);
+        grain_pitch_mult = cloud_on ? (2 ^ (g_pitch_off / 12)) : 1.0; rd_f = g_base[0] + (g_phase * effective_pitch_ratio * grain_pitch_mult * g_dir); rd_f -= eff_start; rd_f -= floor(rd_f / eff_len) * eff_len; rd_f += eff_start; rd_f = max(eff_start, min(eff_end - 1.0001, rd_f));
+        rd_i = floor(rd_f); rd_frac = rd_f - rd_i; rp1 = rd_i; rp0 = max(eff_start, rp1 - 1); rp2 = min(eff_end - 1, rp1 + 1); rp3 = min(eff_end - 1, rp2 + 1);
+        p_norm = g_phase / g_dur; min_fade_samps = srate * 0.0015; f_samps = max(min_fade_samps, g_dur * (0.02 + g_dens * 0.48)); env = 1.0; curr_samp = g_phase; curr_samp < f_samps ? env = curr_samp / f_samps : ((g_dur - curr_samp) < f_samps ? env = (g_dur - curr_samp) / f_samps);
+        env = max(0, min(1, env)); env = 0.5 - 0.5 * cos(env * $pi);
+        g_l = hermite(rd_frac, left_buf[rp0], left_buf[rp1], left_buf[rp2], left_buf[rp3]) * env; g_r = hermite(rd_frac, right_buf[rp0], right_buf[rp1], right_buf[rp2], right_buf[rp3]) * env;
+        cloud_on && abs(g_pan) > 0.0001 ? ( p_ang = (g_pan + 1.0) * 0.25 * $pi; gl_gain = cos(p_ang) * 1.414; gr_gain = sin(p_ang) * 1.414; g_mono = (g_l + g_r) * 0.5; g_l = g_mono * gl_gain; g_r = g_mono * gr_gain; );
+        granular_l += g_l; granular_r += g_r; total_w += env; g_base[1] = g_phase + 1; ); gi += 1; );
+    total_w < 0.001 ? total_w = 0.001; loop_env_pos = 1.0; fade_samps > 0 && (pos - eff_start) < fade_samps ? loop_env_pos = min(loop_env_pos, (pos - eff_start) / fade_samps); fade_samps > 0 && (eff_end - pos) < fade_samps && !ml_fwd_free ? loop_env_pos = min(loop_env_pos, (eff_end - pos) / fade_samps);
+    slice_g = play_mode == 1 ? slice_env * sl_gate * slice_mute_gate : 1.0; base_mix_factor = grain_mix;
+    s0 = s0 * (1.0 - base_mix_factor) + (granular_l / total_w) * loop_env_pos * slice_g * base_mix_factor; s1 = s1 * (1.0 - base_mix_factor) + (granular_r / total_w) * loop_env_pos * slice_g * base_mix_factor;
+    cloud_on ? ( s0 = s0 * (1.0 - cloud_mix) + (granular_l / total_w) * loop_env_pos * slice_g * cloud_mix; s1 = s1 * (1.0 - cloud_mix) + (granular_r / total_w) * loop_env_pos * slice_g * cloud_mix; );
+  );
+  play_mode == 1 && stereo_width > 0.0001 ? ( s_angle = (slice_pan * stereo_width + 1.0) * 0.25 * $pi; s_gL = min(1.0, cos(s_angle) * 1.414); s_gR = min(1.0, sin(s_angle) * 1.414); s_mono = (s0 + s1) * 0.5; s0 = s0 * (1.0 - stereo_width) + s_mono * s_gL * stereo_width; s1 = s1 * (1.0 - stereo_width) + s_mono * s_gR * stereo_width; );
+  dub_gran && (!is_one_shot_mode || one_shot_playing) ? dub_grain_tick(pos, effective_rev, state != 5 || auto_rep_active);
+  (!is_one_shot_mode || one_shot_playing) ? (
+    old_pos = pos; pos_step_actual = pos_step * (effective_rev ? -1 : 1); pos += pos_step_actual; wrapped = 0;
+    is_one_shot_mode ? ( pingpong_on ? ( (pos >= eff_end || pos < eff_start) ? ( one_shot_pp_state ? ( pos = max(eff_start, min(eff_end, pos)); one_shot_playing = 0; ) : ( pos = (pos >= eff_end) ? 2 * eff_end - pos : 2 * eff_start - pos; ping_pong_dir = -ping_pong_dir; one_shot_pp_state = 1; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ); ); ) : ( pos >= eff_end ? ( pos = eff_end; one_shot_playing = 0; ); pos < eff_start ? ( pos = eff_start; one_shot_playing = 0; ); );
+    ) : (
+      ml_guard = min(delay_len + 4 * abs(pos_step) + 16, length * 0.25); ml_trig = effective_rev ? (pos <= ml_guard) : (pos >= length - ml_guard); !ml_trig ? ml_cool = 0;
+      ml_ok && ml_trig && !ml_cool ? ( multiply_extend(); ml_cool = 1; );
+      pingpong_on ? ( pos < eff_start ? ( pos = 2 * eff_start - pos; ping_pong_dir = -ping_pong_dir; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ) : pos >= eff_end ? ( pos = 2 * eff_end - pos; ping_pong_dir = -ping_pong_dir; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); );
+      ) : ( pos < eff_start ? ( pos += eff_len; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ); pos >= eff_end ? ( pos -= eff_len; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ); );
+    );
+     wrapped ? dens_force = 1; 
+    
+    (play_mode == 1 && trans_count > 0 && sl_hi > sl_lo) ? ( 
+      slice_end_dist = effective_rev ? (pos - sl_lo) : (sl_hi - pos);
+      slice_end_dist < (srate * 0.005) ? ( 
+        sl_run = max(0, min(sl_run, slice_end_dist / (srate * 0.005))); 
+      ) : (
+        (effective_rev ? pos <= sl_lo : pos >= sl_hi) ? sl_run = 0; 
+      );
+    );
+    state == 3 ? (
+      dub_gran ? (
+        wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); dub_pan = rand(2.0) - 1.0; )
+               : ( !effective_rev ? dub_merge_behind(pos) : 0 );
+      ) : ( write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; );
+      replace_fade = max(0, replace_fade - replace_fade_coeff);
+      wet_s0 = s0 * (1.0 - replace_fade * dens_g); wet_s1 = s1 * (1.0 - replace_fade * dens_g);
+    ) : state == 4 ? (
+      dub_gran ? ( wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); dub_pan = rand(2.0) - 1.0; ) : 0 )
+               : ( write_move(old_pos, pos, wrapped, effective_rev, 2); wrapped ? dub_pan = rand(2.0) - 1.0; );
+      replace_fade = min(1.0, replace_fade + replace_fade_coeff);
+      wet_s0 = s0; wet_s1 = s1;
+    ) : state == 5 ? (
+      input_env = input_env * 0.6 + curr_peak * 0.4; hold_samps = srate * (trans_hold_ms * 0.001);
+      auto_above = input_env > trans_sens; auto_above && !auto_above_prev ? dub_pan = rand(2.0) - 1.0; auto_above_prev = auto_above;
+      input_env > trans_sens ? ( auto_rep_active = 1; auto_rep_hold_counter = hold_samps; );
+      auto_rep_hold_counter > 0 ? auto_rep_hold_counter -= 1 : auto_rep_active = 0;
+      dub_gran && wrapped ? dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0)));
+      auto_rep_active ? (
+        !dub_gran ? write_move(old_pos, pos, wrapped, effective_rev, 2) : 0;
+        replace_fade = min(1.0, replace_fade + replace_fade_coeff);
+      ) : ( replace_fade = max(0, replace_fade - replace_fade_coeff); );
+      wet_s0 = s0; wet_s1 = s1;
+    ) : state == 6 ? ( write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0 * (1.0 - replace_fade * dens_g); wet_s1 = s1 * (1.0 - replace_fade * dens_g);
+    ) : ( replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0 * (1.0 - replace_fade * dens_g); wet_s1 = s1 * (1.0 - replace_fade * dens_g); );
+  ) : ( wet_s0 = 0; wet_s1 = 0; acc_cur_dirty ? dub_commit_begin(1); );
+);
+cm_active ? dub_commit_step(16 + floor(abs(sm_speed) * 4));
+prev_in0 = in0; prev_in1 = in1; 
+
+smp_mode = sampler_mode_now(); smp_armed = smp_mode > 0; smp_kmode = (smp_mode == 2);
+((smp_mode != smp_prev_mode) || smp_alloff) ? ( sampler_release_all(smp_quick_rel); smp_alloff = 0; );
+smp_prev_mode = smp_mode;
+while (smp_ev_i < smp_ev_n) (
+  smp_ev_vel[smp_ev_i] > 0 ? ( smp_armed ? sampler_note_on(smp_ev_note[smp_ev_i], smp_ev_vel[smp_ev_i]); ) : sampler_note_off(smp_ev_note[smp_ev_i]);
+  smp_ev_i += 1;
+);
+sampler_render();
+wet_s0 += smp_l; wet_s1 += smp_r;
+dry_gain = cos(mix * $pi * 0.5); 
+wet_gain = sin(mix * $pi * 0.5);
+
+out0 = in0 * dry_gain + wet_s0 * wet_gain;
+out1 = in1 * dry_gain + wet_s1 * wet_gain;
+
+out0 *= out_vol; out1 *= out_vol;
+out0 = transparent_soft_clip(out0); out1 = transparent_soft_clip(out1);
+spl0 = max(-1.0, min(1.0, out0)); spl1 = max(-1.0, min(1.0, out1));
+peak_loop_vu = max(peak_loop_vu * vu_rel, max(abs(wet_s0), abs(wet_s1)));
+slider22 = length > 0 ? (master_pos / length) * 100.0 : 0;
+
+@gfx 760 630
+pc_n = floor(slider41 + 0.5);
+pc_n < 1 ? pc_n = (inst_idx >= 0 ? inst_idx % 8 : 0) + 1;
+pc_n == 1 ? (r_bg = 0.36; g_bg = 0.08; b_bg = 0.08;) :
+pc_n == 2 ? (r_bg = 0.40; g_bg = 0.20; b_bg = 0.04;) :
+pc_n == 3 ? (r_bg = 0.34; g_bg = 0.31; b_bg = 0.04;) :
+pc_n == 4 ? (r_bg = 0.08; g_bg = 0.30; b_bg = 0.10;) :
+pc_n == 5 ? (r_bg = 0.04; g_bg = 0.29; b_bg = 0.33;) :
+pc_n == 6 ? (r_bg = 0.08; g_bg = 0.14; b_bg = 0.40;) :
+pc_n == 7 ? (r_bg = 0.26; g_bg = 0.09; b_bg = 0.36;) :
+(r_bg = 0.40; g_bg = 0.09; b_bg = 0.26;);
+
+gfx_set(r_bg, g_bg, b_bg);
+gfx_rect(0, 0, gfx_w, gfx_h);
+
+gmem[160 + inst_idx] = slider41;
+
+gfx_setfont(1, "Arial", 12); gfx_setfont(2, "Arial", 11, 'b'); gfx_setfont(3, "Arial", 17, 'b'); gfx_setfont(1);
+mouse_down = mouse_cap & 1; mouse_click = mouse_down && !(last_mouse_cap & 1); mouse_rclick = (mouse_cap & 2) && !(last_mouse_cap & 2);
+
+!mouse_down ? ( (active_control == 21 || active_control == 22) ? ( start_analysis(); last_det_t = det_thresh; last_det_h = det_hold_ms; ); active_control = 0; );
+
+ui_en = 1; max_len_to_draw = (length > 0) ? length : (state == 1 || state == 8 ? pos : 0); ml_s = max_len_to_draw / srate;
+gfx_set(0.12, 0.04, 0.05); gfx_rect(0, 0, 760, 27); gfx_set(0.85, 0.35, 0.40); gfx_rect(0, 26, 760, 1);
+gfx_setfont(3); gfx_set(1, 1, 1); gfx_x = 12; gfx_y = 4; gfx_drawstr("NOWUNDO"); gfx_measurestr("NOWUNDO", tw, th);
+gfx_set(0.85, 0.35, 0.40); gfx_x = 12 + tw + 6; gfx_y = 4; gfx_drawstr("V3.6.9"); gfx_setfont(1);
+
+sname = "STOP"; state == 1 ? sname = "REC"; state == 2 ? sname = "PLAY"; state == 3 ? sname = dub_gran ? "DUB-G" : "DUB"; state == 4 ? sname = dub_gran ? "REPL-G" : "REPLACE"; state == 5 ? sname = dub_gran ? "A-REP-G" : "AUTO-REP"; state == 6 ? sname = "MULTIPLY"; state == 7 ? sname = "WAIT"; state == 8 ? sname = "WAIT SYNC";
+len_show = state == 1 || state == 8 ? pos / srate : length / srate; cycles = base_loop_length > 0 ? floor(length / base_loop_length + 0.5) : 1;
+sprintf(#hdr_info, "%.2f / %.0f s   |   x%d   |   %d slices   |   %d undo layers", len_show, buf_len / srate, cycles, trans_count, history_count);
+gfx_measurestr(#hdr_info, tw, th); gfx_measurestr(sname, sw, sh); hx = 748 - tw - 22 - sw;
+
+// --- Menu déroulant Looper ID ---
+gfx_setfont(2);
+id_menu_w = 128;
+id_menu_h = 18;
+id_menu_x = hx - id_menu_w - 24;
+id_menu_y = 4;
+id_hov = mouse_x >= id_menu_x && mouse_x < id_menu_x + id_menu_w && mouse_y >= id_menu_y && mouse_y < id_menu_y + id_menu_h;
+
+id_hov ? gfx_set(0.22, 0.10, 0.12) : gfx_set(0.16, 0.06, 0.08);
+gfx_rect(id_menu_x, id_menu_y, id_menu_w, id_menu_h);
+gfx_set(0.85, 0.35, 0.40, id_hov ? 1 : 0.7);
+gfx_rect(id_menu_x, id_menu_y + id_menu_h - 2, id_menu_w, 2);
+gfx_rect(id_menu_x, id_menu_y, id_menu_w, id_menu_h, 0);
+
+manual_id > 0 ? sprintf(#looper_id_str, "Looper %d", manual_id) : strcpy(#looper_id_str, "Looper (auto)");
+gfx_set(1, 1, 1, 0.95);
+gfx_measurestr(#looper_id_str, id_tw, id_th);
+gfx_x = id_menu_x + 8;
+gfx_y = id_menu_y + (id_menu_h - id_th) * 0.5;
+gfx_drawstr(#looper_id_str);
+
+gfx_set(0.85, 0.35, 0.40, 0.9);
+arrow_x = id_menu_x + id_menu_w - 14;
+arrow_y = id_menu_y + id_menu_h * 0.5;
+gfx_triangle(arrow_x - 4, arrow_y - 3, arrow_x + 4, arrow_y - 3, arrow_x, arrow_y + 3);
+
+mouse_click && id_hov && active_control == 0 ? (
+  gfx_x = id_menu_x;
+  gfx_y = id_menu_y + id_menu_h;
+  qsel_id = gfx_showmenu("Auto (1)|Looper 1|Looper 2|Looper 3|Looper 4|Looper 5|Looper 6|Looper 7|Looper 8");
+  qsel_id > 0 ? (
+    manual_id = qsel_id == 1 ? 0 : qsel_id - 1;
+    slider45 = manual_id;
+    instance_id = manual_id > 0 ? manual_id : 1;
+    instance_alias = instance_id;
+    inst_idx = instance_id - 1;
+  );
+);
+gfx_setfont(1);
+
+ui_text(748, 7, #hdr_info, 0.75, 0.75, 0.78, 1, 1); ui_text(hx, 7, sname, 1, 1, 1, 1, 0);
+
+state == 1 ? gfx_set(0.9, 0.2, 0.2) : (state == 2 ? gfx_set(0.2, 0.8, 0.35) : (state == 3 ? gfx_set(0.95, 0.7, 0.2) : (state == 4 ? gfx_set(0.25, 0.55, 0.95) : (state == 5 ? gfx_set(0.95, 0.5, 0.25) : (state == 6 ? gfx_set(0.7, 0.3, 0.85) : (state == 7 ? gfx_set(0.9, 0.4, 0.2) : (state == 8 ? ((time_precise() * 8 % 2 >= 1) ? gfx_set(0.9, 0.5, 0.1) : gfx_set(0.4, 0.2, 0.05)) : gfx_set(0.5, 0.5, 0.55))))))));
+gfx_circle(hx - 10, 13, 4, 1);
+
+ui_ar = 0.95; ui_ag = 0.35; ui_ab = 0.3; ui_panel(10, 32, 335, 62, "TRANSPORT");
+bx = 18; by = 52; bw = 59;
+ui_btn(bx, by, bw, 34, "Re-Rec", 0, 0.85, 0.2, 0.2) ? ( do_clear(0); state_target = 1; ); bx += bw + 4;
+rec_lbl = length > 0 ? "Dub" : ((state == 1 || state == 8) ? "Stop Rec" : (state == 7 ? "Wait..." : "Rec"));
+rec_on = (state == 1 || state == 3 || state == 8); rec_cr = length > 0 ? 0.85 : 0.82; rec_cg = length > 0 ? 0.55 : 0.2; rec_cb = length > 0 ? 0.1 : 0.2;
+ui_btn(bx, by, bw, 34, rec_lbl, rec_on, rec_cr, rec_cg, rec_cb) ? ( length > 0 && state != 1 && state != 8 ? state_target = (state == 3 ? 2 : 3) : rec_cmd = 1; ); bx += bw + 4;
+play_lbl = (state == 0 || state == 7) ? "Play" : "Stop"; play_on = state == 2;
+ui_btn(bx, by, bw, 34, play_lbl, play_on, 0.15, 0.6, 0.3) ? ( state_target = (state == 0 || state == 7) ? 2 : 0; ); bx += bw + 4;
+rep_lbl = auto_on ? "A-Rep" : "Replace"; rep_on = (state == 4 || state == 5);
+ui_btn(bx, by, bw, 34, rep_lbl, rep_on, 0.2, 0.45, 0.85) ? ( state_target = rep_on ? 2 : (auto_on ? 5 : 4); ); bx += bw + 4;
+ui_btn(bx, by, bw, 34, "Mult", state == 6, 0.7, 0.3, 0.85) ? state_target = (state == 6 ? 2 : 6);
+
+ms_off = (active_part - 1) * 10;
+ms_locked = gmem[ms_off]; ms_master_id = gmem[ms_off + 1];
+ms_is_master = (ms_locked == 1 && (ms_master_id == instance_id || ms_master_id == instance_alias));
+ms_is_slave = (ms_locked > 0 && !ms_is_master);
+
+led_cr = ms_is_master ? 0.95 : (ms_is_slave ? 0.9 : 0.2);
+led_cg = ms_is_master ? 0.2  : (ms_is_slave ? 0.8 : 0.8);
+led_cb = ms_is_master ? 0.2  : (ms_is_slave ? 0.2 : 0.3);
+ms_locked == 2 ? (led_cr = 0.2; led_cg = 0.7; led_cb = 0.9;);
+
+ms_btn_x = 190; ms_btn_y = 36; ms_btn_w = 110; ms_btn_h = 16;
+ms_hov = ui_en && mouse_x >= ms_btn_x && mouse_x <= ms_btn_x + ms_btn_w && mouse_y >= ms_btn_y && mouse_y <= ms_btn_y + ms_btn_h;
+mouse_click && ms_hov ? (
+    ms_is_master ? gmem[ms_off] = 0 : ( length > 0 ? ( gmem[ms_off] = 1; gmem[ms_off + 1] = instance_id; gmem[ms_off + 2] = base_loop_length; gmem[ms_off + 3] = master_pos; ) );
+);
+
+gfx_set(led_cr, led_cg, led_cb, 1); gfx_circle(ms_btn_x + 6, ms_btn_y + 8, 4, 1);
+gfx_set(1, 1, 1, 0.4); gfx_circle(ms_btn_x + 6, ms_btn_y + 8, 4, 0);
+gfx_set(0.7, 0.7, 0.7, 1); ms_hov ? gfx_set(1, 1, 1, 1); gfx_x = ms_btn_x + 16; gfx_y = ms_btn_y + 3;
+lbl = ms_is_master ? "MS: MASTER" : (ms_locked == 2 ? "MS: HOST" : (ms_is_slave ? "MS: SLAVE" : "MS: FREE")); gfx_drawstr(lbl);
+
+sprintf(#alias_str, "Looper %d", instance_alias);
+ui_text(ms_btn_x + ms_btn_w + 4, ms_btn_y + 3, #alias_str, 0.6, 0.8, 1.0, 0.9, 0);
+
+ui_ar = 0.8; ui_ag = 0.5; ui_ab = 0.9; ui_panel(353, 32, 182, 62, "SONG PARTS");
+sp_x = 361; sp_y = 52; sp_w = 54; sp_h = 34;
+cp_active = (active_part == 1 && !pending_part_switch); cp_pend = (pending_part_switch && target_part == 1); cp_blink = cp_pend && (time_precise() * 4 % 2 >= 1); cp_color = cp_blink ? 0.9 : (cp_active ? 0.75 : 0.2);
+ui_btn(sp_x, sp_y, sp_w, sp_h, "Main", cp_active || cp_pend, cp_color, cp_color * 0.5, 0.8) ? ( active_part == 1 ? ( pending_part_switch = 0; state == 0 ? ( state_target = length > 0 ? 2 : (auto_on ? 7 : 1); ) : ( state_target = (state == 1 || state == 8 ? 3 : (state == 3 ? 2 : 3)); ); ) : ( length > 0 ? ( target_part = 1; pending_part_switch = 1; ) : switch_part(1); ); );
+sp_x += sp_w + 4; rf_active = (active_part == 2 && !pending_part_switch); rf_pend = (pending_part_switch && target_part == 2); rf_blink = rf_pend && (time_precise() * 4 % 2 >= 1); rf_color = rf_blink ? 0.9 : (rf_active ? 0.75 : 0.2);
+ui_btn(sp_x, sp_y, sp_w, sp_h, "Chorus", rf_active || rf_pend, rf_color, rf_color * 0.5, 0.8) ? ( active_part == 2 ? ( pending_part_switch = 0; state == 0 ? ( state_target = length > 0 ? 2 : (auto_on ? 7 : 1); ) : ( state_target = (state == 1 || state == 8 ? 3 : (state == 3 ? 2 : 3)); ); ) : ( length > 0 ? ( target_part = 2; pending_part_switch = 1; ) : switch_part(2); ); );
+sp_x += sp_w + 4; br_active = (active_part == 3 && !pending_part_switch); br_pend = (pending_part_switch && target_part == 3); br_blink = br_pend && (time_precise() * 4 % 2 >= 1); br_color = br_blink ? 0.9 : (br_active ? 0.75 : 0.2);
+ui_btn(sp_x, sp_y, sp_w, sp_h, "Bridge", br_active || br_pend, br_color, br_color * 0.5, 0.8) ? ( active_part == 3 ? ( pending_part_switch = 0; state == 0 ? ( state_target = length > 0 ? 2 : (auto_on ? 7 : 1); ) : ( state_target = (state == 1 || state == 8 ? 3 : (state == 3 ? 2 : 3)); ); ) : ( length > 0 ? ( target_part = 3; pending_part_switch = 1; ) : switch_part(3); ); );
+
+ui_ar = 0.45; ui_ag = 0.6; ui_ab = 0.9; ui_panel(543, 32, 207, 62, "EDIT");
+bx = 549; by = 52; ui_en = hist_undo > 0; ui_btn(bx, by, 34, 34, "Undo", 0, 0.45, 0.6, 0.9) ? undo_state(); bx += 34 + 4; ui_en = hist_redo > 0; ui_btn(bx, by, 34, 34, "Redo", 0, 0.45, 0.6, 0.9) ? redo_state(); bx += 34 + 4; ui_en = length > 0; ui_btn(bx, by, 34, 34, "Rst", 0, 0.95, 0.55, 0.2) ? trigger_restart(); bx += 34 + 4;
+auto_btn_x = bx; auto_btn_y = by; auto_btn_w = 40; auto_btn_h = 34; led_x = auto_btn_x + auto_btn_w * 0.5; led_y = auto_btn_y - 7; led_blink = input_signal_active && (time_precise() * 8 % 2 >= 1); input_signal_active ? ( led_blink ? gfx_set(0.95, 0.8, 0.1, 1) : gfx_set(0.6, 0.4, 0.05, 0.8); ) : ( gfx_set(0.35, 0.10, 0.10, 1); ); gfx_circle(led_x, led_y, 4, 1); input_signal_active ? gfx_set(1, 0.9, 0.3, 0.9) : gfx_set(0.2, 0.05, 0.05, 0.5); gfx_circle(led_x, led_y, 4, 0); ui_en = 1; ui_btn(auto_btn_x, auto_btn_y, auto_btn_w, auto_btn_h, "Auto", auto_on, 0.95, 0.5, 0.25) ? auto_on = !auto_on; bx += auto_btn_w + 4; ui_en = 1; 
+clr_btn_x = bx; clr_btn_y = by; clr_btn_w = 40; clr_btn_h = 34; clr_hov = mouse_x >= clr_btn_x && mouse_x < clr_btn_x + clr_btn_w && mouse_y >= clr_btn_y && mouse_y < clr_btn_y + clr_btn_h; clr_hov ? ui_hov = 1;
+mouse_click && clr_hov ? ( clr_press_time = time_precise(); clr_long_pressed = 0; );
+mouse_down && clr_hov && !clr_long_pressed && clr_press_time > 0 ? ( (time_precise() - clr_press_time) >= 2.0 ? ( do_clear(1); clr_long_pressed = 1; ); );
+!mouse_down && (last_mouse_cap & 1) && clr_hov && !clr_long_pressed && clr_press_time > 0 && (time_precise() - clr_press_time) < 2.0 ? ( do_clear(0); clr_press_time = 0; );
+!mouse_down ? clr_press_time = 0; clr_ua = 1; clr_hov ? gfx_set(0.35, 0.15, 0.18, clr_ua) : gfx_set(0.22, 0.07, 0.09, clr_ua); gfx_rect(clr_btn_x, clr_btn_y, clr_btn_w, clr_btn_h); clr_press_time > 0 && mouse_down && clr_hov && !clr_long_pressed ? ( hold_ratio = min(1.0, (time_precise() - clr_press_time) / 2.0); gfx_set(0.85, 0.2, 0.2, 0.4); gfx_rect(clr_btn_x, clr_btn_y, clr_btn_w * hold_ratio, clr_btn_h); ); gfx_set(1, 1, 1, 0.06); gfx_line(clr_btn_x, clr_btn_y, clr_btn_x + clr_btn_w - 1, clr_btn_y); gfx_set(0.85, 0.2, 0.2, 0.8 * clr_ua); gfx_rect(clr_btn_x, clr_btn_y + clr_btn_h - 2, clr_btn_w, 2); gfx_set(0, 0, 0, 0.4); gfx_rect(clr_btn_x, clr_btn_y, clr_btn_w, clr_btn_h, 0); gfx_setfont(1); gfx_set(1, 1, 1, 0.82 * clr_ua); gfx_measurestr("Clr", tw, th); gfx_x = clr_btn_x + (clr_btn_w - tw) * 0.5; gfx_y = clr_btn_y + (clr_btn_h - th) * 0.5; gfx_drawstr("Clr");
+ui_en = 1; v = ui_hbar(61, auto_btn_x, clr_btn_y + 37, auto_btn_w, 4, trans_sens, 0.01, 0.8, 0.15, "Auto Thr %.2f"); ui_chg ? ( trans_sens = v; slider10 = trans_sens; );
+v = ui_hbar(62, clr_btn_x, clr_btn_y + 37, clr_btn_w, 4, trans_hold_ms, 30, 1000, 120, "Auto Hold %.0f ms"); ui_chg ? ( trans_hold_ms = floor(v / 10 + 0.5) * 10; slider11 = trans_hold_ms; );
+
+ui_ar = 0.55; ui_ag = 0.62; ui_ab = 0.8; ui_panel(10, 100, 740, 100, "WAVEFORM");
+ui_text(742, 105, "drag green/orange markers = loop start / end   |   click = jump / set position", 0.65, 0.55, 0.58, 1, 1);
+wav_x = 18; wav_y = 118; wav_w = 724; wav_h = 78; gfx_set(0.10, 0.03, 0.04); gfx_rect(wav_x, wav_y, wav_w, wav_h); mid_y = wav_y + wav_h * 0.5; gfx_set(1, 1, 1, 0.07); gfx_rect(wav_x, mid_y, wav_w, 1);
+max_len_to_draw > 0 ? (
+  cur_end = min(loop_start + loop_width, max_len_to_draw); start_x = wav_x + (loop_start / max_len_to_draw) * wav_w; end_x = wav_x + (cur_end / max_len_to_draw) * wav_w; cursor_x = wav_x + (pos / max_len_to_draw) * wav_w; cloud_cursor_x = wav_x + (cloud_center_draw / max_len_to_draw) * wav_w;
+  mouse_click && active_control == 0 ? ( mouse_x >= wav_x && mouse_x <= wav_x + wav_w && mouse_y >= wav_y && mouse_y <= wav_y + wav_h ? ( abs(mouse_x - start_x) < 8 ? active_control = 3 : abs(mouse_x - end_x) < 8 ? active_control = 4 : active_control = 5; ); );
+  active_control == 3 ? ( new_start = ((mouse_x - wav_x) / wav_w) * max_len_to_draw; old_end = loop_start + loop_width; new_start = apply_quant_start(min(new_start, old_end - min_width())); loop_width = max(min_width(), old_end - new_start); loop_start = new_start; sync_hard_resync = 1;
+  ) : active_control == 4 ? ( new_end = ((mouse_x - wav_x) / wav_w) * max_len_to_draw; new_w = new_end - loop_start; loop_width = apply_quant_width(new_w, loop_start); sync_hard_resync = 1;
+  ) : active_control == 5 ? ( t_pos = max(loop_start, min(cur_end, ((mouse_x - wav_x) / wav_w) * max_len_to_draw)); trigger_pos_jump(t_pos); slider9 = (pos / max_len_to_draw) * 100.0; last_slider9 = slider9; );
+  state == 1 ? gfx_set(0.9, 0.2, 0.2, 0.85) : state == 8 ? gfx_set(0.9, 0.5, 0.1, 0.85) : state == 3 ? gfx_set(0.9, 0.7, 0.2, 0.85) : state == 4 ? gfx_set(0.25, 0.55, 0.95, 0.85) : state == 5 ? gfx_set(0.95, 0.55, 0.25, 0.85) : state == 6 ? gfx_set(0.7, 0.3, 0.85, 0.85) : gfx_set(0.2, 0.85, 0.3, 0.85);
+  wi = 0; w_step = max_len_to_draw / wav_w; loop(wav_w, w_val = 0; wk = 0; loop(4, w_idx = floor(wi * w_step + wk * w_step * 0.25); w_tmp = max(abs(left_buf[w_idx]), abs(right_buf[w_idx])); w_tmp > w_val ? w_val = w_tmp; wk += 1; ); w_h = min(w_val, 1) * (wav_h * 0.46); gfx_rect(wav_x + wi, mid_y - w_h, 1, w_h * 2); wi += 1; );
+  length > 0 ? ( gfx_set(0, 0, 0, 0.5); start_x > wav_x ? gfx_rect(wav_x, wav_y, start_x - wav_x, wav_h); end_x < wav_x + wav_w ? gfx_rect(end_x, wav_y, wav_x + wav_w - end_x, wav_h); );
+  cloud_on ? ( v_i = 0; loop(max_grains, g_base = grain_mem + (v_i * grain_data_size); g_base[2] == 1 ? ( g_pos_val = g_base[0]; g_dur_val = g_base[3]; g_pan_val = g_base[4]; cx_p = wav_x + (g_pos_val / max_len_to_draw) * wav_w; cy_p = wav_y + (wav_h * 0.5) + (g_pan_val * (wav_h * 0.35)); c_rad = max(3, min(20, (g_dur_val / srate) * 16)); gfx_set(0.2, 0.85, 0.95, 0.45); gfx_circle(cx_p, cy_p, c_rad, 1); gfx_set(1, 1, 1, 0.85); gfx_circle(cx_p, cy_p, c_rad, 0); ); v_i += 1; ); );
+  base_loop_length > 0 && length > base_loop_length * 1.5 ? ( cy_k = base_loop_length; gfx_set(0.7, 0.3, 0.85, 0.6); while(cy_k < max_len_to_draw - 1) ( cy_x = wav_x + (cy_k / max_len_to_draw) * wav_w; gfx_rect(cy_x, wav_y, 1, 12); cy_k += base_loop_length; ); );
+  tk_step = ml_s > 20 ? 5 : (ml_s > 8 ? 2 : 1); tk = tk_step; gfx_set(1, 1, 1, 0.3); while(tk < ml_s) ( tk_x = wav_x + (tk * srate / max_len_to_draw) * wav_w; gfx_rect(tk_x, wav_y + wav_h - 5, 1, 5); tk += tk_step; );
+  ti = 0; loop(trans_count, t_p = trans_mem[ti]; (t_p >= loop_start && t_p <= cur_end) ? ( t_x = wav_x + (t_p / max_len_to_draw) * wav_w; gfx_set(1.0, 0.85, 0.1, 0.7); gfx_rect(t_x, wav_y, 1, wav_h); ); ti += 1; );
+  vh_i = 0; loop(smp_nv, vh_b = smp_voice + vh_i * smp_vs; vh_b[0] > 0 ? ( vh_b[11] == 0 ? ( gfx_set(0.3, 0.95, 0.5, 0.22); vh_x0 = wav_x + (vh_b[2] / max_len_to_draw) * wav_w; vh_x1 = wav_x + (vh_b[3] / max_len_to_draw) * wav_w; gfx_rect(vh_x0, wav_y, max(2, vh_x1 - vh_x0), wav_h); ) : ( gfx_set(0.3, 0.95, 0.5, 0.9); vh_x0 = wav_x + (vh_b[1] / max_len_to_draw) * wav_w; gfx_rect(vh_x0, wav_y, 1, wav_h); ); ); vh_i += 1; );
+  fade_samps_draw = min((fade_ms * 0.001) * srate, loop_width * 0.5); fade_in_x = wav_x + ((loop_start + fade_samps_draw) / max_len_to_draw) * wav_w; fade_out_x = wav_x + ((cur_end - fade_samps_draw) / max_len_to_draw) * wav_w;
+  gfx_set(0.2, 0.9, 0.3, 0.9); gfx_rect(start_x, wav_y, 1, wav_h); gfx_triangle(start_x, wav_y, start_x + 8, wav_y, start_x, wav_y + 10); gfx_line(start_x, wav_y + wav_h, fade_in_x, wav_y); gfx_rect(fade_in_x, wav_y, 1, wav_h);
+  gfx_set(0.9, 0.4, 0.2, 0.9); gfx_rect(end_x, wav_y, 1, wav_h); gfx_triangle(end_x, wav_y, end_x - 8, wav_y, end_x, wav_y + 10); gfx_line(end_x, wav_y + wav_h, fade_out_x, wav_y); gfx_rect(fade_out_x, wav_y, 1, wav_h);
+  cloud_on ? ( gfx_set(0.75, 0.2, 0.95, 0.9); gfx_rect(cloud_cursor_x, wav_y, 1, wav_h); gfx_rect(cloud_cursor_x - 2, wav_y + wav_h - 8, 5, 8); );
+  gfx_set(1, 0.3, 0.3, 0.95); gfx_rect(cursor_x, wav_y, 1, wav_h); gfx_rect(cursor_x - 3, wav_y, 6, 8);
+) : ( ui_text(wav_x + wav_w * 0.5 - 70, mid_y - 6, "Press Rec to start recording", 0.6, 0.55, 0.58, 1, 0) );
+
+ui_ar = 0.3; ui_ag = 0.75; ui_ab = 0.95; ui_panel(10, 206, 372, 144, "PLAYBACK");
+bx = 22; by = 226;
+ui_btn(bx, by, 46, 24, "Normal", play_mode == 0, 0.3, 0.6, 0.8) ? ( play_mode = 0; slider6 = play_mode; ); bx += 48;
+ui_btn(bx, by, 34, 24, "Rev", rev_on, 0.8, 0.3, 0.25) ? ( rev_on = !rev_on; slider16 = rev_on; ) : 0; bx += 36;
+ui_btn(bx, by, 60, 24, "Ping-Pong", pingpong_on, 0.8, 0.3, 0.25) ? ( pingpong_on = !pingpong_on; slider17 = pingpong_on; ) : 0; bx += 62;
+ui_btn(bx, by, 56, 24, "One-Shot", play_mode == 2, 0.55, 0.35, 0.75) ? ( play_mode = 2; slider6 = play_mode; ); bx += 58;
+ui_btn(bx, by, 48, 24, "Slicer", play_mode == 1, 0.7, 0.5, 0.1) ? ( play_mode = (play_mode == 1 ? 0 : 1); slider6 = play_mode; play_mode == 1 ? ( cloud_on = 0; slider23 = 0; ); ); bx += 50;
+ui_btn(bx, by, 46, 24, "Cloud", cloud_on, 0.2, 0.8, 0.9) ? ( cloud_on = !cloud_on; slider23 = cloud_on; cloud_on && play_mode == 1 ? ( play_mode = 0; slider6 = 0; ); ) : 0; bx += 48;
+ui_btn(bx, by, 56, 24, "Link P/S", link_on, 0.8, 0.3, 0.25) ? ( link_on = !link_on; slider7 = link_on; ) : 0;
+ky = 288;
+ui_btn(20, ky - 10, 22, 18, "/2", 0, 0.3, 0.6, 0.8) ? speed = max(0.01, speed * 0.5); ui_btn(70, ky - 10, 22, 18, "x2", 0, 0.3, 0.6, 0.8) ? speed = min(100.0, speed * 2.0);
+v = ui_log_knob(12, 56, ky, 16, speed, 0.01, 100.0, "Speed", "%.2fx", 1.0); ui_chg ? ( speed = v; slider1 = speed; );
+ui_btn(106, ky - 10, 22, 18, "/2", 0, 0.3, 0.6, 0.8) ? pitch = max(-48, pitch - 12); ui_btn(156, ky - 10, 22, 18, "x2", 0, 0.3, 0.6, 0.8) ? pitch = min(48, pitch + 12);
+v = ui_knob(13, 142, ky, 16, pitch, -48, 48, "Pitch", "%.1f st", 0.0); ui_chg ? ( pitch = v; slider2 = pitch; );
+v = ui_knob(16, 228, ky, 16, dens_occ, 0, 100, "Density", "%.0f%%", 100.0); ui_chg ? ( dens_occ = v; slider28 = dens_occ; );
+ui_en_old = ui_en; ui_en = (play_mode == 1 && length > 0 && trans_count > 0) ? 0 : ui_en_old; floor(dens_len_f + 0.5) != dens_len ? dens_len_f = dens_len; ui_dv = 2 ^ floor(dens_len_f + 0.5); ui_dv_on = 1; v = ui_knob(20, 314, ky, 16, dens_len_f, 0, 6, "Rec Len", "1/%.0f", 2.0); ui_chg ? ( dens_len_f = v; dens_len = floor(v + 0.5); slider29 = dens_len; ); ui_en = ui_en_old;
+loop_beats < 1 ? sprintf(#lb_lbl, "Auto") : sprintf(#lb_lbl, "%d bt", loop_beats); ui_btn(338, ky - 10, 46, 18, #lb_lbl, loop_beats >= 1, 0.25, 0.85, 0.4) ? ( loop_beats = loop_beats < 1 ? 2 : (loop_beats < 4 ? 4 : (loop_beats < 8 ? 8 : (loop_beats < 16 ? 16 : (loop_beats < 32 ? 32 : 0)))); slider30 = loop_beats; );
+length > 0 ? ( sprintf(#lb_bpm, "%.1f bpm", 60 * srate / loop_beat_len()); ui_text(338, ky + 12, #lb_bpm, 0.7, 0.65, 0.68, 1, 0); );
+ky3 = 318;
+v = ui_knob(44, 100, ky3, 14, grain_ms, 20, 200, "Grain", "%.0f ms", 80.0); ui_chg ? ( grain_ms = v; slider4 = grain_ms; );
+v = ui_knob(45, 190, ky3, 14, grain_fade, 5, 50, "Grn Fade", "%.0f%%", 25.0); ui_chg ? ( grain_fade = v; slider12 = grain_fade; );
+
+ui_ar = 0.25; ui_ag = 0.85; ui_ab = 0.4; ui_panel(390, 206, 360, 124, "LOOP REGION");
+sprintf(#lp_info, "%.2fs - %.2fs", loop_start / srate, (loop_start + loop_width) / srate); ui_text(590, 229, #lp_info, 0.7, 0.65, 0.68, 1, 0); ui_en = 1;
+ui_btn(670, 224, 70, 22, "Full Loop", 0, 0.25, 0.85, 0.4) ? ( loop_start = 0; loop_width = length > 0 ? length : buf_len; sync_hard_resync = 1; );
+ui_btn(490, 224, 52, 22, loop_edit_mode ? "Out" : "Width", 1, 0.25, 0.85, 0.4) ? ( loop_edit_mode = 1 - loop_edit_mode; );
+
+// ----- IN knob (commun aux deux modes) -----
+active_control != 10 ? in_raw = loop_start / srate;
+ui_dv_on = 1; ui_dv = loop_start / srate;
+v = ui_knob(10, 420, ky, 16, in_raw, 0, max(ml_s, 0.2), "In", "%.2fs", 0);
+ui_chg ? (
+  in_raw = max(0, min(v, max(0, (loop_max_len() - min_width()) / srate)));
+  new_start = apply_quant_start(in_raw * srate);
+  loop_edit_mode == 0 ? (
+    // Width mode: move window, keep width (shrink only at right edge)
+    keep_w = loop_width;
+    loop_start = new_start;
+    loop_width = max(min_width(), min(keep_w, loop_max_len() - loop_start));
+    w_raw = loop_width / srate;
+  ) : (
+    // Out mode: move In, keep end fixed
+    old_end = loop_start + loop_width;
+    loop_start = new_start;
+    loop_width = max(min_width(), old_end - loop_start);
+    loop_width = min(loop_width, loop_max_len() - loop_start);
+    w_raw = (loop_start + loop_width) / srate;
+  );
+  sync_hard_resync = 1;
+);
+
+// ----- WIDTH knob (mode 0) -----
+loop_edit_mode == 0 ? (
+  active_control != 11 ? w_raw = loop_width / srate;
+  ui_dv_on = 1; ui_dv = loop_width / srate;
+  v = ui_knob(11, 478, ky, 16, w_raw, 0.05, max(ml_s, 0.2), "Width", "%.2fs", ml_s > 0 ? ml_s : 1.0);
+  ui_chg ? (
+    w_raw = max(min_width() / srate, min(v, max(min_width(), loop_max_len() - loop_start) / srate));
+    loop_width = apply_quant_width(w_raw * srate, loop_start);
+    w_raw = loop_width / srate;
+    sync_hard_resync = 1;
+  );
+) : (
+  // ----- OUT knob (mode 1) : plage dynamique [In+min_width .. loop_max_len] -----
+  out_min_s = (loop_start + min_width()) / srate;
+  out_max_s = max(out_min_s + 0.001, loop_max_len() / srate);
+  active_control != 11 ? w_raw = (loop_start + loop_width) / srate;
+  w_raw = max(out_min_s, min(out_max_s, w_raw));
+  ui_dv_on = 1; ui_dv = (loop_start + loop_width) / srate;
+  v = ui_knob(11, 478, ky, 16, w_raw, out_min_s, out_max_s, "Out", "%.2fs", ml_s > 0 ? ml_s : 1.0);
+  ui_chg ? (
+    out_raw = max(out_min_s, min(v, out_max_s));
+    g = quant_grid();
+    new_end = out_raw * srate;
+    g > 0 ? new_end = floor(new_end / g + 0.5) * g;
+    new_end = max(loop_start + min_width(), min(new_end, loop_max_len()));
+    loop_width = new_end - loop_start;
+    w_raw = new_end / srate;
+    sync_hard_resync = 1;
+  );
+);
+
+sprintf(#qlabel, "Quant %s", quant_name(loop_quant)); ui_btn(402, 224, 78, 22, #qlabel, loop_quant > 0, 0.25, 0.85, 0.4) ? ( gfx_x = 402; gfx_y = 246; qsel = gfx_showmenu("Free|1/2|1/3|1/4|1/6|1/8|1/12|1/16|1/32|1/64"); qsel > 0 ? ( loop_quant = qsel - 1; slider24 = loop_quant; loop_start = apply_quant_start(loop_start); loop_width = apply_quant_width(loop_width, loop_start); sync_hard_resync = 1; ); );
+v = ui_knob(17, 594, ky, 16, max_len_to_draw > 0 ? (pos / max_len_to_draw) * 100 : 0, 0, 100, "Pos", "%.0f%%", 0); ui_chg && max_len_to_draw > 0 ? ( trigger_pos_jump(v * 0.01 * max_len_to_draw); slider9 = (pos / max_len_to_draw) * 100.0; last_slider9 = slider9; );
+clock_disp = length > 0 ? (master_pos / length) * 100.0 : 0; v = ui_knob(29, 652, ky, 16, clock_disp, 0, 100, "Clock", "%.0f%%", 0); ui_chg && length > 0 ? ( master_pos = max(0, min(length - 0.0001, v * 0.01 * length)); clk_cyc = 0; active_part == 1 ? master_pos1 = master_pos : (active_part == 2 ? master_pos2 = master_pos : master_pos3 = master_pos); slider22 = (master_pos / length) * 100.0; sync_hard_resync = 1; );
+ui_en = 1; v = ui_knob(15, 710, ky, 16, fade_ms, 0, 500, "Fade", "%.0f ms", 10.0); ui_chg ? ( fade_ms = v; slider5 = fade_ms; );
+
+ui_ar = 0.95; ui_ag = 0.75; ui_ab = 0.2; ui_panel(10, 356, 405, 124, "SLICER / TRANSIENTS");
+play_mode == 1 ? ui_text(407, 361, "ACTIVE", 0.4, 0.9, 0.5, 1, 1) : 0;
+state == 0 ? (
+  smp_armed ? gfx_set(0.2, 0.9, 0.4, 1) : gfx_set(0.35, 0.15, 0.18, 1); gfx_circle(158, 366, 3, 1);
+  smp_mode == 1 ? (
+    fmt_note(#nlo, sampler_root); fmt_note(#nhi, min(127, sampler_root + trans_count - 1));
+    sprintf(#smp_rng, "SMP SLICE  %s..%s  (%d slices)", #nlo, #nhi, trans_count); ui_text(166, 361, #smp_rng, 0.4, 0.95, 0.5, 1, 0);
+  ) : smp_mode == 2 ? (
+    fmt_note(#nlo, sampler_root); sprintf(#smp_rng, "SMP KEYS  orig @ %s", #nlo); ui_text(166, 361, #smp_rng, 0.4, 0.95, 0.5, 1, 0);
+  ) : (
+    ui_text(166, 361, play_mode == 1 ? "SAMPLER  no slices" : "SAMPLER", 0.65, 0.55, 0.58, 1, 0);
+  );
+);
+by = 376; ui_text(18, by + 6, "Mode", 0.75, 0.68, 0.72, 1, 0); ui_btn(48, by, 72, 24, slicer_mode_name(slicer_mode), 0, 0.95, 0.75, 0.2) ? ( gfx_x = 48; gfx_y = by + 24; qsel = gfx_showmenu("Random|Steps|All"); qsel > 0 ? ( slicer_mode = (qsel == 3 ? 5 : qsel - 1); slider13 = slicer_mode; slicer_regen(); ); );
+ui_text(124, by + 6, "Rate", 0.75, 0.68, 0.72, 1, 0); ui_btn(152, by, 48, 24, slicer_rate_name(slicer_sub), 0, 0.95, 0.75, 0.2) ? ( gfx_x = 152; gfx_y = by + 24; qsel = gfx_showmenu("1/4 (Noire)|1/8 (Croche)|1/12 (Triolet)|1/16 (Double)|1/24 (Triolet Double)|1/32 (Triple)"); qsel > 0 ? ( slicer_sub = qsel - 1; slider14 = slicer_sub; ); );
+ui_en = 1; scan_lbl = analysing ? "Scan..." : "Scan"; ui_btn(206, by, 46, 24, scan_lbl, analysing != 0, 0.7, 0.5, 0.1) ? start_analysis(); ui_btn(256, by, 46, 24, "Regen", 0, 0.95, 0.75, 0.2) ? slicer_regen(); ui_btn(306, by, 42, 24, slicer_src ? "Grid" : "Trans", slicer_src == 1, 0.95, 0.75, 0.2) ? ( slicer_src = 1 - slicer_src; slider31 = slicer_src; );
+ui_en = (slicer_src == 1); ui_btn(352, by, 56, 24, slicer_rate_name(grid_sub), 0, 0.95, 0.75, 0.2) ? ( gfx_x = 352; gfx_y = by + 24; qsel = gfx_showmenu("1/4 (Noire)|1/8 (Croche)|1/12 (Triolet)|1/16 (Double)|1/24 (Triolet Double)|1/32 (Triple)"); qsel > 0 ? ( grid_sub = qsel - 1; slider32 = grid_sub; start_analysis(); ); ); ui_en = 1;
+smp_view = (state == 0); kr = smp_view ? 16 : 13; kdx = smp_view ? 60 : 44; kx0 = smp_view ? 46 : 34; kf_ms = smp_view ? "%.0f ms" : "%.0f";
+v = ui_knob(21, kx0, 438, kr, det_thresh, 0.01, 0.8, smp_view ? "Detect" : "Det", "%.2f", 0.15); ui_chg ? ( det_thresh = v; slider50 = det_thresh; active_control == 0 ? ( start_analysis(); last_det_t = det_thresh; ); );
+v = ui_knob(22, kx0 + kdx, 438, kr, det_hold_ms, 30, 1000, smp_view ? "Det Hold" : "DHold", kf_ms, 120); ui_chg ? ( det_hold_ms = v; slider51 = det_hold_ms; active_control == 0 ? ( start_analysis(); last_det_h = det_hold_ms; ); );
+ui_ds_on = 1; slice_decay_ms > 1950 ? strcpy(#ui_ds, "Infini") : sprintf(#ui_ds, kf_ms, slice_decay_ms); 
+v = ui_knob(23, kx0 + kdx * 2, 438, kr, slice_decay_ms, 10, 2000, "Decay", kf_ms, 150); ui_chg ? ( slice_decay_ms = v; slider15 = slice_decay_ms; slice_decay_ms > 1950 ? slice_decay_ms = 2000; ); ui_ds_on = 0;
+v = ui_knob(41, kx0 + kdx * 3, 438, kr, slicer_pitch_spread, 0, 100, smp_view ? "Pitch Spr" : "Pitch", "%.0f%%", 0.0); ui_chg ? ( slicer_pitch_spread = v; slider33 = slicer_pitch_spread; );
+!smp_view ? (
+  floor(steps_f + 0.5) != slicer_steps ? steps_f = slicer_steps;
+  ui_en = (slicer_mode == 1); v = ui_knob(47, kx0 + kdx * 4, 438, kr, steps_f, 1, 32, "Steps", "%.0f", 16); ui_chg ? ( steps_f = v; slicer_steps = max(1, min(32, floor(v + 0.5))); slider47 = slicer_steps; );
+  floor(maxsl_f + 0.5) != max_slices && active_control != 48 ? maxsl_f = max_slices;
+  ui_en = (slicer_src == 0); maxsl_f < 1.5 ? strcpy(#ui_ds, "Off") : sprintf(#ui_ds, "%d", floor(maxsl_f + 0.5)); ui_ds_on = 1;
+  v = ui_knob(48, kx0 + kdx * 5, 438, kr, maxsl_f, 0, 64, "Max", "%.0f", 0); ui_chg ? ( maxsl_f = v; max_slices = floor(v + 0.5); slider48 = max_slices; ); ui_ds_on = 0; ui_en = 1;
+);
+
+state == 0 ? (
+vx = 256; vy = 408; vw = 144; vh = 62; gfx_set(0.12, 0.04, 0.05); gfx_rect(vx, vy, vw, vh); gfx_set(0.30, 0.12, 0.15); gfx_rect(vx, vy, vw, vh, 0);
+ui_en = 1; floor(sampler_root_f + 0.5) != sampler_root ? sampler_root_f = sampler_root;
+fmt_note(#ui_ds, sampler_root); ui_ds_on = 1;
+v = ui_knob(42, 282, 438, 16, sampler_root_f, 0, 127, "Root Note", "%.0f", 48); ui_chg ? ( sampler_root_f = v; sampler_root = floor(v + 0.5); slider42 = sampler_root; );
+rel_chk = sampler_rel_u * sampler_rel_u * 3000; rel_chk < 5 ? rel_chk = 0; floor(rel_chk + 0.5) != sampler_release ? sampler_rel_u = sqrt(sampler_release / 3000);
+sampler_release == 0 ? strcpy(#ui_ds, "Off") : (sampler_release >= 1000 ? sprintf(#ui_ds, "%.2f s", sampler_release / 1000) : sprintf(#ui_ds, "%d ms", sampler_release)); ui_ds_on = 1;
+v = ui_knob(43, 334, 438, 16, sampler_rel_u, 0, 1, "Release", "%.2f", 0); ui_chg ? ( sampler_rel_u = v; sampler_release = v * v * 3000; sampler_release < 5 ? sampler_release = 0; sampler_release = floor(sampler_release + 0.5); slider44 = sampler_release; );
+ui_text(366, 410, "Pitch", 0.75, 0.68, 0.72, 1, 0);
+ui_en = (smp_mode != 1); ui_btn(362, 428, 36, 16, sampler_pitch_mode ? "Grain" : "Tape", sampler_pitch_mode, 0.95, 0.75, 0.2) ? ( sampler_pitch_mode = 1 - sampler_pitch_mode; slider43 = sampler_pitch_mode; ); ui_en = 1;
+) : (
+vx = 284; vy = 424; vw = 124; vh = 46; gfx_set(0.12, 0.04, 0.05); gfx_rect(vx, vy, vw, vh); gfx_set(0.30, 0.12, 0.15); gfx_rect(vx, vy, vw, vh, 0); sl_n = get_slicer_len();
+ui_en = 1; pb_i = 0; loop(4, sprintf(#pb_lbl, "%d", pb_i + 1); ui_btn(vx + pb_i * 32, 404, 28, 16, #pb_lbl, (floor(slicer_preset + 0.5) - 1) == pb_i, 0.95, 0.75, 0.2) ? ( slicer_preset = pb_i + 1; slider49 = slicer_preset; ); pb_i += 1; );
+(slicer_mode == 0 || trans_count == 0 || max_len_to_draw <= 0) ? ( sv_msg = trans_count == 0 ? "No slices" : "Random"; gfx_setfont(1); gfx_set(0.65, 0.55, 0.58); gfx_measurestr(sv_msg, tw, th); gfx_x = vx + (vw - tw) * 0.5; gfx_y = vy + (vh - th) * 0.5; gfx_drawstr(sv_msg);
+) : ( sv_cw = vw / sl_n; sv_i = 0; sv_cur = (slicer_current_step - 1 + sl_n) % sl_n;
+  mouse_down && mouse_x >= vx && mouse_x < vx + vw && mouse_y >= vy && mouse_y < vy + vh && trans_count > 0 && slicer_mode > 0 ? ( draw_step = floor((mouse_x - vx) / sv_cw); draw_step = max(0, min(sl_n - 1, draw_step)); rel_y = 1.0 - max(0, min(1, (mouse_y - vy) / vh)); target_trans_idx = floor(rel_y * trans_count); target_trans_idx = max(0, min(trans_count - 1, target_trans_idx)); seq_mem[draw_step] = trans_mem[target_trans_idx]; );
+  mouse_rclick && mouse_x >= vx && mouse_x < vx + vw && mouse_y >= vy && mouse_y < vy + vh && trans_count > 0 && slicer_mode > 0 ? ( clicked_step = floor((mouse_x - vx) / sv_cw); clicked_step = max(0, min(sl_n - 1, clicked_step)); rand_idx = floor(rand(trans_count)); seq_mem[clicked_step] = trans_mem[rand_idx]; );
+  loop(sl_n, sv_h = 6 + min(1, seq_mem[sv_i] / max_len_to_draw) * (vh - 10); (play_mode == 1 && state >= 2 && sv_i == sv_cur) ? gfx_set(1, 0.9, 0.35, 1) : gfx_set(0.95, 0.75, 0.2, 0.45); gfx_rect(vx + sv_i * sv_cw + 1, vy + vh - 3 - sv_h, max(sv_cw - 2, 1), sv_h); sv_i += 1; );
+);
+);
+
+ui_ar = 0.2; ui_ag = 0.75; ui_ab = 0.85; ui_panel(423, 336, 327, 268, "CLOUD / GRANULAR ENGINE");
+v = ui_knob(31, 452, 390, 16, cloud_density * 100, 0, 100, "Densité", "%.0f%%", 50); ui_chg ? ( cloud_density = v * 0.01; slider25 = cloud_density; );
+v = ui_knob(32, 516, 390, 16, cloud_chaos * 100, 0, 100, "Chaos", "%.0f%%", 0); ui_chg ? ( cloud_chaos = v * 0.01; slider26 = cloud_chaos; );
+v = ui_knob(33, 580, 390, 16, cloud_spread * 100, 0, 100, "Spread", "%.0f%%", 10); ui_chg ? ( cloud_spread = v * 0.01; slider27 = cloud_spread; );
+v = ui_knob(34, 644, 390, 16, cloud_pitch_spread, 0, 100, "Pitch Spr", "%.0f%%", 0.0); ui_chg ? ( cloud_pitch_spread = v; slider34 = cloud_pitch_spread; );
+v = ui_knob(35, 708, 390, 16, cloud_mix * 100, 0, 100, "Dry/Wet", "%.0f%%", 100); ui_chg ? ( cloud_mix = v * 0.01; slider35 = cloud_mix; );
+ui_text(440, 448, "Position", 0.75, 0.68, 0.72, 1, 0); ui_btn(445, 470, 48, 22, cloud_pos_mode == 0 ? "Link" : "Free", 1, 0.2, 0.6, 0.8) ? ( cloud_pos_mode = 1 - cloud_pos_mode; slider36 = cloud_pos_mode; );
+v = ui_knob(37, 530, 482, 16, cloud_pos_pct, 0, 100, "Pos", "%.0f%%", 50.0); ui_chg ? ( cloud_pos_pct = v; slider37 = cloud_pos_pct; );
+v = ui_knob(39, 620, 482, 16, cloud_lfo_rate, 0.1, 4.0, "Rate", "%.1fHz", 1.0); ui_chg ? ( cloud_lfo_rate = v; slider39 = cloud_lfo_rate; );
+v = ui_knob(40, 700, 482, 16, cloud_lfo_depth, 0, 100, "Depth", "%.0f%%", 0.0); ui_chg ? ( cloud_lfo_depth = v; slider40 = cloud_lfo_depth; );
+ui_text(440, 530, "LFO Modulation", 0.75, 0.68, 0.72, 1, 0); ui_btn(445, 552, 64, 22, lfo_shape_name(cloud_lfo_shape), 1, 0.2, 0.6, 0.8) ? ( gfx_x = 445; gfx_y = 576; qsel = gfx_showmenu("Sine|Saw|Inv Saw"); qsel > 0 ? ( cloud_lfo_shape = qsel - 1; slider38 = cloud_lfo_shape; ); );
+
+ui_ar = 0.75; ui_ag = 0.45; ui_ab = 0.95; ui_panel(10, 486, 405, 138, "OUTPUT / TAPE & VU");
+ky_out = 528;
+v = ui_knob(24, 45, ky_out, 15, mix * 100, 0, 100, "Mix", "%.0f%%", 100); ui_chg ? ( mix = v * 0.01; slider3 = mix; );
+v = ui_knob(25, 120, ky_out, 15, degradation * 100, 0, 100, "Degrad", "%.0f%%", 100); ui_chg ? ( degradation = v * 0.01; slider19 = degradation; );
+v = ui_knob(26, 195, ky_out, 15, stereo_width * 100, 0, 100, "Stereo", "%.0f%%", 0); ui_chg ? ( stereo_width = v * 0.01; slider20 = stereo_width; );
+v = ui_knob(27, 270, ky_out, 15, feedback, 0, 2, "Fdbk", "%.2f", 1.0); ui_chg ? ( feedback = v; slider18 = feedback; );
+v = ui_knob(28, 345, ky_out, 15, out_vol * 100, 0, 200, "Out Vol", "%.0f%%", 100); ui_chg ? ( out_vol = v * 0.01; slider21 = out_vol; );
+
+vm_x = 22; vm_w = 365; vm1_y = 578; vm2_y = 600; vm_h = 10;
+gfx_setfont(1); ui_text(vm_x, vm1_y - 11, "IN", 0.65, 0.55, 0.58, 1, 0); ui_text(vm_x, vm2_y - 11, "LOOP", 0.65, 0.55, 0.58, 1, 0);
+gfx_set(0.12, 0.04, 0.05); gfx_rect(vm_x + 35, vm1_y, vm_w - 35, vm_h); gfx_set(0.30, 0.12, 0.15); gfx_rect(vm_x + 35, vm1_y, vm_w - 35, vm_h, 0);
+in_db = 20 * log10(max(0.00001, peak_in_vu)); in_ratio = max(0, min(1, (in_db + 48) / 48)); gfx_set(0.2, 0.85, 0.4, 0.85); in_ratio > 0 ? gfx_rect(vm_x + 36, vm1_y + 1, floor((vm_w - 37) * in_ratio), vm_h - 2);
+gfx_set(0.12, 0.04, 0.05); gfx_rect(vm_x + 35, vm2_y, vm_w - 35, vm_h); gfx_set(0.30, 0.12, 0.15); gfx_rect(vm_x + 35, vm2_y, vm_w - 35, vm_h, 0);
+loop_db = 20 * log10(max(0.00001, peak_loop_vu)); loop_ratio = max(0, min(1, (loop_db + 48) / 48)); gfx_set(0.95, 0.65, 0.2, 0.85); loop_ratio > 0 ? gfx_rect(vm_x + 36, vm2_y + 1, floor((vm_w - 37) * loop_ratio), vm_h - 2);
+
+ui_en = 1; ui_text(10, 618, "Knobs: drag vertical   |   Shift = fine   |   Ctrl/Cmd+click = reset   |   Clear long-press = Clear All", 0.65, 0.55, 0.58, 1, 0);
+last_mouse_x = mouse_x; last_mouse_y = mouse_y; last_mouse_cap = mouse_cap;

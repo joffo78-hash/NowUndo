@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>nowundo</title>
+<script src="/main.js"></script>
+<style>
+:root {
+  --bg: #0c0c0f;
+  --panel: #16161a;
+  --border: #2a2a30;
+  --text: #eee;
+  --muted: #888;
+  --accent: #3d9eff;
+  --hold-on: #2ecc71;
+  --safe: env(safe-area-inset-bottom, 0px);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  height: 100%; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  overflow: hidden; touch-action: manipulation; user-select: none;
+}
+#app { display: flex; flex-direction: column; height: 100%; max-width: 900px; margin: 0 auto; }
+
+/* ── Tabs ── */
+#tabs {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 8px 0;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  flex-shrink: 0; overflow-x: auto;
+}
+.tab {
+  border: none; background: transparent; color: var(--muted);
+  padding: 8px 12px; font-size: 12px; font-weight: 600;
+  border-radius: 6px 6px 0 0; cursor: pointer; white-space: nowrap;
+}
+.tab:hover { color: var(--text); background: #1e1e24; }
+.tab.active { color: #fff; background: var(--bg); border: 1px solid var(--border); border-bottom-color: var(--bg); }
+.tab.sub { font-size: 11px; padding: 6px 10px; }
+
+#views { flex: 1; min-height: 0; position: relative; }
+.view { display: none; height: 100%; overflow: auto; padding: 8px; padding-bottom: calc(8px + var(--safe)); }
+.view.active { display: flex; flex-direction: column; }
+
+/* ── Launchpad (embedded styles) ── */
+#lp-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 0 8px; flex-shrink: 0; }
+#lp-status { flex: 1; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn {
+  border: none; border-radius: 6px; padding: 8px 12px; font-size: 12px; font-weight: 600;
+  cursor: pointer; background: #2a2a2a; color: var(--text);
+}
+.btn:active { transform: scale(0.96); }
+.btn.on { background: var(--hold-on); color: #111; }
+.btn.layer { background: #333; min-width: 100px; text-align: left; }
+.btn.layer::after { content: " ▾"; opacity: .6; }
+#conn { width: 10px; height: 10px; border-radius: 50%; background: #555; flex-shrink: 0; }
+#conn.ok { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
+#conn.warn { background: #f1c40f; }
+#lp-grid-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+#lp-grid {
+  display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(9, 1fr);
+  gap: 3px; width: 100%; max-width: min(100%, calc(100vh - 160px)); aspect-ratio: 1;
+}
+.pad {
+  border-radius: 6px; background: #222; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; cursor: pointer; position: relative;
+}
+.pad.down { filter: brightness(1.35); box-shadow: inset 0 0 0 2px rgba(255,255,255,.35); }
+.pad-label {
+  font-size: 9px; line-height: 1.15; text-align: center; padding: 2px; pointer-events: none;
+  word-break: break-word; max-width: 100%; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+}
+.pad.light .pad-label { color: #111; }
+.pad.dark .pad-label { color: #f5f5f5; }
+#lp-help { font-size: 11px; color: var(--muted); text-align: center; min-height: 16px; padding-top: 4px; }
+#layer-menu {
+  display: none; position: absolute; z-index: 100; background: #2a2a2a; border: 1px solid #444;
+  border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5); min-width: 140px;
+}
+#layer-menu button {
+  display: block; width: 100%; text-align: left; background: transparent; border: none;
+  color: var(--text); padding: 10px 14px; font-size: 13px; border-radius: 4px; cursor: pointer;
+}
+#layer-menu button:hover, #layer-menu button.active { background: #3d9eff; color: #fff; }
+
+/* ── Twister ── */
+#tw-bar {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 0 10px; flex-shrink: 0;
+}
+#tw-bar .pg {
+  border: none; border-radius: 6px; padding: 8px 10px; font-size: 11px; font-weight: 600;
+  background: #252530; color: var(--muted); cursor: pointer;
+}
+#tw-bar .pg.active { background: var(--accent); color: #fff; }
+#tw-bar .reset-btn { background: #5a2020; color: #fcc; margin-left: auto; }
+#tw-bar .reset-btn:active { background: #a03030; }
+#tw-conn { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+#tw-conn.ok { background: #2ecc71; }
+
+#tw-page { flex: 1; min-height: 0; overflow: auto; }
+.tw-faders { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
+.tw-row {
+  display: grid; grid-template-columns: 56px 1fr 48px; gap: 8px; align-items: center;
+  padding: 8px 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border);
+}
+.tw-row.off { opacity: 0.35; }
+.tw-name { font-size: 12px; font-weight: 700; }
+.tw-pct { font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Dual range track */
+.range {
+  position: relative; height: 36px; border-radius: 8px; background: #0a0a0c;
+  border: 1px solid #333; touch-action: none; cursor: pointer;
+}
+.range-fill {
+  position: absolute; top: 4px; bottom: 4px; border-radius: 6px; opacity: 0.85;
+  pointer-events: none;
+}
+.range-thumb {
+  position: absolute; top: 2px; width: 16px; height: 32px; margin-left: -8px;
+  border-radius: 4px; background: #fff; border: 2px solid #111;
+  box-shadow: 0 1px 4px rgba(0,0,0,.5); pointer-events: none; z-index: 2;
+}
+.range-thumb.mid {
+  width: 20px; margin-left: -10px; height: 20px; top: 8px; border-radius: 50%;
+  background: rgba(255,255,255,.9); opacity: 0.95;
+}
+
+.tw-placeholder {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 14px; text-align: center; padding: 24px;
+}
+
+/* Dashboard / Looper placeholders */
+.dash-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+}
+@media (min-width: 600px) { .dash-grid { grid-template-columns: repeat(4, 1fr); } }
+.dash-card {
+  border-radius: 10px; padding: 12px; min-height: 100px; border: 1px solid rgba(255,255,255,.12);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.dash-card h3 { font-size: 13px; font-weight: 700; }
+.dash-card .meta { font-size: 11px; opacity: 0.8; }
+
+#offline {
+  display: none; position: absolute; inset: 0; background: rgba(0,0,0,.75); z-index: 50;
+  align-items: center; justify-content: center; flex-direction: column; gap: 12px;
+  text-align: center; padding: 24px;
+}
+#offline.show { display: flex; }
+</style>
+</head>
+<body>
+<div id="app">
+  <nav id="tabs">
+    <button class="tab active" data-view="launchpad">Launchpad</button>
+    <button class="tab" data-view="twister">Twister</button>
+    <button class="tab" data-view="dashboard">Dashboard</button>
+    <button class="tab sub" data-view="looper1">L1</button>
+    <button class="tab sub" data-view="looper2">L2</button>
+    <button class="tab sub" data-view="looper3">L3</button>
+    <button class="tab sub" data-view="looper4">L4</button>
+    <button class="tab sub" data-view="looper5">L5</button>
+    <button class="tab sub" data-view="looper6">L6</button>
+    <button class="tab sub" data-view="looper7">L7</button>
+    <button class="tab sub" data-view="looper8">L8</button>
+  </nav>
+
+  <div id="views">
+    <!-- LAUNCHPAD -->
+    <section class="view active" id="view-launchpad">
+      <div id="lp-toolbar">
+        <div id="conn" title="Backend Launchpad"></div>
+        <div id="lp-status">En attente du backend Launchpad…</div>
+        <button class="btn layer" id="btn-layer" style="display:none">Layer</button>
+        <button class="btn" id="btn-hold">HOLD</button>
+      </div>
+      <div id="lp-grid-wrap"><div id="lp-grid"></div></div>
+      <div id="lp-help"></div>
+    </section>
+
+    <!-- TWISTER -->
+    <section class="view" id="view-twister">
+      <div id="tw-bar">
+        <div id="tw-conn" title="Backend Twister"></div>
+        <button class="pg active" data-page="1">1 In/Out</button>
+        <button class="pg" data-page="2">2 Pitch</button>
+        <button class="pg" data-page="3">3 Volume</button>
+        <button class="pg" data-page="4">4 Slicer</button>
+        <button class="pg" data-page="5">5 Cloud</button>
+        <button class="btn reset-btn" id="tw-reset">RESET</button>
+      </div>
+      <div id="tw-page">
+        <div class="tw-faders" id="tw-faders"></div>
+        <div class="tw-placeholder" id="tw-placeholder" style="display:none">
+          Page Twister à venir — pilotée aussi depuis le Launchpad (fighter page).
+        </div>
+      </div>
+    </section>
+
+    <!-- DASHBOARD -->
+    <section class="view" id="view-dashboard">
+      <div class="dash-grid" id="dash-grid"></div>
+    </section>
+
+    <!-- LOOPERS 1-8 -->
+    <section class="view" id="view-looper1"><div class="tw-placeholder">Looper 1 — vue détaillée (à venir)</div></section>
+    <section class="view" id="view-looper2"><div class="tw-placeholder">Looper 2 — vue détaillée (à venir)</div></section>
+    <section class="view" id="view-looper3"><div class="tw-placeholder">Looper 3 — vue détaillée (à venir)</div></section>
+    <section class="view" id="view-looper4"><div class="tw-placeholder">Looper 4 — vue détaillée (à venir)</div></section>
+    <section class="view" id="view-looper5"><div class="tw-placeholder">Looper 5 — vue détaillée (à venir)</div></section>
+    <section class="view" id="view-looper6"><div class="tw-placeholder">Looper 6 — vue détaillée (à venir)</div></section>
+    <section class="view" id="view-looper7"><div class="tw-placeholder">Looper 7 — vue détaillée (à venir)</div></section>
+    <section class="view" id="view-looper8"><div class="tw-placeholder">Looper 8 — vue détaillée (à venir)</div></section>
+  </div>
+</div>
+<div id="layer-menu"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Couleurs loopers (dashboard photo, haut-gauche → bas-droite)
+  const LOOPER_COL = [
+    "#8B1A1A", // L1 rouge
+    "#8B4513", // L2 brun
+    "#6B7C23", // L3 olive
+    "#1B7A2E", // L4 vert
+    "#0A7A7A", // L5 teal
+    "#1A3A8B", // L6 bleu
+    "#5A1A8B", // L7 violet
+    "#8B1A6B"  // L8 magenta
+  ];
+
+  // ═══════════════════════════════════════════
+  // NAVIGATION ONGLETS
+  // ═══════════════════════════════════════════
+  const tabs = document.querySelectorAll(".tab");
+  const views = document.querySelectorAll(".view");
+  function showView(id) {
+    tabs.forEach(t => t.classList.toggle("active", t.dataset.view === id));
+    views.forEach(v => v.classList.toggle("active", v.id === "view-" + id));
+  }
+  tabs.forEach(t => t.addEventListener("click", () => showView(t.dataset.view)));
+
+  // ═══════════════════════════════════════════
+  // LAUNCHPAD (même logique qu'avant)
+  // ═══════════════════════════════════════════
+  const SECTION = "nowundo_vl";
+  const BLINK_HZ = 2;
+  const POLL_MS = 50;
+  const OFFLINE_MS = 2500;
+  const STATE_FROM_CODE = {
+    o: "off", i: "idle", n: "on", w: "warn",
+    a: "armed", x: "armed_other", c: "cursor", m: "member_cursor"
+  };
+  const LEVEL = {
+    off: 0, idle: 0.45, on: 1, warn: 1, cursor: 1,
+    armed: 1, armed_other: 0.8, member_cursor: 1
+  };
+  const BLINK = {
+    armed: [1, 0], armed_other: [0.8, 0.45], member_cursor: [1, 0.45]
+  };
+
+  let pads = {};
+  let meta = { page: 1, layer: "fx", layers: [] };
+  let holdOn = false, lastTick = 0, backendOk = false, phase = true;
+  let downPads = new Set(), lastDragKey = null;
+
+  const grid = document.getElementById("lp-grid");
+  const statusEl = document.getElementById("lp-status");
+  const helpEl = document.getElementById("lp-help");
+  const connEl = document.getElementById("conn");
+  const btnHold = document.getElementById("btn-hold");
+  const btnLayer = document.getElementById("btn-layer");
+  const layerMenu = document.getElementById("layer-menu");
+
+  for (let row = 0; row <= 8; row++) {
+    for (let col = 1; col <= 9; col++) {
+      const key = row + "," + col;
+      const el = document.createElement("div");
+      el.className = "pad dark";
+      el.dataset.key = key; el.dataset.row = row; el.dataset.col = col;
+      const lab = document.createElement("div");
+      lab.className = "pad-label";
+      el.appendChild(lab);
+      grid.appendChild(el);
+      pads[key] = { el, lab, hex: 0x222222, state: "off", label: "" };
+    }
+  }
+
+  function hexToRgb(h) { return [(h >> 16) & 255, (h >> 8) & 255, h & 255]; }
+  function luminance(r, g, b) { return (0.299 * r + 0.587 * g + 0.114 * b) / 255; }
+  function applyPad(p) {
+    let level = LEVEL[p.state] ?? 0;
+    const bl = BLINK[p.state];
+    if (bl) level = phase ? bl[0] : bl[1];
+    const [r, g, b] = hexToRgb(p.hex);
+    const R = Math.round(r * level), G = Math.round(g * level), B = Math.round(b * level);
+    p.el.style.background = "rgb(" + R + "," + G + "," + B + ")";
+    const lum = luminance(R, G, B);
+    p.el.classList.toggle("light", lum > 0.5);
+    p.el.classList.toggle("dark", lum <= 0.5);
+  }
+  function parseFrame(str) {
+    if (!str) return;
+    str.split("|").forEach(function (part) {
+      var bits = part.split(":");
+      var p = pads[bits[0]]; if (!p) return;
+      var hex = parseInt(bits[1], 16) || 0;
+      var state = STATE_FROM_CODE[bits[2]] || "off";
+      if (p.hex !== hex || p.state !== state) { p.hex = hex; p.state = state; applyPad(p); }
+    });
+  }
+  function parseLabels(str) {
+    if (!str) return;
+    for (var k in pads) { pads[k].label = ""; pads[k].lab.textContent = ""; }
+    str.split("|").forEach(function (part) {
+      var idx = part.indexOf(":"); if (idx < 0) return;
+      var key = part.slice(0, idx);
+      var lab = part.slice(idx + 1).replace(/¦/g, "|").replace(/⁚/g, ":");
+      if (pads[key]) { pads[key].label = lab; pads[key].lab.textContent = lab; }
+    });
+  }
+  function parseMeta(str) {
+    if (!str) return;
+    var m = {};
+    str.split(";").forEach(function (pair) { var kv = pair.split("="); if (kv[0]) m[kv[0]] = kv[1]; });
+    meta.page = parseInt(m.page) || 1;
+    meta.layer = m.layer || "fx";
+    meta.holdGroup = parseInt(m.hold) || 0;
+    if (m.layers) {
+      meta.layers = m.layers.split(",").map(function (s) {
+        var p = s.split("="); return { id: p[0], name: p[1] || p[0] };
+      });
+    }
+    btnLayer.style.display = meta.page === 4 ? "" : "none";
+    if (meta.page === 4) {
+      var cur = meta.layers.find(function (l) { return l.id === meta.layer; });
+      btnLayer.textContent = "Layer: " + (cur ? cur.name : meta.layer);
+    }
+    updateHelp();
+  }
+  function updateHelp() {
+    helpEl.textContent = holdOn
+      ? (meta.holdGroup > 0 ? "EDIT GROUP " + meta.holdGroup : "HOLD : tapez un pad GROUP")
+      : "";
+  }
+
+  var cmdQueue = [], cmdSending = false;
+  function flushCmdQueue() {
+    if (cmdSending || !cmdQueue.length) return;
+    cmdSending = true;
+    var batch = cmdQueue.splice(0, 8).join(";");
+    wwr_req("SET/EXTSTATE/" + SECTION + "/web_cmd/" + encodeURIComponent(batch));
+    setTimeout(function () { cmdSending = false; flushCmdQueue(); }, 25);
+  }
+  function queueCmd(cmd) { cmdQueue.push(cmd); flushCmdQueue(); }
+
+  function onPadDown(row, col) {
+    var key = row + "," + col;
+    if (downPads.has(key)) return;
+    downPads.add(key); lastDragKey = key;
+    if (pads[key]) pads[key].el.classList.add("down");
+    queueCmd("P," + row + "," + col);
+  }
+  function onPadUp(row, col) {
+    var key = row + "," + col;
+    if (!downPads.has(key)) return;
+    downPads.delete(key);
+    if (pads[key]) pads[key].el.classList.remove("down");
+    queueCmd("R," + row + "," + col);
+  }
+  function onPadDrag(row, col) {
+    var key = row + "," + col;
+    if (key === lastDragKey) return;
+    lastDragKey = key;
+    queueCmd("D," + row + "," + col);
+  }
+
+  grid.addEventListener("pointerdown", function (e) {
+    var el = e.target.closest(".pad"); if (!el) return;
+    e.preventDefault(); el.setPointerCapture(e.pointerId);
+    onPadDown(+el.dataset.row, +el.dataset.col);
+  });
+  grid.addEventListener("pointerup", function (e) {
+    var el = e.target.closest(".pad"); if (!el) return;
+    onPadUp(+el.dataset.row, +el.dataset.col);
+  });
+  grid.addEventListener("pointercancel", function (e) {
+    var el = e.target.closest(".pad"); if (!el) return;
+    onPadUp(+el.dataset.row, +el.dataset.col);
+  });
+  grid.addEventListener("pointermove", function (e) {
+    if (e.buttons === 0 && e.pressure === 0) return;
+    var under = document.elementFromPoint(e.clientX, e.clientY);
+    var el = under && under.closest(".pad"); if (!el) return;
+    var key = el.dataset.row + "," + el.dataset.col;
+    if (!downPads.has(key) && downPads.size > 0) onPadDrag(+el.dataset.row, +el.dataset.col);
+  });
+
+  btnHold.addEventListener("click", function () {
+    holdOn = !holdOn;
+    btnHold.classList.toggle("on", holdOn);
+    btnHold.textContent = holdOn ? "HOLD ON" : "HOLD";
+    queueCmd("H," + (holdOn ? "1" : "0"));
+    updateHelp();
+  });
+  btnLayer.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (layerMenu.style.display === "block") { layerMenu.style.display = "none"; return; }
+    layerMenu.innerHTML = "";
+    meta.layers.forEach(function (l) {
+      var b = document.createElement("button");
+      b.textContent = l.name;
+      if (l.id === meta.layer) b.className = "active";
+      b.addEventListener("click", function () { queueCmd("L," + l.id); layerMenu.style.display = "none"; });
+      layerMenu.appendChild(b);
+    });
+    var rect = btnLayer.getBoundingClientRect();
+    layerMenu.style.left = rect.left + "px";
+    layerMenu.style.top = (rect.bottom + 4) + "px";
+    layerMenu.style.display = "block";
+  });
+  document.addEventListener("click", function () { layerMenu.style.display = "none"; });
+
+  setInterval(function () {
+    phase = !phase;
+    for (var k in pads) if (BLINK[pads[k].state]) applyPad(pads[k]);
+  }, 1000 / (BLINK_HZ * 2));
+
+  // ═══════════════════════════════════════════
+  // TWISTER — dual range faders
+  // ═══════════════════════════════════════════
+  const TW_SECTION = "nowundo_tw";
+  let twPage = 1;
+  let twState = []; // [{on, inN, outN, len}]
+  for (let i = 0; i < 8; i++) twState.push({ on: false, inN: 0, outN: 1, len: 0 });
+
+  const twFaders = document.getElementById("tw-faders");
+  const twPlaceholder = document.getElementById("tw-placeholder");
+  const twConn = document.getElementById("tw-conn");
+  let twLastTick = 0;
+
+  // Build 8 rows
+  const rangeEls = [];
+  for (let i = 0; i < 8; i++) {
+    const row = document.createElement("div");
+    row.className = "tw-row off";
+    row.dataset.idx = i;
+    row.innerHTML =
+      '<div class="tw-name" style="color:' + LOOPER_COL[i] + '">L' + (i + 1) + '</div>' +
+      '<div class="range" data-idx="' + i + '">' +
+        '<div class="range-fill" style="background:' + LOOPER_COL[i] + '"></div>' +
+        '<div class="range-thumb in"></div>' +
+        '<div class="range-thumb mid"></div>' +
+        '<div class="range-thumb out"></div>' +
+      '</div>' +
+      '<div class="tw-pct">—</div>';
+    twFaders.appendChild(row);
+    rangeEls.push({
+      row: row,
+      range: row.querySelector(".range"),
+      fill: row.querySelector(".range-fill"),
+      tin: row.querySelector(".range-thumb.in"),
+      tmid: row.querySelector(".range-thumb.mid"),
+      tout: row.querySelector(".range-thumb.out"),
+      pct: row.querySelector(".tw-pct")
+    });
+  }
+
+  function updateRangeUI(i) {
+    const st = twState[i];
+    const el = rangeEls[i];
+    el.row.classList.toggle("off", !st.on);
+    const a = Math.max(0, Math.min(1, st.inN));
+    const b = Math.max(0, Math.min(1, st.outN));
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    el.fill.style.left = (lo * 100) + "%";
+    el.fill.style.width = ((hi - lo) * 100) + "%";
+    el.tin.style.left = (a * 100) + "%";
+    el.tout.style.left = (b * 100) + "%";
+    el.tmid.style.left = (((a + b) / 2) * 100) + "%";
+    if (st.on) {
+      el.pct.textContent = Math.round(a * 100) + "–" + Math.round(b * 100) + "%";
+    } else {
+      el.pct.textContent = "—";
+    }
+  }
+  for (let i = 0; i < 8; i++) updateRangeUI(i);
+
+  function twCmd(cmd) {
+    wwr_req("SET/EXTSTATE/" + TW_SECTION + "/web_cmd/" + encodeURIComponent(cmd));
+  }
+
+  // Interaction dual-thumb
+  let drag = null; // { idx, mode: 'in'|'out'|'mid', startX, startIn, startOut, width }
+
+  function hitMode(el, clientX) {
+    const rect = el.range.getBoundingClientRect();
+    const x = (clientX - rect.left) / rect.width;
+    const st = twState[el.range.dataset.idx | 0];
+    const dIn = Math.abs(x - st.inN);
+    const dOut = Math.abs(x - st.outN);
+    const mid = (st.inN + st.outN) / 2;
+    const dMid = Math.abs(x - mid);
+    const thresh = 0.08;
+    // priorité au plus proche
+    if (dIn <= dOut && dIn <= dMid && dIn < thresh) return "in";
+    if (dOut <= dIn && dOut <= dMid && dOut < thresh) return "out";
+    if (dMid < 0.12 && x > Math.min(st.inN, st.outN) && x < Math.max(st.inN, st.outN)) return "mid";
+    // clic hors zone : déplacer le bord le plus proche
+    return dIn <= dOut ? "in" : "out";
+  }
+
+  rangeEls.forEach(function (el, i) {
+    el.range.addEventListener("pointerdown", function (e) {
+      if (!twState[i].on) return;
+      e.preventDefault();
+      el.range.setPointerCapture(e.pointerId);
+      const mode = hitMode(el, e.clientX);
+      const rect = el.range.getBoundingClientRect();
+      drag = {
+        idx: i, mode: mode,
+        startX: e.clientX, width: rect.width,
+        startIn: twState[i].inN, startOut: twState[i].outN
+      };
+    });
+    el.range.addEventListener("pointermove", function (e) {
+      if (!drag || drag.idx !== i) return;
+      const dx = (e.clientX - drag.startX) / drag.width;
+      let a = drag.startIn, b = drag.startOut;
+      if (drag.mode === "in") {
+        a = Math.max(0, Math.min(b, drag.startIn + dx));
+      } else if (drag.mode === "out") {
+        b = Math.max(a, Math.min(1, drag.startOut + dx));
+      } else {
+        // mid : translater le segment
+        const w = drag.startOut - drag.startIn;
+        a = drag.startIn + dx;
+        b = a + w;
+        if (a < 0) { a = 0; b = w; }
+        if (b > 1) { b = 1; a = 1 - w; }
+      }
+      twState[i].inN = a;
+      twState[i].outN = b;
+      updateRangeUI(i);
+      // envoi temps réel (throttle léger via queue)
+      twCmd("IO," + i + "," + a.toFixed(4) + "," + b.toFixed(4));
+    });
+    el.range.addEventListener("pointerup", function () { drag = null; });
+    el.range.addEventListener("pointercancel", function () { drag = null; });
+  });
+
+  // Pages Twister
+  document.querySelectorAll("#tw-bar .pg").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      twPage = +btn.dataset.page;
+      document.querySelectorAll("#tw-bar .pg").forEach(function (b) {
+        b.classList.toggle("active", +b.dataset.page === twPage);
+      });
+      const isIO = twPage === 1;
+      twFaders.style.display = isIO ? "" : "none";
+      twPlaceholder.style.display = isIO ? "none" : "";
+      if (!isIO) {
+        twPlaceholder.textContent = "Page " + twPage + " — à venir (Pitch / Volume / Slicer / Cloud)";
+      }
+      twCmd("PAGE," + twPage);
+      // synchro fighter_page côté Launchpad backend
+      queueCmd("PAGE," + twPage); // no - different section
+      // Launchpad fighter page via VL command if we add it - for now ExtState on tw
+    });
+  });
+
+  document.getElementById("tw-reset").addEventListener("click", function () {
+    if (twPage === 1) {
+      // reset all In/Out to full loop
+      for (let i = 0; i < 8; i++) {
+        if (!twState[i].on) continue;
+        twState[i].inN = 0;
+        twState[i].outN = 1;
+        updateRangeUI(i);
+      }
+      twCmd("RESET");
+    } else {
+      twCmd("RESET");
+    }
+  });
+
+  function parseTwState(str) {
+    // format: i:on:in:out:len|...
+    if (!str) return;
+    str.split("|").forEach(function (part) {
+      var b = part.split(":");
+      if (b.length < 4) return;
+      var i = parseInt(b[0], 10);
+      if (i < 0 || i > 7) return;
+      twState[i].on = b[1] === "1";
+      twState[i].inN = parseFloat(b[2]) || 0;
+      twState[i].outN = parseFloat(b[3]) || 1;
+      twState[i].len = parseFloat(b[4]) || 0;
+      updateRangeUI(i);
+    });
+  }
+
+  // Dashboard cards
+  const dashGrid = document.getElementById("dash-grid");
+  for (let i = 0; i < 8; i++) {
+    const c = document.createElement("div");
+    c.className = "dash-card";
+    c.style.background = LOOPER_COL[i];
+    c.innerHTML = "<h3>L" + (i + 1) + " · Main</h3><div class='meta'>Vue dashboard — bientôt liée au gmem</div>";
+    c.style.cursor = "pointer";
+    c.addEventListener("click", function () { showView("looper" + (i + 1)); });
+    dashGrid.appendChild(c);
+  }
+
+  // ═══════════════════════════════════════════
+  // WWR
+  // ═══════════════════════════════════════════
+  function wwr_onreply(results) {
+    results.split("\n").forEach(function (line) {
+      if (!line) return;
+      var tok = line.split("\t");
+      if (tok[0] !== "EXTSTATE") return;
+      var key = tok[2], val = tok[3] || "";
+      if (tok[1] === SECTION || true) {
+        if (key === "web_frame") parseFrame(val);
+        else if (key === "web_labels") parseLabels(val);
+        else if (key === "web_status") statusEl.textContent = val || "—";
+        else if (key === "web_meta") parseMeta(val);
+        else if (key === "web_tick") {
+          lastTick = Date.now();
+          if (!backendOk) { backendOk = true; connEl.className = "ok"; }
+        }
+      }
+      if (key === "tw_state") parseTwState(val);
+      else if (key === "tw_tick") {
+        twLastTick = Date.now();
+        twConn.className = "ok";
+      }
+    });
+  }
+  window.wwr_onreply = wwr_onreply;
+
+  setInterval(function () {
+    if (Date.now() - lastTick > OFFLINE_MS && backendOk) {
+      backendOk = false; connEl.className = "warn";
+    }
+    if (Date.now() - twLastTick > OFFLINE_MS) twConn.className = "";
+  }, 500);
+
+  if (typeof g_wwr_timer_freq !== "undefined") g_wwr_timer_freq = 40;
+  wwr_start();
+  wwr_req_recur(
+    "GET/EXTSTATE/" + SECTION + "/web_frame;" +
+    "GET/EXTSTATE/" + SECTION + "/web_status;" +
+    "GET/EXTSTATE/" + SECTION + "/web_meta;" +
+    "GET/EXTSTATE/" + SECTION + "/web_tick;" +
+    "GET/EXTSTATE/" + TW_SECTION + "/tw_state;" +
+    "GET/EXTSTATE/" + TW_SECTION + "/tw_tick",
+    POLL_MS
+  );
+  wwr_req_recur("GET/EXTSTATE/" + SECTION + "/web_labels", 300);
+})();
+</script>
+</body>
+</html>
