@@ -70,6 +70,27 @@ PAD_LABEL[1]["4,1"] = "LAUNCH"      -- le libelle d'origine (MODE LAUNCH) debord
 for p = 1, NPAGE do                  -- libelles en anglais + nom complet du bouton page 4
   for key, label in pairs(PAD_LABEL[p]) do PAD_LABEL[p][key] = (label:gsub("GROUPE", "GROUP")) end
 end
+-- Page 1 : inserer la ligne statut sous la selection (row 1) et decaler l'ancienne grille 1-4 -> 2-5
+do
+  local function shift_row_map(map)
+    local moved = {}
+    for key, val in pairs(map) do
+      local r, c = key:match("^(%d+),(%d+)$")
+      r, c = tonumber(r), tonumber(c)
+      if r and r >= 1 and r <= 4 and c >= 1 and c <= 8 then
+        moved[(r + 1) .. "," .. c] = val
+        map[key] = nil
+      end
+    end
+    for k, v in pairs(moved) do map[k] = v end
+  end
+  shift_row_map(PAD_LABEL[1])
+  shift_row_map(PAD_RGB[1])
+  for i = 1, 8 do
+    PAD_LABEL[1]["1," .. i] = "L" .. i .. " STATUS"
+    PAD_RGB[1]["1," .. i] = 0x444444
+  end
+end
 for row = 1, 8 do for col = 1, 8 do                  -- pages 2 et 4 redefinies (inputs 1-8, effets en insert)
   PAD_LABEL[2][row .. "," .. col] = "IN" .. row .. "/ L" .. col
   PAD_RGB[2][row .. "," .. col] = 0x99FF66
@@ -95,7 +116,7 @@ local function now()
 end
 local function hex_to_rgb(h) return (h >> 16) & 255, (h >> 8) & 255, h & 255 end
 
-local LOG = { level = 3, console = true, ring = {}, max = 300 }
+local LOG = { level = 3, console = false, ring = {}, max = 300 }
 local LEVELS = { error = 1, warn = 2, info = 3, debug = 4 }
 local function log(level, fmt, ...)
   if LEVELS[level] > LOG.level then return end
@@ -147,12 +168,19 @@ local function new_state()
       routing = { active = 1, slots = {} },
       group   = { active = 1, slots = {} },
     },
-    cfg = { feedback_policy = "attenuate", feedback_gain_db = -6 },   -- "allow" | "attenuate" | "block"
+    cfg = {
+      feedback_policy = "attenuate", feedback_gain_db = -6,   -- "allow" | "attenuate" | "block"
+      auto_mute_unrouted_inputs = true,                       -- IN sans aucune route IN->L => piste mutee
+      -- Index 1-based REAPER (ta structure) : dossier IN=1, IN1..8=2..9, dossier L=10, L1..8=11..18
+      in_track_first = 2,
+      looper_track_first = 11,
+    },
   }
   for i = 1, NLOOP do
     s.group_of[i] = 0
     s.loopers[i] = { playing = false, rev = false, oneshot = false, cloud = false, slicer = false,
-                     link = false, rec = false, replace = false, multiply = false, auto = false, pingpong = false, part = 1 }
+                     link = false, rec = false, rec_led = false, overdub = false, wait_sync = false, state = 0,
+                     replace = false, multiply = false, auto = false, pingpong = false, part = 1, pending_part = false, target_part = 1 }
   end
   return s
 end
@@ -160,25 +188,496 @@ end
 --------------------------------------------------------------------------
 -- Hooks / backend (phase 2 les remplacera)
 --------------------------------------------------------------------------
-VL.backend = { send = function(looper, action, value)
-  log("debug", "send L%d  %s  %s", looper, action, tostring(value))
-end }
+-- Mapping actions -> commandes gmem NowUndo (options:gmem=nowundo_sync)
+-- Layout par instance (looper 1..8) / part (0=Main,1=Chorus,2=Bridge) :
+--   base = 1000 + (looper-1)*600 + part*200
+--   base+48 = cmd (ecrit par le controleur, lu puis remis a 0 par le JSFX)
+--   base+49 = arg numerique optionnel (speed/pitch step)
+--   base+160/161/162 = edition In/Out/Width
+--   base+180/181 = write param abs (id, value)
+-- Feedback (JSFX -> miroir) : base+2=state, +3=speed, +4=pitch, +8=play_mode,
+--   +9=link, +17=rev, +18=pingpong, +24=cloud, +43=auto_on, ...
+local GMEM_NAME = "nowundo_sync"
+-- NowUndo do_clear(0) = part active seulement | do_clear(1) = les 3 parts
+-- cmd 2  = clear part active
+-- cmd 11 = clear les 3 parts
+local CMD = {
+  rec_overdub = 1,   clear = 2,  clear_part = 2,   -- court : part active
+  clear_full  = 11,                                -- long  : 3 parts (1 looper)
+  stop_play = 3,
+  reverse = 4,       auto_rev = 5,               slicer = 6,
+  cloud = 7,         link = 8,                   replace = 9,
+  auto_rep = 10,     part = 12,
+  -- clear_all / clear_all_full : broadcast (pas un cmd unique) — voir backend.send
+  clear_all = 2,     clear_all_full = 11,          -- court=part partout | long=3 parts partout
+  multiply = 13,     undo = 14,                  redo = 15,
+  restart = 16,      rerec = 17,                 one_shot = 18,
+  auto = 19,         speed_step = 20,            pitch_step = 21,
+  full_loop = 22,    quantise_inout = 23,
+}
+
+local function gmem_base(looper, part)
+  part = part or 1
+  return 1000 + (looper - 1) * 600 + (part - 1) * 200
+end
+
+local function gmem_write_cmd(looper, cmd, arg, part)
+  if not (reaper and reaper.gmem_attach and reaper.gmem_write) then
+    log("warn", "gmem indisponible : action %s ignoree", tostring(cmd))
+    return false
+  end
+  local L = S.loopers[looper]
+  part = part or (L and L.part) or 1
+  local base = gmem_base(looper, part)
+  reaper.gmem_attach(GMEM_NAME)
+  if arg ~= nil then reaper.gmem_write(base + 49, arg) end
+  reaper.gmem_write(base + 48, cmd)   -- ecrit en dernier : le JSFX consomme des que cmd > 0
+  return true
+end
+
+-- Commandes GLOBALES (comme le Dashboard) : toutes les instances NowUndo vivantes (heartbeat).
+-- Utilise pour CLEAR ALL : pas de selection looper/groupe — diffusion a chaque slot actif.
+local function gmem_broadcast_cmd(cmd, arg)
+  if not (reaper and reaper.gmem_attach and reaper.gmem_write and reaper.gmem_read) then
+    log("warn", "gmem indisponible : broadcast %s ignore", tostring(cmd))
+    return 0
+  end
+  reaper.gmem_attach(GMEM_NAME)
+  local t = now()
+  local n = 0
+  for i = 1, NLOOP do
+    local alive = reaper.gmem_read(100 + (i - 1)) or 0
+    local hb = reaper.gmem_read(130 + (i - 1)) or 0
+    if alive > 0 and (t - hb) <= 3.0 then
+      local ap = reaper.gmem_read(gmem_base(i, 1) + 42) or 1
+      if ap < 1 or ap > 3 then ap = 1 end
+      local base = gmem_base(i, math.floor(ap + 0.5))
+      if arg ~= nil then reaper.gmem_write(base + 49, arg) end
+      reaper.gmem_write(base + 48, cmd)
+      n = n + 1
+    end
+  end
+  log("info", "broadcast cmd %s -> %d instance(s)", tostring(cmd), n)
+  return n
+end
+
+local function gmem_write_param(looper, param_id, value, part)
+  if not (reaper and reaper.gmem_attach and reaper.gmem_write) then return false end
+  local L = S.loopers[looper]
+  part = part or (L and L.part) or 1
+  local base = gmem_base(looper, part)
+  reaper.gmem_attach(GMEM_NAME)
+  reaper.gmem_write(base + 181, value)
+  reaper.gmem_write(base + 180, param_id)
+  return true
+end
+
+local function gmem_write_edit(looper, edit_cmd, v1, v2, part)
+  if not (reaper and reaper.gmem_attach and reaper.gmem_write) then return false end
+  local L = S.loopers[looper]
+  part = part or (L and L.part) or 1
+  local base = gmem_base(looper, part)
+  reaper.gmem_attach(GMEM_NAME)
+  if v1 ~= nil then reaper.gmem_write(base + 161, v1) end
+  if v2 ~= nil then reaper.gmem_write(base + 162, v2) end
+  reaper.gmem_write(base + 160, edit_cmd)
+  return true
+end
+
+VL.backend = {
+  -- API publique utilisee par exec()
+  send = function(looper, action, value)
+    log("debug", "send L%d  %s  %s", looper, action, tostring(value))
+    -- CLEAR ALL (court) / CLEAR ALL FULL (long) : GLOBAL, ignore selection — comme le Dashboard
+    if action == "clear_all" then
+      gmem_broadcast_cmd(CMD.clear_all)        -- cmd 2 : part active partout
+      return
+    end
+    if action == "clear_all_full" then
+      gmem_broadcast_cmd(CMD.clear_all_full)   -- cmd 11 : 3 parts partout
+      return
+    end
+    if action == "part" then
+      -- bascule de part : cmd 12 sur la part cible (le JSFX switch_part avant d'agir)
+      local part = tonumber(value) or 1
+      gmem_write_cmd(looper, CMD.part, nil, part)
+      return
+    end
+    if action == "speed_step" or action == "pitch_step" then
+      gmem_write_cmd(looper, CMD[action], tonumber(value) or 12)
+      return
+    end
+    if action == "loop_in_step" or action == "loop_out_step" then
+      -- value = fraction de la boucle (signe = sens). Utilise length / loop_start / loop_width du feedback.
+      local L = S.loopers[looper]
+      local len = L.length or 0
+      if len <= 0 then log("debug", "loop step ignore: length inconnue L%d", looper) return end
+      local frac = tonumber(value) or 0.01
+      local delta = frac * len
+      local start = L.loop_start or 0
+      local width = L.loop_width or len
+      local min_w = math.max(1, len * 0.01)
+      if action == "loop_in_step" then
+        local new_in = math.max(0, math.min(start + delta, len - min_w))
+        local endp = start + width
+        start = new_in
+        width = math.max(min_w, endp - start)
+        width = math.min(width, len - start)
+        L.loop_start, L.loop_width = start, width
+        gmem_write_edit(looper, 1, start, nil)  -- edit_cmd 1 = set In, keep Out
+      else
+        local new_out = math.max(start + min_w, math.min(start + width + delta, len))
+        width = new_out - start
+        L.loop_width = width
+        gmem_write_edit(looper, 2, nil, new_out)  -- edit_cmd 2 = set Out absolute
+      end
+      return
+    end
+    if action == "volume_step" then
+      -- value = dB ; conversion approx vers facteur lineaire sur out_vol
+      local L = S.loopers[looper]
+      local cur = L.out_vol or 1.0
+      local db = tonumber(value) or 0
+      local nxt = math.max(0, math.min(2, cur * (10 ^ (db / 20))))
+      L.out_vol = nxt
+      gmem_write_param(looper, 22, nxt)
+      return
+    end
+    if action == "volume_pct" then
+      local L = S.loopers[looper]
+      local cur = L.out_vol or 1.0
+      local pct = tonumber(value) or 0
+      local nxt = math.max(0, math.min(2, cur + pct * 0.01))
+      L.out_vol = nxt
+      gmem_write_param(looper, 22, nxt)
+      return
+    end
+    local cmd = CMD[action]
+    if not cmd then
+      log("warn", "action gmem inconnue : %s", tostring(action))
+      return
+    end
+    -- toggles : value est le nouvel etat desire (true/false). Le JSFX toggle localement ;
+    -- on envoie la commande une seule fois (le miroir optimiste est deja a jour dans send()).
+    gmem_write_cmd(looper, cmd, nil)
+  end,
+  -- helpers exposes pour les couches tune / loop
+  write_param = gmem_write_param,
+  write_edit  = gmem_write_edit,
+  broadcast   = gmem_broadcast_cmd,
+  gmem_base   = gmem_base,
+  CMD         = CMD,
+}
+
+-- Feedback gmem NowUndo -> miroir d'etat (appele dans VL.tick / render)
+function VL.poll_looper_feedback()
+  if not (reaper and reaper.gmem_attach and reaper.gmem_read) then return end
+  reaper.gmem_attach(GMEM_NAME)
+  for i = 1, NLOOP do
+    local L = S.loopers[i]
+    -- presence : gmem[100 + i-1] == i (heartbeat instance)
+    local alive = reaper.gmem_read(100 + (i - 1))
+    if alive and alive > 0 then
+      -- part active publiee sur chaque slot (+42) ; on lit depuis Main
+      local base0 = gmem_base(i, 1)
+      local ap = reaper.gmem_read(base0 + 42) or L.part or 1
+      if ap < 1 or ap > 3 then ap = 1 end
+      L.part = math.floor(ap + 0.5)
+      local part = L.part
+      local base = gmem_base(i, part)
+      L.pending_part = (reaper.gmem_read(base + 163) or 0) > 0.5
+      local tp = reaper.gmem_read(base + 164) or part
+      L.target_part = math.max(1, math.min(3, math.floor((tp or part) + 0.5)))
+      local st = math.floor((reaper.gmem_read(base + 2) or 0) + 0.5)
+      L.state    = st
+      -- Rec LED : rec=rouge, overdub=orange (warn), wait-sync=clignote (armed)
+      L.overdub   = (st == 3)                 -- DUB
+      L.wait_sync = (st == 8)                 -- sorti du rec, attend le point de sync
+      L.rec_led   = (st == 1)                 -- LED rouge : vrai REC
+      -- cle toggle "rec" : true tant que on est dans le cycle rec/dub/wait-sync
+      L.rec       = (st == 1 or st == 3 or st == 8)
+      L.playing   = (st == 2 or st == 3 or st == 4 or st == 5 or st == 6)
+      L.replace   = (st == 4)
+      L.multiply  = (st == 6)
+      L.rev      = (reaper.gmem_read(base + 17) or 0) > 0.5
+      L.pingpong = (reaper.gmem_read(base + 18) or 0) > 0.5
+      L.cloud    = (reaper.gmem_read(base + 24) or 0) > 0.5
+      local pm   = reaper.gmem_read(base + 8) or 0
+      L.slicer   = (pm > 0.5 and pm < 1.5)
+      L.oneshot  = (pm > 1.5)
+      L.link     = (reaper.gmem_read(base + 9) or 0) > 0.5
+      L.auto     = (reaper.gmem_read(base + 43) or 0) > 0.5
+      L.speed    = reaper.gmem_read(base + 3) or L.speed or 1
+      L.pitch    = reaper.gmem_read(base + 4) or L.pitch or 0
+      L.out_vol  = reaper.gmem_read(base + 22) or L.out_vol or 1
+      L.loop_quant = reaper.gmem_read(base + 25) or L.loop_quant or 0
+      L.loop_start = reaper.gmem_read(base + 44) or L.loop_start or 0
+      L.loop_width = reaper.gmem_read(base + 45) or L.loop_width or 0
+      L.length     = reaper.gmem_read(base + 46) or L.length or 0
+    end
+  end
+end
+
 VL.hooks = {
-  routing_changed = function(edges) end,
+  routing_changed = function(edges) VL.apply_routing(edges) end,
   groups_changed  = function(group_of) end,
   fighter_page    = function(n) end,
-  fx_changed      = function(slots) end,
+  fx_changed      = function(slots) VL.apply_fx(slots) end,
   layer_changed   = function(id) end,
   find_looper_fx  = nil,                 -- (i) -> track, fxindex ; defaut : voir plus bas
 }
-VL.config = { fx_patterns = { "nowundo", "noundo", "looper" } }   -- nom du JSFX a reconnaitre sur les pistes
+VL.config = {
+  fx_patterns = { "nowundo", "noundo", "looper" },   -- nom du JSFX a reconnaitre sur les pistes
+  -- Noms de secours si les index de piste ne collent pas
+  in_name_patterns = { "^in%s*%d+", "^input%s*%d+", "^entree%s*%d+" },
+  looper_name_patterns = { "^l%d+", "^looper%s*%d+" },
+}
+
+--------------------------------------------------------------------------
+-- Routing REAPER : sends IN->L et L->L + mute auto des entrees non routees
+-- Ne touche PAS aux parent sends (dossier Inputs / dossier Loopers).
+--------------------------------------------------------------------------
+local function track_by_index_1based(n)
+  if not (reaper and reaper.GetTrack and n and n >= 1) then return nil end
+  local tr = reaper.GetTrack(0, n - 1)
+  return tr
+end
+
+local function track_name(tr)
+  if not tr then return "" end
+  local _, name = reaper.GetTrackName(tr)
+  return name or ""
+end
+
+local function match_indexed_name(name, patterns)
+  local lower = (name or ""):lower()
+  for _, pat in ipairs(patterns or {}) do
+    local n = lower:match(pat)
+    if n then
+      local num = tonumber(lower:match("(%d+)"))
+      if num then return num end
+    end
+  end
+  return nil
+end
+
+-- Cache leger (invalide si le nombre de pistes change)
+local _route_cache = { ntracks = -1, inputs = {}, loopers = {} }
+
+function VL.resolve_tracks(force)
+  if not (reaper and reaper.CountTracks) then return _route_cache end
+  local n = reaper.CountTracks(0)
+  if not force and n == _route_cache.ntracks and _route_cache.inputs[1] then
+    return _route_cache
+  end
+  local inputs, loopers = {}, {}
+  local cfg = S.cfg
+  -- 1) index fixes (structure projet)
+  for i = 1, NIN do
+    inputs[i] = track_by_index_1based((cfg.in_track_first or 2) + (i - 1))
+  end
+  for i = 1, NLOOP do
+    loopers[i] = track_by_index_1based((cfg.looper_track_first or 11) + (i - 1))
+  end
+  -- 2) secours par nom si une piste manque
+  local named_in, named_l = {}, {}
+  for t = 0, n - 1 do
+    local tr = reaper.GetTrack(0, t)
+    local nm = track_name(tr)
+    local ii = match_indexed_name(nm, VL.config.in_name_patterns)
+    if ii and ii >= 1 and ii <= NIN then named_in[ii] = tr end
+    local li = match_indexed_name(nm, VL.config.looper_name_patterns)
+    if li and li >= 1 and li <= NLOOP then named_l[li] = tr end
+  end
+  for i = 1, NIN do if not inputs[i] then inputs[i] = named_in[i] end end
+  for i = 1, NLOOP do if not loopers[i] then loopers[i] = named_l[i] end end
+  _route_cache = { ntracks = n, inputs = inputs, loopers = loopers }
+  return _route_cache
+end
+
+local function find_send(src, dst)
+  if not (src and dst) then return nil end
+  local ns = reaper.GetTrackNumSends(src, 0)
+  for i = 0, ns - 1 do
+    local dest = reaper.GetTrackSendInfo_Value(src, 0, i, "P_DESTTRACK")
+    if dest == dst then return i end
+  end
+  return nil
+end
+
+local function ensure_send(src, dst)
+  local idx = find_send(src, dst)
+  if idx then return idx end
+  if not (src and dst) then return nil end
+  idx = reaper.CreateTrackSend(src, dst)
+  if idx and idx >= 0 then
+    -- send audio, pas MIDI ; mode post-fader par defaut
+    reaper.SetTrackSendInfo_Value(src, 0, idx, "I_SENDMODE", 0)  -- post-fader
+    reaper.SetTrackSendInfo_Value(src, 0, idx, "I_SRCCHAN", 0)    -- stereo 1/2
+    reaper.SetTrackSendInfo_Value(src, 0, idx, "I_DSTCHAN", 0)
+    return idx
+  end
+  return nil
+end
+
+local function set_send_open(src, dst, open, gain_db)
+  if not (src and dst) then return false end
+  local idx = open and ensure_send(src, dst) or find_send(src, dst)
+  if not idx then return false end
+  -- mute si ferme ; unmute + volume si ouvert
+  reaper.SetTrackSendInfo_Value(src, 0, idx, "B_MUTE", open and 0 or 1)
+  if open then
+    local db = gain_db or 0
+    local vol = (db <= -150) and 0 or (10 ^ (db / 20))
+    reaper.SetTrackSendInfo_Value(src, 0, idx, "D_VOL", vol)
+  end
+  return true
+end
+
+-- Mute piste UNIQUEMENT (B_MUTE). Pas de monitoring, pas de CSurf.
+local function set_track_mute(tr, mute)
+  if not tr then return end
+  local want = mute and 1 or 0
+  local cur = reaper.GetMediaTrackInfo_Value(tr, "B_MUTE") or 0
+  if (cur >= 0.5) == (want == 1) then return end  -- deja dans le bon etat
+  reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", want)
+end
+
+-- Source de verite = S.routing.in_l (pas les edges)
+function VL.update_input_mutes()
+  if not (reaper and reaper.CountTracks) then return end
+  if not S.cfg.auto_mute_unrouted_inputs then return end
+  local tracks = VL.resolve_tracks(true)
+  local R = S.routing.in_l
+  for k = 1, NIN do
+    local any = false
+    for i = 1, NLOOP do
+      if R[k][i] then any = true; break end
+    end
+    set_track_mute(tracks.inputs[k], not any)
+  end
+end
+
+function VL.apply_routing(edges)
+  if not (reaper and reaper.CountTracks) then return end
+  edges = edges or VL.routing_edges()
+  local tracks = VL.resolve_tracks(true)
+  for _, e in ipairs(edges) do
+    local src, dst
+    if e.kind == "in_l" then
+      src = tracks.inputs[e.a]; dst = tracks.loopers[e.b]
+    elseif e.kind == "l_l" then
+      src = tracks.loopers[e.a]; dst = tracks.loopers[e.b]
+    end
+    if src and dst then set_send_open(src, dst, e.open, e.gain_db or 0) end
+  end
+  VL.update_input_mutes()
+end
+
+function VL.set_auto_mute_unrouted(on)
+  S.cfg.auto_mute_unrouted_inputs = not not on
+  if not S.cfg.auto_mute_unrouted_inputs then
+    local tracks = VL.resolve_tracks(true)
+    for k = 1, NIN do set_track_mute(tracks.inputs[k], false) end
+  else
+    VL.update_input_mutes()
+  end
+end
+
+function VL.toggle_auto_mute_unrouted()
+  VL.set_auto_mute_unrouted(not S.cfg.auto_mute_unrouted_inputs)
+end
+
+--------------------------------------------------------------------------
+-- FX inserts : 4 slots par IN (haut page FX) + 4 slots par looper (bas)
+-- Slot N = N-ieme effet "utile" sur la piste (les JSFX nowundo sont ignores sur les L).
+--------------------------------------------------------------------------
+local function is_nowundo_fx(tr, fx)
+  local _, nm = reaper.TrackFX_GetFXName(tr, fx, "")
+  nm = (nm or ""):lower()
+  for _, pat in ipairs(VL.config.fx_patterns or {}) do
+    if nm:find(pat, 1, true) then return true end
+  end
+  return false
+end
+
+-- Retourne l'index TrackFX (0-based) du slot logique 1..NSLOT, ou nil si absent
+local function fx_index_for_slot(tr, slot, skip_nowundo)
+  if not tr or slot < 1 then return nil end
+  local n = reaper.TrackFX_GetCount(tr)
+  local seen = 0
+  for fx = 0, n - 1 do
+    if not (skip_nowundo and is_nowundo_fx(tr, fx)) then
+      seen = seen + 1
+      if seen == slot then return fx end
+    end
+  end
+  return nil
+end
+
+function VL.scan_fx_present()
+  if not (reaper and reaper.CountTracks) then return end
+  local tracks = VL.resolve_tracks(true)
+  for k = 1, NIN do
+    local tr = tracks.inputs[k]
+    for slot = 1, NSLOT do
+      local fx = tr and fx_index_for_slot(tr, slot, false) or nil
+      S.fx_present.input[k][slot] = fx ~= nil
+      -- miroir = etat REAPER (enabled) ; pas de notify au scan
+      S.fx.input[k][slot] = (fx ~= nil) and reaper.TrackFX_GetEnabled(tr, fx) or false
+    end
+  end
+  for i = 1, NLOOP do
+    local tr = tracks.loopers[i]
+    for slot = 1, NSLOT do
+      local fx = tr and fx_index_for_slot(tr, slot, true) or nil
+      S.fx_present.looper[i][slot] = fx ~= nil
+      S.fx.looper[i][slot] = (fx ~= nil) and reaper.TrackFX_GetEnabled(tr, fx) or false
+    end
+  end
+end
+
+function VL.apply_fx(slots)
+  if not (reaper and reaper.CountTracks) then return end
+  slots = slots or VL.fx_list()
+  local tracks = VL.resolve_tracks(true)
+  reaper.PreventUIRefresh(1)
+  for _, s in ipairs(slots) do
+    local tr = (s.kind == "input") and tracks.inputs[s.id] or tracks.loopers[s.id]
+    if tr then
+      local fx = fx_index_for_slot(tr, s.slot, s.kind == "looper")
+      if not fx then
+        if s.present then VL.set_fx_present(s.kind, s.id, s.slot, false) end
+      else
+        if not s.present then VL.set_fx_present(s.kind, s.id, s.slot, true) end
+        -- enabled true = effet actif = bypass OFF
+        local on = reaper.TrackFX_GetEnabled(tr, fx)
+        if on ~= s.enabled then
+          reaper.TrackFX_SetEnabled(tr, fx, s.enabled and true or false)
+        end
+      end
+    end
+  end
+  reaper.PreventUIRefresh(-1)
+end
+
 
 -- Geste de "peinture" : on pose/retire une cellule, puis on glisse (souris) ou on appuie sur d'autres
 -- pads sans lacher le premier (hardware) : toutes prennent la meme valeur. Les hooks (routing, groupes)
 -- ne sont appeles qu'UNE fois, a la fin du geste.
 local paint = nil
 local function notify_routing()
-  if paint then paint.dirty_routing = true else VL.hooks.routing_changed(VL.routing_edges()) end
+  if paint then
+    paint.dirty_routing = true
+  else
+    -- hooks d'abord (sends), puis mute IN toujours a jour
+    local ok, err = pcall(function() VL.hooks.routing_changed(VL.routing_edges()) end)
+    if not ok then log("warn", "routing_changed : %s", tostring(err)) end
+    if VL.update_input_mutes then
+      ok, err = pcall(VL.update_input_mutes)
+      if not ok then log("warn", "update_input_mutes : %s", tostring(err)) end
+    end
+  end
 end
 local function notify_groups()
   if paint then paint.dirty_groups = true else VL.hooks.groups_changed(S.group_of) end
@@ -283,11 +782,17 @@ local ACTIONS = {
   loop_in_step  = { kind = "trig" },                                    -- args = % de la boucle (signe = sens)
   loop_out_step = { kind = "trig" },                                    -- vrais In / Out : l'autre borne ne bouge pas
                                                                         -- (si la boucle est quantisee : une division par appui)
-  -- CLEAR : reinitialise tout (rec, replace, multiply, auto, reverse, play, one shot, cloud, slicer, link)
-  -- et remet PART sur MAIN. Epargne : presets, selecteurs looper/groupe/page, appartenance aux groupes.
-  clear_all   = { kind = "trig", reset = "all" },
-  clear       = { kind = "trig", reset = "all" },
-  clear_part  = { kind = "trig", reset = "part" },                       -- idem mais garde la part courante
+  -- CLEAR individuel :
+  --   court (clear / clear_part) = part active seulement (Main|Chorus|Bridge)
+  --   long  (clear_full)         = les 3 parts de CE looper
+  -- CLEAR ALL (global, ignore la selection) :
+  --   court (clear_all)      = part active de CHAQUE looper vivant
+  --   long  (clear_all_full) = les 3 parts de CHAQUE looper vivant
+  clear       = { kind = "trig", reset = "part" },
+  clear_part  = { kind = "trig", reset = "part" },
+  clear_full  = { kind = "trig", reset = "all" },
+  clear_all   = { kind = "trig", reset = "part", global = true },
+  clear_all_full = { kind = "trig", reset = "all", global = true },
   -- toggles (allume / eteint) ; excl = actions mutuellement exclusives
   rec_overdub = { kind = "toggle", key = "rec",      excl = { "replace" } },
   replace     = { kind = "toggle", key = "replace",  excl = { "rec_overdub" } },
@@ -337,6 +842,14 @@ end
 local function exec(action, args, targets)
   local def = ACTIONS[action]
   if not def then log("error", "action inconnue : %s", tostring(action)) return end
+  -- CLEAR ALL / CLEAR ALL FULL : global — une seule diffusion + reset miroir de TOUS les loopers
+  if action == "clear_all" or action == "clear_all_full" then
+    VL.backend.send(1, action, nil)   -- broadcast (looper ignore)
+    local all_parts = (action == "clear_all_full")
+    for i = 1, NLOOP do reset_looper(i, all_parts) end
+    log("info", "%s -> toutes les instances", action)
+    return
+  end
   if def.kind == "toggle" then
     local want = desired_toggle(def.key, targets)
     for _, t in ipairs(targets) do
@@ -466,6 +979,7 @@ function VL.set_route(kind, a, b, value)
     return false
   end
   notify_routing()
+  if kind == "in_l" and VL.update_input_mutes then VL.update_input_mutes() end
   log("info", "route %s %d->%d : %s", kind, a, b, value and "ouverte" or "fermee")
   return true
 end
@@ -546,12 +1060,13 @@ end
 for p = 1, NPAGE do bind_all(NGROUP + p, 9, fn(function() VL.set_page(p) end, function() return S.page == p and "on" or "idle" end)) end
 
 -- Page 1 : Main
-for n = 1, 5 do bind(1, 1, n, fn(function() VL.set_fighter_page(n) end, function() return S.fighter_page == n and "on" or "idle" end)) end
-bind(1, 1, 7, fn(function() VL.step_looper(-1) end))
-bind(1, 1, 8, fn(function() VL.step_looper(1) end))
+-- row 0 = selection loopers | row 1 = statut loopers | rows 2-5 = ancienne grille 1-4 decalee
+for n = 1, 5 do bind(1, 2, n, fn(function() VL.set_fighter_page(n) end, function() return S.fighter_page == n and "on" or "idle" end)) end
+bind(1, 2, 7, fn(function() VL.step_looper(-1) end))
+bind(1, 2, 8, fn(function() VL.step_looper(1) end))
 for n = 1, NPRESET do
   for r, bank in ipairs({ "routing", "group" }) do
-    bind(1, 1 + r, n,
+    bind(1, 2 + r, n,   -- routing=row3, group=row4
       fn(function() VL.preset_press(bank, n) end, function()
         local p = S.presets[bank]
         return p.active == n and "on" or (p.slots[n] and "idle" or "off")
@@ -559,18 +1074,20 @@ for n = 1, NPRESET do
       fn(function() VL.preset_revert(bank, n) end))
   end
 end
-bind(1, 4, 1, fn(function() VL.toggle_launch() end, function() return S.launch and "on" or "idle" end))
-bind(1, 4, 2, fn(function() VL.fire() end, function() return #S.armed > 0 and "armed" or "idle" end))
-bind(1, 4, 7, act("quantise_inout"))
-bind(1, 4, 8, act("full_loop"))
+bind(1, 5, 1, fn(function() VL.toggle_launch() end, function() return S.launch and "on" or "idle" end))
+bind(1, 5, 2, fn(function() VL.fire() end, function() return #S.armed > 0 and "armed" or "idle" end))
+bind(1, 5, 7, act("quantise_inout"))
+bind(1, 5, 8, act("full_loop"))
 for n = 1, 3 do bind(1, 6, n, act("part", n)) end
 bind(1, 6, 4, act("speed_step", -12)); bind(1, 6, 5, act("speed_step", 12))
 bind(1, 6, 6, act("pitch_step", -12)); bind(1, 6, 7, act("pitch_step", 12))
 bind(1, 6, 8, act("link"))
 bind(1, 7, 1, act("auto"));    bind(1, 7, 3, act("restart"));  bind(1, 7, 4, act("one_shot"))
 bind(1, 7, 5, act("cloud"));   bind(1, 7, 6, act("slicer"));   bind(1, 7, 7, act("redo")); bind(1, 7, 8, act("undo"))
-bind(1, 8, 1, act("clear_all"))
-bind(1, 8, 2, act("clear"), act("clear_part"))
+-- CLEAR ALL : court = part active sur les 8 | long = 3 parts sur les 8
+bind(1, 8, 1, act("clear_all"), act("clear_all_full"))
+-- CLEAR individuel : court = part active | long = 3 parts de ce looper (ou groupe)
+bind(1, 8, 2, act("clear"), act("clear_full"))
 bind(1, 8, 3, act("reverse"), act("auto_rev"))
 bind(1, 8, 4, act("stop_play")); bind(1, 8, 5, act("multiply")); bind(1, 8, 6, act("replace"))
 bind(1, 8, 7, act("rerec"));     bind(1, 8, 8, act("rec_overdub"))
@@ -639,8 +1156,53 @@ function VL.cycle_layer()
 end
 
 -- libelle d'un pad (fenetre de test) : dynamique pour la page 4 et le bouton PAGE 4
+
+-- Rangee 5 (4e en partant du bas) page Main : statut des 8 loopers (affichage seul, pas d'action)
+local STATUS_HEX = {
+  empty     = 0x202020,
+  rec       = 0xFF0000,   -- premier rec
+  wait_sync = 0xFF0000,   -- attente sortie de rec (clignote)
+  play      = 0x00CC44,   -- play
+  overdub   = 0xFF8800,   -- overdub
+  multiply  = 0x9933FF,   -- multiply (violet, comme le bouton)
+  stop      = 0x00CC44,   -- stop avec contenu (vert clignotant)
+  cloud     = 0x3399FF,   -- cloud
+  slicer    = 0xFFD320,   -- slicer
+  reverse   = 0xFF66AA,   -- reverse
+  replace   = 0xFF5500,   -- replace (autre orange)
+}
+
+local function looper_status(i)
+  local L = S.loopers[i]
+  local has = (L.length or 0) > 0
+  -- Priorite transport / modes
+  if L.wait_sync then return "WAIT SYNC", STATUS_HEX.wait_sync, "armed" end
+  if L.rec_led then return "REC", STATUS_HEX.rec, "on" end
+  if L.replace then return "REPLACE", STATUS_HEX.replace, "on" end
+  if L.multiply then return "MULT", STATUS_HEX.multiply, "on" end
+  if L.overdub then return "DUB", STATUS_HEX.overdub, "on" end
+  if L.playing then
+    if L.cloud then return "CLOUD", STATUS_HEX.cloud, "on" end
+    if L.slicer then return "SLICER", STATUS_HEX.slicer, "on" end
+    if L.rev then return "REVERSE", STATUS_HEX.reverse, "on" end
+    return "PLAY", STATUS_HEX.play, "on"
+  end
+  if has then
+    -- stop avec boucle : vert clignotant ; reverse/cloud/slicer en stop restent visibles
+    if L.cloud then return "CLOUD", STATUS_HEX.cloud, "member_cursor" end
+    if L.slicer then return "SLICER", STATUS_HEX.slicer, "member_cursor" end
+    if L.rev then return "REVERSE", STATUS_HEX.reverse, "member_cursor" end
+    return "STOP", STATUS_HEX.stop, "member_cursor"
+  end
+  return "EMPTY", STATUS_HEX.empty, "off"
+end
+
 function VL.pad_label(page, row, col)
   if row == 8 and col == 9 then return "Launchpad PAGE 4 " .. cur_layer().name end
+  if page == 1 and row == 1 and col >= 1 and col <= 8 then
+    local label = looper_status(col)
+    return "L" .. col .. " " .. label
+  end
   if page == 4 and row >= 1 and col <= 8 then
     local spec = cur_layer().cells[row .. "," .. col]
     if not spec then return nil end
@@ -680,10 +1242,10 @@ VL.register_layer({ id = "groups", name = "Groups", cell = function(row, col)
                  end }
     return { short = sh, hex = GROUP_COL[row], label = "L" .. col .. " GRP" .. row,
              state = function() return S.group_of[col] == row and "on" or "idle" end }
-  elseif row == 5 then                                          -- rappel des presets de groupe (comme la ligne 3 de la page Main)
-    local b = BIND[1]["3," .. col]
-    return { short = b.short, long = b.long, hex = PAD_RGB[1]["3," .. col] or COL.default,
-             label = PAD_LABEL[1]["3," .. col], state = function() return main_state(b) end }
+  elseif row == 5 then                                          -- rappel des presets de groupe (comme la ligne 4 de la page Main apres decalage)
+    local b = BIND[1]["4," .. col]
+    return { short = b.short, long = b.long, hex = PAD_RGB[1]["4," .. col] or COL.default,
+             label = PAD_LABEL[1]["4," .. col], state = function() return main_state(b) end }
   else                                                          -- lignes 6-8 : repliquees de la page Main
     local key = row .. "," .. col
     local b = BIND[1][key]
@@ -705,7 +1267,16 @@ VL.register_layer({ id = "rc505", name = "RC-505", cell = function(row, col)
   local action, name, hex = fnrow[1], fnrow[2], fnrow[3]
   local def = ACTIONS[action]
   return { short = act_on(col, action), hex = hex, label = "L" .. col .. " " .. name,
-           state = function() return (def.key and S.loopers[col][def.key]) and "on" or "idle" end }
+           state = function()
+             local L = S.loopers[col]
+             if action == "rec_overdub" then
+               if L.wait_sync then return "armed" end  -- clignote
+               if L.overdub then return "warn" end     -- orange
+               if L.rec_led then return "on" end       -- rouge
+               return "idle"
+             end
+             return (def.key and L[def.key]) and "on" or "idle"
+           end }
 end })
 
 -- Pads "-/+" : 2 pads par looper et par parametre ; rangee impaire = loopers 1-4, rangee paire = loopers 5-8
@@ -841,7 +1412,10 @@ end
 local function end_paint()
   local p = paint
   paint = nil
-  if p.dirty_routing then VL.hooks.routing_changed(VL.routing_edges()) end
+  if p.dirty_routing then
+    pcall(function() VL.hooks.routing_changed(VL.routing_edges()) end)
+    if VL.update_input_mutes then pcall(VL.update_input_mutes) end
+  end
   if p.dirty_groups then VL.hooks.groups_changed(S.group_of) end
   if p.dirty_fx then VL.hooks.fx_changed(VL.fx_list()) end
 end
@@ -899,6 +1473,7 @@ end
 
 function VL.tick(t)
   t = t or now()
+  if VL.poll_looper_feedback then VL.poll_looper_feedback() end
   local fired = false
   for _, d in pairs(down) do
     if d.b.long and not d.paint and not d.long_fired and (t - d.t) >= LONG_PRESS_S then
@@ -1073,12 +1648,41 @@ main_state = function(b)
   local sh, mode = b.short, "idle"
   if sh.kind == "action" then
     local def = ACTIONS[sh.action]
+    -- REC : rouge en enregistrement, orange en overdub, clignote en Wait Sync
+    if sh.action == "rec_overdub" then
+      local function rec_mode_for(L)
+        if L.wait_sync then return "armed" end   -- clignote : sorti du rec, sync pas encore atteinte
+        if L.overdub then return "warn" end      -- orange : overdub
+        if L.rec_led then return "on" end        -- rouge (couleur famille du pad) : rec
+        return "idle"
+      end
+      -- groupe : priorite wait_sync > overdub > rec parmi les cibles
+      mode = "idle"
+      for _, t in ipairs(targets) do
+        local m = rec_mode_for(S.loopers[t])
+        if m == "armed" then mode = "armed"; break
+        elseif m == "warn" and mode ~= "armed" then mode = "warn"
+        elseif m == "on" and mode == "idle" then mode = "on" end
+      end
+      mode = armed_mode(sh.action, sh.args) or mode
+      return mode
+    end
+    if sh.action == "part" then
+      -- Main/Chorus/Bridge : allume si active, clignote si pending (attente fin de cycle)
+      local want = sh.args
+      if ref.pending_part and ref.target_part == want then mode = "armed"
+      elseif ref.part == want and not ref.pending_part then mode = "on"
+      else mode = "idle" end
+      mode = armed_mode(sh.action, sh.args) or mode
+      return mode
+    end
     if def.kind == "toggle" and toggle_on(def.key, targets) then mode = "on"
     elseif def.kind == "select" and ref[def.key] == sh.args then mode = "on" end
     mode = armed_mode(sh.action, sh.args) or mode
   elseif sh.led then mode = sh.led() end
   return mode
 end
+
 
 function VL.build_frame()
   local f, page = {}, S.page
@@ -1115,7 +1719,12 @@ function VL.build_frame()
   if page == 1 then
     for key, b in pairs(BIND[1]) do
       local row, col = key:match("^(%d+),(%d+)$"); row, col = tonumber(row), tonumber(col)
-      if row >= 1 and col <= 8 then put(row, col, rgb[key] or COL.default, main_state(b)) end
+      if row >= 1 and col <= 8 and row ~= 1 then put(row, col, rgb[key] or COL.default, main_state(b)) end
+    end
+    -- Ligne 1 (sous selection) : statut live des 8 loopers
+    for i = 1, NLOOP do
+      local label, hex, mode = looper_status(i)
+      put(1, i, hex, mode)
     end
   else
     local fb = compute_feedback()
@@ -1399,7 +2008,7 @@ local function lp_send(bytes)
   if not ok then
     if not VL._midi_send_error then
       VL._midi_send_error = true
-      reaper.ShowConsoleMsg("[Virtual Launchpad MK3] Erreur MIDI sortie: " .. tostring(err) .. "\n")
+      -- MIDI send error silenced
     end
     return false
   end
@@ -1627,14 +2236,14 @@ function VL.run_gfx_test()
   NDDOCK.init("Virtual Launchpad - Launchpad Mini MK3 TEST", "VirtualLaunchpad_MK3_TEST", REF_W, REF_H)
   if LP_OUT then
     lp_set_mode(true)
-    reaper.ShowConsoleMsg("[Virtual Launchpad MK3] Sortie MIDI " .. tostring(LP_OUT) .. " : " .. tostring(LP_OUT_NAME) .. "\n")
+    -- MIDI OUT ok
   else
-    reaper.ShowConsoleMsg("[Virtual Launchpad MK3] Sortie Launchpad non detectee.\n" .. tostring(LP_OUT_NAME or "") .. "\n")
+    -- MIDI OUT missing
   end
   if LP_IN then
-    reaper.ShowConsoleMsg("[Virtual Launchpad MK3] Entree MIDI " .. tostring(LP_IN) .. " : " .. tostring(LP_IN_NAME) .. "\n")
+    -- MIDI IN ok
   else
-    reaper.ShowConsoleMsg("[Virtual Launchpad MK3] Entree Launchpad non detectee. Verifier Preferences > MIDI Devices.\n" .. tostring(LP_IN_NAME or "") .. "\n")
+    -- MIDI IN missing
   end
 
   -- Calcule le scale + positions à chaque frame
@@ -1975,6 +2584,10 @@ function VL.reset()
   log("info", "Virtual Launchpad %s initialise", VL.VERSION)
 end
 VL.reset()
+-- Applique l'etat de routing initial (tout ferme) + mute auto des IN non routees
+if VL.scan_fx_present then VL.scan_fx_present() end
+if VL.apply_routing then VL.apply_routing() end
+if VL.apply_fx then VL.apply_fx() end
 
 if rawget(_G, "VL_TEST") then return VL end
 VL.run_gfx_test()
