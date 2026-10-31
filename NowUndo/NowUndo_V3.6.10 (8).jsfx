@@ -807,20 +807,68 @@ loop(3,
   
   cmd = gmem[gmem_base + 48];
   cmd > 0 ? (
-    p != (active_part - 1) ? switch_part(p + 1);
-    cmd == 1 ? ( length > 0 && state != 1 && state != 8 ? state_target = (state == 3 ? 2 : 3) : rec_cmd = 1; ) :
-    cmd == 2 ? ( do_clear(0); state_target = 0; ) :
-    cmd == 3 ? ( state_target = (state == 0 || state == 7) ? 2 : 0; ) :
-    cmd == 4 ? ( rev_on = !rev_on; slider16 = rev_on; ) :
-    cmd == 5 ? ( pingpong_on = !pingpong_on; slider17 = pingpong_on; ) :
-    cmd == 6 ? ( play_mode = (play_mode == 1 ? 0 : 1); slider6 = play_mode; play_mode == 1 ? ( cloud_on = 0; slider23 = 0; ); ) :
-    cmd == 7 ? ( cloud_on = !cloud_on; slider23 = cloud_on; cloud_on && play_mode == 1 ? ( play_mode = 0; slider6 = 0; ); ) :
-    cmd == 8 ? ( link_on = !link_on; slider7 = link_on; ) :
-    cmd == 9 ? ( state_target = (state == 4 ? 2 : 4); ) :
-    cmd == 10 ? ( state_target = (state == 5 ? 2 : 5); ) :
-    cmd == 11 ? ( do_clear(1); state_target = 0; ) :
-    cmd == 12 ? 0; // pure part switch (already done above)
+    // Remote transport / mode commands (Launchpad / Virtual Launchpad)
+    // +48 = cmd, +49 = optional numeric arg (speed/pitch step, etc.)
+    cmd_arg = gmem[gmem_base + 49];
+    // cmd 12 = switch de part quantize (comme les boutons Main/Chorus/Bridge de l'UI) :
+    //   length > 0 -> pending jusqu'a fin de cycle ; sinon switch immediat.
+    //   re-tap sur la part active / cible = annule le pending.
+    cmd == 12 ? (
+      req_part = p + 1;
+      req_part == active_part ? (
+        pending_part_switch = 0;
+      ) : (
+        pending_part_switch && target_part == req_part ? (
+          pending_part_switch = 0; // re-tap = annule
+        ) : (
+          length > 0 ? ( target_part = req_part; pending_part_switch = 1; ) : switch_part(req_part);
+        );
+      );
+    ) : (
+      // autres commandes : bascule d'abord sur la part du slot si besoin
+      p != (active_part - 1) ? switch_part(p + 1);
+      cmd == 1 ? ( length > 0 && state != 1 && state != 8 ? state_target = (state == 3 ? 2 : 3) : rec_cmd = 1; ) :
+      cmd == 2 ? ( do_clear(0); state_target = 0; ) :
+      cmd == 3 ? ( state_target = (state == 0 || state == 7) ? 2 : 0; ) :
+      cmd == 4 ? ( rev_on = !rev_on; slider16 = rev_on; ) :
+      cmd == 5 ? ( pingpong_on = !pingpong_on; slider17 = pingpong_on; ) :
+      cmd == 6 ? ( play_mode = (play_mode == 1 ? 0 : 1); slider6 = play_mode; play_mode == 1 ? ( cloud_on = 0; slider23 = 0; ); ) :
+      cmd == 7 ? ( cloud_on = !cloud_on; slider23 = cloud_on; cloud_on && play_mode == 1 ? ( play_mode = 0; slider6 = 0; ); ) :
+      cmd == 8 ? ( link_on = !link_on; slider7 = link_on; ) :
+      cmd == 9 ? ( state_target = (state == 4 ? 2 : 4); ) :
+      cmd == 10 ? ( state_target = (state == 5 ? 2 : 5); ) :
+      cmd == 11 ? ( do_clear(1); state_target = 0; ) :
+      cmd == 13 ? ( state_target = (state == 6 ? 2 : 6); ) : // Multiply
+    cmd == 14 ? undo_state() :
+    cmd == 15 ? redo_state() :
+    cmd == 16 ? trigger_restart() :
+    cmd == 17 ? ( do_clear(0); state_target = 1; ) : // Re-Rec
+    cmd == 18 ? ( // One-Shot toggle
+      play_mode = (play_mode == 2 ? 0 : 2); slider6 = play_mode;
+      play_mode == 2 ? ( cloud_on = 0; slider23 = 0; );
+    ) :
+    cmd == 19 ? ( auto_on = !auto_on; ) :
+    cmd == 20 ? ( // relative speed step: arg in semitones-ish ratio factors via 2^(st/12)
+      st = cmd_arg;
+      abs(st) < 0.0001 ? st = 12;
+      speed = max(0.01, min(100, speed * (2 ^ (st / 12)))); slider1 = speed;
+    ) :
+    cmd == 21 ? ( // relative pitch step in semitones
+      st = cmd_arg;
+      abs(st) < 0.0001 ? st = 12;
+      pitch = max(-48, min(48, pitch + st)); slider2 = pitch;
+    ) :
+    cmd == 22 ? ( // Full Loop
+      length > 0 ? ( loop_start = 0; loop_width = length; sync_hard_resync = 1; );
+    ) :
+    cmd == 23 ? ( // Quantise In/Out cycle
+      loop_quant = (loop_quant >= 9 ? 0 : loop_quant + 1); slider24 = loop_quant;
+      length > 0 ? ( loop_start = apply_quant_start(loop_start); loop_width = apply_quant_width(loop_width, loop_start); sync_hard_resync = 1; );
+    ) :
+    0;
+    );
     gmem[gmem_base + 48] = 0;
+    gmem[gmem_base + 49] = 0;
   );
 
   // Dashboard Twister In/Out/Width:
@@ -956,6 +1004,8 @@ loop(3,
     gmem[gmem_base + 40] = cloud_lfo_rate;
     gmem[gmem_base + 41] = cloud_lfo_depth;
     gmem[gmem_base + 42] = active_part;
+    gmem[gmem_base + 163] = pending_part_switch;
+    gmem[gmem_base + 164] = target_part;
     gmem[gmem_base + 43] = auto_on;
     gmem[gmem_base + 44] = loop_start;
     gmem[gmem_base + 45] = loop_width;
@@ -992,6 +1042,8 @@ loop(3,
     gmem[gmem_base + 10] = 0;
     gmem[gmem_base + 23] = 0;
     gmem[gmem_base + 42] = active_part;
+    gmem[gmem_base + 163] = pending_part_switch;
+    gmem[gmem_base + 164] = target_part;
     
     p_len == 0 ? (
       wi_ex = 0; loop(100, gmem[gmem_base + 50 + wi_ex] = 0; wi_ex += 1;);
