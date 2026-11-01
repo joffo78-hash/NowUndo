@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" name="NowUndo" commit="894e634c98d541bb76e268c4e350989e7f40adcf">
+  <category name="NowUndo">
+    <reapack name="NowUndo_V3.6.10 (8).jsfx" type="effect" desc="NowUndo Looper">
+      <version name="3.6.10" author="joffo78-hash" time="2026-11-01T08:17:20Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source>https://github.com/joffo78-hash/NowUndo/raw/1533f33dfd40a8859eea320bfea19d1518416e33/NowUndo/NowUndo_V3.6.10%20(8).jsfx</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="NowUndo/Scripts">
+    <reapack name="DashBoard.lua" type="script" desc="NowUndo Dashboard">
+      <version name="1.3" author="Assistant" time="2026-10-29T14:24:17Z">
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/62bf0dd100fca07db11348e962bc4e80128af03e/NowUndo/Scripts/DashBoard.lua</source>
+      </version>
+    </reapack>
+    <reapack name="Synchronizer.lua" type="script" desc="NowUndo Synchronizer">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:17:25Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/d576e9448d51f7439ba7c5eeae931d366b4469b9/NowUndo/Scripts/Synchronizer.lua</source>
+      </version>
+    </reapack>
+    <reapack name="VirtualLaunchpad_LaunchpadMiniMK3.lua" type="script" desc="NowUndo Virtual Launchpad">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:17:31Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/25d6b42534b426b68b9cd855220836276ec251b9/NowUndo/Scripts/VirtualLaunchpad_LaunchpadMiniMK3.lua</source>
+      </version>
+    </reapack>
+    <reapack name="VirtualLaunchpadDisplaymidi.lua" type="script" desc="NowUndo Virtual Launchpad Mirror">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:17:28Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/ab01360095e6a74ca6d1134aec855a460c45c6b4/NowUndo/Scripts/VirtualLaunchpadDisplaymidi.lua</source>
+      </version>
+    </reapack>
+    <reapack name="VirtualTwister.lua" type="script" desc="NowUndo Twister Control">
+      <version name="1.2" author="Assistant" time="2026-10-29T14:24:17Z">
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/62bf0dd100fca07db11348e962bc4e80128af03e/NowUndo/Scripts/VirtualTwister.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="NowUndo/Scripts/NowUndo_Web_Package">
+    <reapack name="NowUndo_Twister_Web.lua" type="script" desc="NowUndo Twister Web Backend">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:17:38Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/9ab3dca0eb79b5a1fd2e343c280c05099253be09/NowUndo/Scripts/NowUndo_Web_Package/NowUndo_Twister_Web.lua</source>
+      </version>
+    </reapack>
+    <reapack name="Virtual_Launchpad_Web.lua" type="script" desc="NowUndo Virtual Launchpad Web Backend">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:17:41Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/28e0e2f56fcb7c33043d6e5de1bfe341cc333fa8/NowUndo/Scripts/NowUndo_Web_Package/Virtual_Launchpad_Web.lua</source>
+        <source type="webinterface" file="NowUndo.html">https://github.com/joffo78-hash/NowUndo/raw/28e0e2f56fcb7c33043d6e5de1bfe341cc333fa8/NowUndo/Scripts/NowUndo_Web_Package/NowUndo.html</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="NowUndo/Scripts/openners">
+    <reapack name="openlooper1.lua" type="script" desc="NowUndo Open Looper 1">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:18:14Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/0f4444454355b0edc168603a679077e77dd584c4/NowUndo/Scripts/openners/openlooper1.lua</source>
+      </version>
+    </reapack>
+    <reapack name="openlooper2.lua" type="script" desc="NowUndo Open Looper 2">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:18:17Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/5cf774ba85f521c377b53ab533319b43ae1808ab/NowUndo/Scripts/openners/openlooper2.lua</source>
+      </version>
+    </reapack>
+    <reapack name="openlooper3.lua" type="script" desc="NowUndo Open Looper 3">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:18:20Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/bcd6375be463d9be0c677f1360c164c987b5816a/NowUndo/Scripts/openners/openlooper3.lua</source>
+      </version>
+    </reapack>
+    <reapack name="openlooper4.lua" type="script" desc="NowUndo Open Looper 4">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:18:23Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/94dd3aa1a5e74d91439c49a759b24d6d78eae3ec/NowUndo/Scripts/openners/openlooper4.lua</source>
+      </version>
+    </reapack>
+    <reapack name="openlooper5.lua" type="script" desc="NowUndo Open Looper 5">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:18:25Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/3bff2837af5a06b4bd10558a8cd94628c1eb9342/NowUndo/Scripts/openners/openlooper5.lua</source>
+      </version>
+    </reapack>
+    <reapack name="openlooper6.lua" type="script" desc="NowUndo Open Looper 6">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:18:29Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/d3bf6178fa27b036a5cb71e2b2c4af329629833d/NowUndo/Scripts/openners/openlooper6.lua</source>
+      </version>
+    </reapack>
+    <reapack name="openlooper7.lua" type="script" desc="NowUndo Open Looper 7">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:18:32Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/4518c967b148ddea1aa1f28f7afc18cd2f9cc8fc/NowUndo/Scripts/openners/openlooper7.lua</source>
+      </version>
+    </reapack>
+    <reapack name="openlooper8.lua" type="script" desc="NowUndo Open Looper 8">
+      <version name="1.0" author="joffo78-hash" time="2026-11-01T08:18:34Z">
+        <changelog><![CDATA[Initial ReaPack release.]]></changelog>
+        <source main="main">https://github.com/joffo78-hash/NowUndo/raw/74aba259358f032f5a84e2474c864b361a877d7e/NowUndo/Scripts/openners/openlooper8.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <metadata>
+    <link rel="website">https://github.com/joffo78-hash/NowUndo</link>
+  </metadata>
+</index>
