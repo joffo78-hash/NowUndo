@@ -1,6 +1,6 @@
--- @description NowUndo Dashboard (Light) - Compact
+-- @description NowUndo Dashboard
 -- @version 1.3
--- @author Assistant
+-- @author joffo78-hash
 
 local SCALE = 1.0
 local MAX_INST = 8
