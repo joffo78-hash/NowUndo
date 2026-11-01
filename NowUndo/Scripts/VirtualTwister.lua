@@ -1,6 +1,6 @@
--- @description NowUndo Twister Control - Compact
+-- @description NowUndo Twister Control
 -- @version 1.2
--- @author Assistant
+-- @author joffo78-hash
 
 local SCALE = 1.0
 local COLS = 4
