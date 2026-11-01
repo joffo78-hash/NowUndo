@@ -15,7 +15,32 @@ max_instances = 5;
 (slider5 < 25 || slider5 > 150) ? slider5 = 100;
 ui_scale = slider5 / 100.0;
 
+// --- COMMANDES EXTERNES (Virtual Launchpad) : gmem[96] Main | gmem[97] Chorus | gmem[98] Bridge
+//     1 = Host Sync ON  |  2 = Host Sync OFF (unlock) ; remis a 0 apres traitement
+function handle_ext_cmds() local(p, c, mask, off) (
+    p = 1;
+    loop(3,
+        c = gmem[95 + p];
+        off = (p - 1) * 10;
+        mask = (p == 1 ? 1 : (p == 2 ? 2 : 4));
+        c == 1 ? (
+            p == 1 ? slider1 = 1 : (p == 2 ? slider2 = 1 : slider3 = 1);
+            sliderchange(mask);
+            slider_automate(mask);
+            gmem[95 + p] = 0;
+        ) : c == 2 ? (
+            p == 1 ? slider1 = 0 : (p == 2 ? slider2 = 0 : slider3 = 0);
+            gmem[off] == 2 ? gmem[off] = 0;
+            sliderchange(mask);
+            slider_automate(mask);
+            gmem[95 + p] = 0;
+        );
+        p += 1;
+    );
+);
+
 function handle_host_sync_all() local(beats_meas, host_bpm, b_len, m_len, total_beats, cur_beat, beat_in_cycle, phase_samples, mi, m_base, m_id, p, offset, enabled, main_locked, main_master_id, master_slot_idx, master_bpm_val, master_gmem_base, m_active_part, m_part_base, m_alias) (
+    handle_ext_cmds();
     host_bpm = max(tempo, 20.0);
     beats_meas = ts_num > 0 ? ts_num : 4;
     total_beats = beats_meas * max(1, floor(slider4));
