@@ -1,3 +1,9 @@
+// @description NowUndo Looper
+// @version 3.6.10
+// @author joffo78-hash
+// @changelog
+//   Initial ReaPack release.
+
 desc:aNowUndo V3.6.10 Looper (slicer: gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
 options:gmem=nowundo_sync
 options:maxmem=128000000
