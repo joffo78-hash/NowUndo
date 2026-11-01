@@ -33,7 +33,6 @@ jobs:
           --no-commit
           --name "NowUndo"
           --link "https://github.com/joffo78-hash/NowUndo"
-          --about "NowUndo/README.md"
 
       - name: Commit updated index
         run: |
