@@ -4,6 +4,7 @@
 -- @changelog
 --   Initial ReaPack release.
 -- @provides
+--   [nomain] virtuallaunchpad_main.lua
 --   [webinterface] NowUndo.html
 --[[
   Virtual_Launchpad_Web.lua
