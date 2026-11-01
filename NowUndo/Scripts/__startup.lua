@@ -1,3 +1,8 @@
+-- @description NowUndo Startup
+-- @version 1.0
+-- @author joffo78-hash
+-- @changelog
+--   Initial ReaPack release.
 -- __startup.lua
 local ids = {
   "_RS84087f5eddf7bcb9e5eff79b91996cf9693de246",  -- Virtual Launchpad
