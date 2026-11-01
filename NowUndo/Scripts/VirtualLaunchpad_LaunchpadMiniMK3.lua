@@ -44,7 +44,14 @@
 ]]
 
 local VL = {}
-VL.VERSION = "0.9.0"
+VL.VERSION = "0.9.6-launchqueue"
+VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
+local function dbg(fmt, ...)
+  if VL.debug and reaper and reaper.ShowConsoleMsg then reaper.ShowConsoleMsg("[VL] " .. string.format(fmt, ...) .. "\n") end
+end
+if reaper and reaper.ShowConsoleMsg then
+  reaper.ShowConsoleMsg("[VL] " .. VL.VERSION .. " charge depuis : " .. tostring(debug.getinfo(1, "S").source) .. "\n")
+end
 
 local NLOOP, NGROUP, NPAGE, NIN, NSLOT, NPRESET = 8, 4, 4, 8, 4, 8   -- NIN : nombre d'inputs (8, ou 4 pour une grille reduite)
 local LONG_PRESS_S = 1.0     -- appui long (CLEAR/PART CLEAR, REVERSE/AUTO REV, revert preset)
@@ -170,7 +177,12 @@ local function new_state()
     },
     cfg = {
       feedback_policy = "attenuate", feedback_gain_db = -6,   -- "allow" | "attenuate" | "block"
-      auto_mute_unrouted_inputs = true,                       -- IN sans aucune route IN->L => piste mutee
+      auto_mute_unrouted_inputs = true,                       -- IN sans aucun send actif vers un looper => piste silencieuse
+      follow_aux_sends = true,                                -- les sources d'un looper suivent ses sends vers les pistes d'effets auxiliaires
+      aux_track_first = 20, aux_track_count = 4,              -- pistes d'effets auxiliaires : numeros REAPER 20 a 23
+      aux_follow_chain = true,                                -- inclut aussi les sources qui atteignent le looper via des routes looper -> looper
+      looper_window_fx = 0,                                   -- index (0 = premier) de l'effet looper dont on ouvre la fenetre sur la piste du looper
+      unrouted_mode = "parent",                               -- "parent" : coupe l'envoi au parent (B_MAINSEND) | "mute" : mute de piste (B_MUTE)
       -- Index 1-based REAPER (ta structure) : dossier IN=1, IN1..8=2..9, dossier L=10, L1..8=11..18
       in_track_first = 2,
       looper_track_first = 11,
@@ -534,28 +546,169 @@ local function set_send_open(src, dst, open, gain_db)
   return true
 end
 
--- Mute piste UNIQUEMENT (B_MUTE). Pas de monitoring, pas de CSurf.
-local function set_track_mute(tr, mute)
-  if not tr then return end
-  local want = mute and 1 or 0
-  local cur = reaper.GetMediaTrackInfo_Value(tr, "B_MUTE") or 0
-  if (cur >= 0.5) == (want == 1) then return end  -- deja dans le bon etat
-  reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", want)
+-- Ecrit une propriete de piste seulement si elle change (retourne true si modifiee)
+local function set_track_prop(tr, key, want)
+  if reaper.GetMediaTrackInfo_Value(tr, key) ~= want then
+    reaper.SetMediaTrackInfo_Value(tr, key, want)
+    return true
+  end
+  return false
 end
 
--- Source de verite = S.routing.in_l (pas les edges)
+-- Rend une piste IN silencieuse (aucun send actif) ou audible (au moins un send actif).
+-- NE TOUCHE JAMAIS au mute des sends. Deux modes (S.cfg.unrouted_mode) :
+--   "parent" : B_MAINSEND = 0/1 (sortie vers le dossier parent coupee), mute de piste laisse a 0
+--   "mute"   : B_MUTE = 1/0 (mute de piste), envoi au parent laisse a 1
+local function set_input_silent(tr, silent)
+  if not tr then return false end
+  local ch
+  if S.cfg.unrouted_mode == "mute" then
+    ch = set_track_prop(tr, "B_MAINSEND", 1)
+    ch = set_track_prop(tr, "B_MUTE", silent and 1 or 0) or ch
+  else
+    ch = set_track_prop(tr, "B_MUTE", 0)
+    ch = set_track_prop(tr, "B_MAINSEND", silent and 0 or 1) or ch
+  end
+  return ch
+end
+
+-- Vrai s'il existe au moins un send NON mute de cette IN vers un looper (etat REEL REAPER)
+local function input_has_active_send(tr, loopers)
+  local ns = reaper.GetTrackNumSends(tr, 0)
+  for s = 0, ns - 1 do
+    if reaper.GetTrackSendInfo_Value(tr, 0, s, "B_MUTE") == 0 then
+      local dest = reaper.GetTrackSendInfo_Value(tr, 0, s, "P_DESTTRACK")
+      for i = 1, NLOOP do
+        if loopers[i] == dest then return true end
+      end
+    end
+  end
+  return false
+end
+
+-- Regle : aucun send actif sur la piste IN -> piste mutee ; au moins un send actif -> piste demutee
+-- Source de verite = S.routing.in_l
+-- Pistes d'effets auxiliaires (reverb, delay...) : numeros de piste REAPER aux_track_first .. +aux_track_count-1.
+-- Quand un looper envoie vers une de ces pistes (send non mute), chaque entree dont le pad IN->looper est allume
+-- envoie aussi vers cette piste, avec les memes reglages (volume, pan, mode pre/post).
+-- Si plusieurs loopers alimentes par la meme entree envoient vers la meme piste : on prend le volume le plus fort.
+-- Quand la condition disparait, le send IN->aux est MUTE (jamais supprime).
+local function send_val(tr, idx, key) return reaper.GetTrackSendInfo_Value(tr, 0, idx, key) end
+local function set_send_val(tr, idx, key, want)
+  if math.abs(send_val(tr, idx, key) - want) > 1e-6 then
+    reaper.SetTrackSendInfo_Value(tr, 0, idx, key, want)
+    return true
+  end
+  return false
+end
+
+-- Loopers atteints par l'entree k : routes IN->looper allumees, puis (option) routes looper->looper en cascade
+local function reachable_loopers(k)
+  local seen, queue = {}, {}
+  for i = 1, NLOOP do
+    if S.routing.in_l[k][i] then seen[i] = true; queue[#queue + 1] = i end
+  end
+  if S.cfg.aux_follow_chain ~= false then
+    local L = S.routing.l_l
+    local qi = 1
+    while qi <= #queue do
+      local a = queue[qi]; qi = qi + 1
+      for b = 1, NLOOP do
+        if L[a][b] and not seen[b] then seen[b] = true; queue[#queue + 1] = b end
+      end
+    end
+  end
+  return seen
+end
+
+function VL.update_aux_follow()
+  if S.cfg.follow_aux_sends == false then return end
+  if not (reaper and reaper.CountTracks) then return end
+  local first = S.cfg.aux_track_first or 20
+  local count = S.cfg.aux_track_count or 4
+  local tracks = VL.resolve_tracks(false)
+  local R = S.routing.in_l
+  for a = first, first + count - 1 do
+    local aux = track_by_index_1based(a)
+    if aux then
+      -- reglages de reference : un looper qui envoie (non mute) vers cette piste d'effets
+      local ref = {}
+      for i = 1, NLOOP do
+        local ltr = tracks.loopers[i]
+        local idx = ltr and find_send(ltr, aux)
+        if idx and send_val(ltr, idx, "B_MUTE") == 0 then
+          ref[i] = { vol = send_val(ltr, idx, "D_VOL"), pan = send_val(ltr, idx, "D_PAN"), mode = send_val(ltr, idx, "I_SENDMODE") }
+        end
+      end
+      for k = 1, NIN do
+        local src = tracks.inputs[k]
+        if src then
+          local best
+          local reach = reachable_loopers(k)
+          for i = 1, NLOOP do
+            if reach[i] and ref[i] and (not best or ref[i].vol > best.vol) then best = ref[i] end
+          end
+          if best then
+            local idx = ensure_send(src, aux)
+            if idx then
+              local ch = set_send_val(src, idx, "B_MUTE", 0)
+              ch = set_send_val(src, idx, "D_VOL", best.vol) or ch
+              ch = set_send_val(src, idx, "D_PAN", best.pan) or ch
+              ch = set_send_val(src, idx, "I_SENDMODE", best.mode) or ch
+              if ch then log("info", "IN%d -> piste %d : send effet suit le looper", k, a) end
+            end
+          else
+            local idx = find_send(src, aux)
+            if idx and send_val(src, idx, "B_MUTE") == 0 then
+              reaper.SetTrackSendInfo_Value(src, 0, idx, "B_MUTE", 1)
+              log("info", "IN%d -> piste %d : send effet coupe", k, a)
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
 function VL.update_input_mutes()
   if not (reaper and reaper.CountTracks) then return end
+  pcall(VL.update_aux_follow)
   if not S.cfg.auto_mute_unrouted_inputs then return end
-  local tracks = VL.resolve_tracks(true)
+  local tracks = VL.resolve_tracks(false)
   local R = S.routing.in_l
+  VL._mm = VL._mm or {}
+  local changed = false
   for k = 1, NIN do
-    local any = false
-    for i = 1, NLOOP do
-      if R[k][i] then any = true; break end
+    local tr = tracks.inputs[k]
+    if tr then
+      -- ACTIF = au moins un pad IN->looper allume (etat du script). Les sends REAPER ne sont que relus pour comparaison.
+      local active = false
+      for i = 1, NLOOP do
+        if R[k][i] then active = true; break end
+      end
+      local real = input_has_active_send(tr, tracks.loopers)
+      if real ~= active and VL._mm[k] ~= (tostring(active) .. tostring(real)) then
+        VL._mm[k] = tostring(active) .. tostring(real)
+        log("warn", "IN%d : pad=%s mais sends REAPER=%s (ecart)", k, tostring(active), tostring(real))
+      elseif real == active then
+        VL._mm[k] = nil
+      end
+      local ch = set_input_silent(tr, not active)
+      if ch then
+        changed = true
+        log("info", "IN%d : %s", k, active and "audible (send actif)" or "silencieuse (aucun send actif)")
+      end
+      VL._sig = VL._sig or {}
+      local sig = tostring(active) .. tostring(real) .. reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND") .. reaper.GetMediaTrackInfo_Value(tr, "B_MUTE")
+      if VL._sig[k] ~= sig then
+        VL._sig[k] = sig
+        local _, nm = reaper.GetTrackName(tr)
+        dbg("IN%d '%s' : pad=%s sendsREAPER=%s -> ecrit=%s | lu : parent=%s mute=%s", k, nm, tostring(active), tostring(real),
+            tostring(ch), tostring(reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND")), tostring(reaper.GetMediaTrackInfo_Value(tr, "B_MUTE")))
+      end
     end
-    set_track_mute(tracks.inputs[k], not any)
   end
+  if changed and reaper.UpdateArrange then reaper.UpdateArrange() end
 end
 
 function VL.apply_routing(edges)
@@ -578,7 +731,7 @@ function VL.set_auto_mute_unrouted(on)
   S.cfg.auto_mute_unrouted_inputs = not not on
   if not S.cfg.auto_mute_unrouted_inputs then
     local tracks = VL.resolve_tracks(true)
-    for k = 1, NIN do set_track_mute(tracks.inputs[k], false) end
+    for k = 1, NIN do set_track_prop(tracks.inputs[k], "B_MUTE", 0); set_track_prop(tracks.inputs[k], "B_MAINSEND", 1) end
   else
     VL.update_input_mutes()
   end
@@ -701,11 +854,13 @@ function VL.select_looper(i)
   S.sel_looper = clamp(i, 1, NLOOP)
   follow_group()
   log("info", "looper %d selectionne", S.sel_looper)
+  if VL.follow_looper_window then VL.follow_looper_window() end   -- une fenetre looper ouverte bascule sur le nouveau
 end
 function VL.step_looper(d)
   S.sel_looper = ((S.sel_looper - 1 + d) % NLOOP) + 1
   follow_group()
   log("info", "looper %d selectionne", S.sel_looper)
+  if VL.follow_looper_window then VL.follow_looper_window() end
 end
 -- Pad GROUP n (sans Ctrl) : selectionne le groupe (= son premier looper) ; re-appui sur le groupe actif = on en sort,
 -- la selection passe au looper SANS groupe suivant (jamais un membre isole). Groupe vide : rien a selectionner.
@@ -881,11 +1036,16 @@ end
 local function arm(action, args, targets)
   targets = targets or VL.targets()             -- cibles figees a l'armement
   local key = armed_key(action, args, targets)
-  for i, a in ipairs(S.armed) do
-    if a.key == key then table.remove(S.armed, i) log("info", "desarme %s", key) return end
+  local def = ACTIONS[action]
+  -- Les actions "trig" (pas de pitch/speed/volume, undo, clear...) s'EMPILENT : chaque appui = une operation a rejouer au fire.
+  -- Les toggles / selections se desarment en re-appuyant (sinon deux appuis s'annuleraient au fire).
+  if not (def and def.kind == "trig") then
+    for i, a in ipairs(S.armed) do
+      if a.key == key then table.remove(S.armed, i) log("info", "desarme %s", key) return end
+    end
   end
   S.armed[#S.armed + 1] = { action = action, args = args, targets = targets, key = key }
-  log("info", "arme %s", key)
+  log("info", "arme %s (%d en file)", key, #S.armed)
 end
 
 function VL.toggle_launch()
@@ -894,12 +1054,51 @@ function VL.toggle_launch()
   log("info", "mode Launch %s", S.launch and "ON" or "OFF")
 end
 
-function VL.fire()                       -- execute tout ce qui est arme, puis quitte le mode Launch
+-- Chaque looper n'a qu'UN slot de commande gmem : ecrire plusieurs commandes dans le meme cycle ne laisse que la derniere.
+-- Le fire met donc les operations en file et les envoie dans l'ordre, au plus UNE par looper tous les FIRE_GAP_S
+-- (des loopers differents partent en meme temps).
+local FIRE_GAP_S = 0.08
+local fire_queue, fire_last = {}, -1e9
+
+local function fire_lanes(a)
+  local def = ACTIONS[a.action]
+  if def and def.global then
+    local all = {}
+    for i = 1, NLOOP do all[i] = i end
+    return all
+  end
+  return a.targets
+end
+
+function VL.fire_pump(t)
+  if #fire_queue == 0 then return end
+  t = t or now()
+  if t - fire_last < FIRE_GAP_S then return end
+  fire_last = t
+  local used = {}
+  local i = 1
+  while i <= #fire_queue do
+    local a = fire_queue[i]
+    local lanes, free = fire_lanes(a), true
+    for _, l in ipairs(lanes) do if used[l] then free = false end end
+    for _, l in ipairs(lanes) do used[l] = true end     -- meme saute : les suivantes du meme looper ne passent pas devant
+    if free then
+      table.remove(fire_queue, i)
+      exec(a.action, a.args, a.targets)
+    else
+      i = i + 1
+    end
+  end
+  if #fire_queue == 0 then log("info", "fire : toutes les operations envoyees") end
+end
+
+function VL.fire()                       -- execute tout ce qui est arme (dans l'ordre), puis quitte le mode Launch
   local list = S.armed
   S.armed = {}
-  for _, a in ipairs(list) do exec(a.action, a.args, a.targets) end
   S.launch = false
-  log("info", "fire : %d action(s), mode Launch OFF", #list)
+  for _, a in ipairs(list) do fire_queue[#fire_queue + 1] = a end
+  log("info", "fire : %d operation(s), mode Launch OFF", #list)
+  VL.fire_pump(now())
 end
 
 function VL.trigger(action, args, targets)    -- targets : cibles explicites (couches), sinon looper / groupe actif
@@ -969,6 +1168,7 @@ function VL.set_fx_present(kind, id, slot, present)     -- feedback backend : un
 end
 
 function VL.set_route(kind, a, b, value)
+  dbg("set_route %s %s->%s = %s", tostring(kind), tostring(a), tostring(b), tostring(value))
   local m = S.routing[kind]
   if kind == "l_l" and a == b then log("debug", "L%d -> L%d desactive", a, b) return false end
   if m[a][b] == value then return false end
@@ -979,7 +1179,10 @@ function VL.set_route(kind, a, b, value)
     return false
   end
   notify_routing()
-  if kind == "in_l" and VL.update_input_mutes then VL.update_input_mutes() end
+  -- Mute auto : toujours recalculer apres un changement IN->L
+  if kind == "in_l" then
+    VL.update_input_mutes()
+  end
   log("info", "route %s %d->%d : %s", kind, a, b, value and "ouverte" or "fermee")
   return true
 end
@@ -1039,18 +1242,23 @@ for p = 1, NPAGE do BIND[p] = {} end
 -- instant = true : l'appui court agit des l'appui (et l'appui long s'ajoute ensuite)
 -- instant : l'appui court agit des l'appui (l'appui long s'ajoute ensuite)
 -- defer   : l'appui court n'agit qu'au relachement, et seulement si le pad n'a pas servi de "maintien"
-local function bind(page, row, col, short, long, instant, defer)
-  BIND[page][row .. "," .. col] = { short = short, long = long, instant = instant, defer = defer }
+-- release : action au RELACHEMENT, seulement si l'appui etait court (l'appui long n'a pas tire)
+local function bind(page, row, col, short, long, instant, defer, release)
+  BIND[page][row .. "," .. col] = { short = short, long = long, instant = instant, defer = defer, release = release }
 end
-local function bind_all(row, col, short, long, instant, defer)
-  for p = 1, NPAGE do bind(p, row, col, short, long, instant, defer) end
+local function bind_all(row, col, short, long, instant, defer, release)
+  for p = 1, NPAGE do bind(p, row, col, short, long, instant, defer, release) end
 end
 
 -- global : top row, groupes, pages
 -- appui = selection ; appui long (1 s) = ouvre / ferme la fenetre du looper
+-- APPUI : selectionne tout de suite ce looper et ferme la fenetre d'un AUTRE looper
+-- RELACHEMENT d'un appui court : ferme la fenetre de ce looper si elle est ouverte
+-- APPUI LONG (1 s) : ouvre la fenetre du looper selectionne
 for i = 1, NLOOP do
-  bind_all(0, i, fn(function() VL.select_looper(i) end, function() return S.sel_looper == i and "on" or "idle" end),
-                 fn(function() VL.toggle_looper_window(i) end), true)
+  bind_all(0, i, fn(function() VL.looper_button_press(i) end, function() return S.sel_looper == i and "on" or "idle" end),
+                 fn(function() VL.looper_button_long(i) end), true, nil,
+                 fn(function() VL.looper_button_release(i) end))
 end
 -- GROUP n : tap = selectionne / quitte le groupe (cf. VL.select_group). MAINTENU + tap sur un looper (rangee du haut)
 -- = ajoute / retire ce looper du groupe. Avec Ctrl enfonce, le tap choisit le groupe edite (cf. VL.group_pad_tap).
@@ -1467,6 +1675,8 @@ function VL.on_pad_released(row, col, t)
     if paint and paint.first == key then end_paint() end
   elseif not d.short_done and not d.long_fired and not d.consumed then
     dispatch(d.b.short)
+  elseif d.b.release and not d.long_fired and not d.consumed then
+    dispatch(d.b.release)
   end
   VL.sync_out()
 end
@@ -1474,6 +1684,7 @@ end
 function VL.tick(t)
   t = t or now()
   if VL.poll_looper_feedback then VL.poll_looper_feedback() end
+  VL.fire_pump(t)
   local fired = false
   for _, d in pairs(down) do
     if d.b.long and not d.paint and not d.long_fired and (t - d.t) >= LONG_PRESS_S then
@@ -1521,14 +1732,95 @@ VL.hooks.find_looper_fx = function(i)
   if not named_any and all[i] then return all[i][1], all[i][2] end   -- aucune piste nommee L<n> : ordre des pistes
 end
 
-function VL.toggle_looper_window(i)
+-- Piste + index d'effet de la fenetre looper i : piste du looper (index fixe, comme le script openlooper), effet looper_window_fx
+local function looper_window_target(i)
+  local tr = VL.resolve_tracks(false).loopers[i]
+  local fx = S.cfg.looper_window_fx or 0
+  if tr and fx < reaper.TrackFX_GetCount(tr) then return tr, fx end
+  return nil
+end
+
+local function looper_window_is_open(tr, fx)
+  return reaper.TrackFX_GetFloatingWindow(tr, fx) ~= nil or reaper.TrackFX_GetOpen(tr, fx)
+end
+
+local function looper_window_close(tr, fx)
+  reaper.TrackFX_SetOpen(tr, fx, false)
+  if reaper.TrackFX_GetFloatingWindow(tr, fx) then reaper.TrackFX_Show(tr, fx, 2) end
+  if reaper.TrackFX_GetFloatingWindow(tr, fx) then            -- plugins qui resistent : astuce ouvrir + refermer
+    reaper.TrackFX_Show(tr, fx, 3)
+    reaper.TrackFX_Show(tr, fx, 2)
+  end
+end
+
+-- Ferme toutes les fenetres looper ouvertes (sauf `except`). Retourne true si une fenetre a ete fermee.
+function VL.close_looper_windows(except)
+  if not (reaper and reaper.CountTracks) then return false end
+  local closed = false
+  for i = 1, NLOOP do
+    if i ~= except then
+      local tr, fx = looper_window_target(i)
+      if tr and looper_window_is_open(tr, fx) then
+        looper_window_close(tr, fx)
+        closed = true
+        log("info", "looper %d : fenetre fermee", i)
+      end
+    end
+  end
+  if closed and reaper.TrackList_AdjustWindows then reaper.TrackList_AdjustWindows(false) end
+  return closed
+end
+
+function VL.open_looper_window(i)
   if not (reaper and reaper.CountTracks) then log("warn", "looper %d : pas de REAPER", i) return false end
-  local tr, fx = VL.hooks.find_looper_fx(i)
-  if not tr then log("warn", "looper %d : piste/JSFX nowundo introuvable (nommer la piste L%d)", i, i) return false end
-  local is_open = reaper.TrackFX_GetFloatingWindow(tr, fx) ~= nil
-  reaper.TrackFX_Show(tr, fx, is_open and 2 or 3)        -- 3 = fenetre flottante, 2 = la fermer
-  log("info", "looper %d : fenetre %s", i, is_open and "fermee" or "ouverte")
+  VL.close_looper_windows(i)                                   -- un seul looper ouvert a la fois
+  local tr, fx = looper_window_target(i)
+  if not tr then log("warn", "looper %d : piste ou effet %d introuvable", i, S.cfg.looper_window_fx or 0) return false end
+  if not looper_window_is_open(tr, fx) then
+    reaper.TrackFX_Show(tr, fx, 3)                             -- 3 = fenetre flottante
+    log("info", "looper %d : fenetre ouverte", i)
+  end
   return true
+end
+
+-- Si une fenetre looper est ouverte sur un AUTRE looper que celui selectionne, elle bascule sur le selectionne
+function VL.follow_looper_window()
+  if not (reaper and reaper.CountTracks) then return end
+  local sel = S.sel_looper
+  for i = 1, NLOOP do
+    if i ~= sel then
+      local tr, fx = looper_window_target(i)
+      if tr and looper_window_is_open(tr, fx) then VL.open_looper_window(sel) return end
+    end
+  end
+end
+
+-- Appui sur un bouton de selection : selection immediate (la fenetre ouverte suit la selection).
+-- On memorise si la fenetre de CE looper etait deja ouverte : un appui court la refermera au relachement.
+local was_open = {}
+function VL.looper_button_press(i)
+  local tr, fx = nil, nil
+  if reaper and reaper.CountTracks then tr, fx = looper_window_target(i) end
+  was_open[i] = (tr and looper_window_is_open(tr, fx)) and true or false
+  VL.select_looper(i)
+end
+
+-- Relachement apres un appui court : ferme la fenetre de ce looper si elle etait deja ouverte a l'appui
+function VL.looper_button_release(i)
+  if was_open[i] then VL.close_looper_windows() end
+  was_open[i] = nil
+end
+
+-- Appui long (1 s) : selectionne le looper (en groupe, c'est le looper selectionne qui s'ouvre) et ouvre sa fenetre
+function VL.looper_button_long(i)
+  VL.select_looper(i)
+  VL.open_looper_window(S.sel_looper)
+end
+
+-- compatibilite : bascule ouvre/ferme
+function VL.toggle_looper_window(i)
+  local tr, fx = looper_window_target(i)
+  if tr and looper_window_is_open(tr, fx) then VL.close_looper_windows() else VL.open_looper_window(i) end
 end
 
 --------------------------------------------------------------------------
@@ -1607,6 +1899,7 @@ function VL.sync_enable()
   SYNC.enabled = true
   if reaper.GetExtState(SYNC.section, "rev") ~= "" and VL.sync_poll(true) then
     log("info", "etat charge depuis une autre fenetre")
+    pcall(VL.apply_routing)
   else
     VL.sync_out(true)
   end
@@ -2320,7 +2613,12 @@ function VL.run_gfx_test()
     local ch = gfx.getchar()
     if ch == -1 or ch == 27 then lp_set_mode(false); gfx.quit(); return end
     NDDOCK.tick()
-    VL.sync_poll()                  -- applique l'etat ecrit par la fenetre miroir (Display)
+    if VL.sync_poll() then pcall(VL.apply_routing) end   -- etat recu du miroir (Display) : appliquer sends + mutes
+    -- Mute auto des IN : verification reguliere de l'etat reel des sends (4 fois par seconde)
+    if not VL._last_mute_check or t - VL._last_mute_check > 0.25 then
+      VL._last_mute_check = t
+      pcall(VL.update_input_mutes)
+    end
 
     local s, CELL, OX, OY, HOLD, LAYERBTN = layout()
     local CTRL_Y = OY + CELL * 9 + 5 * s
