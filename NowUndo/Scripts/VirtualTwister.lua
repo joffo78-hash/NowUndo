@@ -1,10 +1,12 @@
 -- @description NowUndo Twister Control - Multi pages virtuelles
--- @version 2.0
+-- @version 2.8
 -- @about
 --   Page 1 In/Out | 2 Pitch/Speed | 3 Vol/Feedback | 4 Slicer | 5 Cloud
 --   Selection via Launchpad fighter page (ExtState nowundo_vl/fighter_page)
 --   Mode A groupes : deltas relatifs pour pages 1-3
 --   Pages 4-5 : looper (ou membres du groupe) selectionne
+--   MIDI Learn : lit les maps "tw:knob:N" / "tw:btn:N" (ExtState NowUndo_MIDILearn)
+--     et applique selon la page active — le hardware suit le soft.
 --
 -- Couleurs virtuelles : 1 vert, 2 rose, 3 rouge, 4 jaune, 5 bleu
 
@@ -195,10 +197,9 @@ local function apply_peers_io(peers, kind, d_norm)
       if kind == "in" then
         local out_pos = math.min(len, snap.out0)
         local new_in = math.max(0, math.min(out_pos, snap.in0 + d))
-        local new_w = math.max(0, out_pos - new_in)
         reaper.gmem_write(b + 161, new_in)
         reaper.gmem_write(b + 160, 1)
-        pending_width[peer] = { gbase = b, w = new_w }
+        -- JSFX cmd1 garde Out ; pas de cmd3 qui ecraserait
       elseif kind == "out" then
         local new_out = math.max(snap.in0, math.min(len, snap.out0 + d))
         reaper.gmem_write(b + 162, new_out)
@@ -322,9 +323,8 @@ local function tgt_get(off)
 end
 
 local function make_slicer_page()
-  -- offsets feedback ; writes where PID supports
   local cells = {}
-  local function cell(r, c, label, off, id, lo, hi, def, step)
+  local function cell(r, c, label, off, id, lo, hi, def)
     cells[r .. "," .. c] = {
       label = label, looper = nil,
       get = function() return tgt_get(off) end,
@@ -333,68 +333,48 @@ local function make_slicer_page()
       end,
       to_n = function(v) return lin_to_n(v, lo, hi) end,
       from_n = function(n) return n_to_lin(n, lo, hi) end,
-      def = def, write_id = id,
+      def = def,
       push = function() if id then tgt_set_param(id, def) end end,
     }
   end
-  -- row0
-  cell(0, 0, "Detect", 11, nil, 0.01, 0.8, 0.15)  -- trans_sens (proxy) lecture
-  cell(0, 1, "Hold", 12, nil, 30, 1000, 120)
-  cell(0, 2, "Decay", 16, nil, 10, 2000, 150)
-  cell(0, 3, "Pitch", 34, PID.slicer_pitch, 0, 100, 0)
-  -- row1
-  cell(1, 0, "Steps", 14, nil, 0, 5, 1)  -- mode as display - limited
-  cell(1, 1, "Max", 14, nil, 0, 5, 0)
-  cells["1,2"] = {
-    label = "Preset", looper = nil,
-    get = function() return 1 end,
-    set = function() end,
-    to_n = function() return 0.25 end, from_n = function(n) return n end,
-    def = 1,
-    push = function() end, -- regen non dispo via gmem sans cmd
-  }
-  cells["1,3"] = {
-    label = "Mode", looper = nil,
-    get = function() return tgt_get(14) end,
-    set = function() end,
-    to_n = function(v) return clamp(v / 5, 0, 1) end,
-    from_n = function(n) return n * 5 end,
-    def = 0, push = function() end,
-  }
-  -- row2
-  cell(2, 0, "Rate", 15, nil, 0, 5, 0)
+  -- row0 : detect, hold, decay, pitch spread
+  cell(0, 0, "Detect", 165, 50, 0.01, 0.8, 0.15)
+  cell(0, 1, "Hold", 166, 51, 30, 1000, 120)
+  cell(0, 2, "Decay", 16, 16, 10, 2000, 150)
+  cell(0, 3, "Pitch", 34, 34, 0, 100, 0)
+  -- row1 : steps, max, preset, mode
+  cell(1, 0, "Steps", 167, 47, 1, 32, 16)
+  cell(1, 1, "Max", 168, 48, 0, 64, 0)
+  cell(1, 2, "Preset", 169, 49, 1, 4, 1)
+  cell(1, 3, "Mode", 14, 14, 0, 5, 0)
+  -- row2 : rate, src (push toggle)
+  cell(2, 0, "Rate", 15, 15, 0, 5, 0)
   cells["2,1"] = {
-    label = "Src", looper = nil,
+    label = "Src",
     get = function() return tgt_get(32) end,
-    set = function() end,
+    set = function(_, v) tgt_set_param(32, v >= 0.5 and 1 or 0) end,
     to_n = function(v) return v > 0.5 and 1 or 0 end,
-    from_n = function(n) return n end,
+    from_n = function(n) return n >= 0.5 and 1 or 0 end,
     def = 0,
-    push = function() end, -- toggle trans/grid needs write
+    push = function()
+      local cur = tgt_get(32)
+      tgt_set_param(32, cur > 0.5 and 0 or 1)
+    end,
   }
-  -- row3
-  cells["3,0"] = {
-    label = "Root", looper = nil,
-    get = function() return tgt_get(150) end,
-    set = function() end,
-    to_n = function(v) return clamp(v / 127, 0, 1) end,
-    from_n = function(n) return n * 127 end,
-    def = 48, push = function() end,
-  }
-  cells["3,1"] = {
-    label = "Release", looper = nil,
-    get = function() return 0 end,
-    set = function() end,
-    to_n = function() return 0 end, from_n = function() return 0 end,
-    def = 0, push = function() end,
-  }
-  -- 3,2 empty
+  -- row3 : root, release, empty, pitch mode (push toggle)
+  cell(3, 0, "Root", 150, 42, 0, 127, 48)
+  cell(3, 1, "Release", 170, 44, 0, 3000, 0)
   cells["3,3"] = {
-    label = "PitchMd", looper = nil,
-    get = function() return 0 end,
-    set = function() end,
-    to_n = function() return 0 end, from_n = function() return 0 end,
-    def = 0, push = function() end,
+    label = "PitchMd",
+    get = function() return tgt_get(171) end,
+    set = function(_, v) tgt_set_param(43, v >= 0.5 and 1 or 0) end,
+    to_n = function(v) return v > 0.5 and 1 or 0 end,
+    from_n = function(n) return n >= 0.5 and 1 or 0 end,
+    def = 0,
+    push = function()
+      local cur = tgt_get(171)
+      tgt_set_param(43, cur > 0.5 and 0 or 1)
+    end,
   }
   return cells
 end
@@ -418,17 +398,19 @@ local function make_cloud_page()
   cell(0, 3, "PSpread", 35, PID.cloud_pitch, 0, 100, 0)
   cell(1, 0, "Pos", 38, PID.cloud_pos, 0, 100, 50)
   cells["1,0"].push = function()
-    -- toggle free/link would need write cloud_pos_mode - not in wr_id list fully as set
+    local cur = tgt_get(37)
+    tgt_set_param(37, cur > 0.5 and 0 or 1)
   end
   cell(1, 1, "Rate", 40, PID.cloud_lfo_rate, 0.1, 4, 1)
   cell(1, 2, "Depth", 41, PID.cloud_lfo_depth, 0, 100, 0)
   cells["1,3"] = {
     label = "LFO",
     get = function() return tgt_get(39) end,
-    set = function() end,
+    set = function(_, v) tgt_set_param(39, clamp(v, 0, 2)) end,
     to_n = function(v) return clamp(v / 2, 0, 1) end,
     from_n = function(n) return n * 2 end,
-    def = 0, push = function() end,
+    def = 0,
+    push = function() tgt_set_param(39, 0) end,
   }
   return cells
 end
@@ -506,11 +488,433 @@ function init()
   gfx.clear = 0x0C0C0F
 end
 
+
+--------------------------------------------------------------------------
+-- MIDI Learn (maps produites par nowundo_midi_learn.lua)
+-- Uniquement tw:knob:0..15 et tw:btn:0..15 — page = fighter_page()
+--------------------------------------------------------------------------
+local LEARN_EXT = "NowUndo_MIDILearn"
+local IGNORE_DEV_SUBSTR = { "lpminimk3", "launchpad", "lpmini" }
+local midi_maps = {}       -- id -> { status, ch, d1, gate, ret }
+local midi_last_seq = 0
+local midi_maps_sig = ""
+local midi_maps_t = 0
+local midi_out_idx = tonumber(reaper.GetExtState(LEARN_EXT, "midi_out")) or -1
+local last_fighter_page = -1
+
+local function midi_reload_maps(force)
+  local t = reaper.time_precise()
+  if not force and (t - midi_maps_t) < 0.5 then return end
+  midi_maps_t = t
+  local raw = reaper.GetExtState(LEARN_EXT, "maps") or ""
+  if raw == midi_maps_sig and not force then return end
+  midi_maps_sig = raw
+  midi_maps = {}
+  for line in raw:gmatch("[^\n]+") do
+    local id, st, ch, d1, d2, ret, gate = line:match("^([^|]+)|(%d+)|(%d+)|(%d+)|(%-?%d+)|(%d+)|(%d+)$")
+    if id and (id:match("^tw:knob:%d+$") or id:match("^tw:btn:%d+$")) then
+      midi_maps[id] = {
+        status = tonumber(st), ch = tonumber(ch), d1 = tonumber(d1),
+        gate = gate == "1", ret = ret == "1",
+      }
+    end
+  end
+  midi_out_idx = tonumber(reaper.GetExtState(LEARN_EXT, "midi_out")) or -1
+end
+
+-- Applique un slot physique 0..15 selon la page Twister courante
+
+local function midi_send(m, val)
+  if not m or midi_out_idx < 0 then return end
+  if not reaper.SendMIDIMessageToHardware then return end
+  local v = math.max(0, math.min(127, math.floor(val + 0.5)))
+  if m.status == 0xB0 then
+    pcall(reaper.SendMIDIMessageToHardware, midi_out_idx, string.char(0xB0 + (m.ch or 0), m.d1 or 0, v))
+  elseif m.status == 0x90 or m.status == 0x80 then
+    pcall(reaper.SendMIDIMessageToHardware, midi_out_idx, string.char(0x90 + (m.ch or 0), m.d1 or 0, v))
+  end
+end
+
+-- Valeur normalisee 0..1 du knob physique idx pour la page donnee
+local function read_knob_norm(page, idx, now_t)
+  now_t = now_t or reaper.time_precise()
+  if page == 1 then
+    local looper = math.floor(idx / 2) + 1
+    local is_out = (idx % 2) == 1
+    if not looper_alive(looper, now_t) then return 0 end
+    local len = read_fb(looper, 46)
+    if len <= 0 then return 0 end
+    local in_s = read_fb(looper, 44)
+    local w_s = read_fb(looper, 45)
+    if is_out then
+      if tw_mode_io[looper] == 1 then return clamp(w_s / len, 0, 1) end
+      return clamp((in_s + w_s) / len, 0, 1)
+    end
+    return clamp(in_s / len, 0, 1)
+  elseif page == 2 then
+    local looper = (idx % 8) + 1
+    if not looper_alive(looper, now_t) then return 0 end
+    if idx < 8 then
+      local p = read_fb(looper, 4) -- check offset - pitch might be different
+      -- gmem feedback: pitch at base+? use same as write_param id 4 path
+      -- published at gmem_base offsets - pitch typically slider
+      local b = gbase(looper, active_part(looper))
+      local pitch = reaper.gmem_read(b + 4) or 0 -- may need correct offset
+      return clamp((pitch + 48) / 96, 0, 1)
+    else
+      local b = gbase(looper, active_part(looper))
+      local speed = reaper.gmem_read(b + 3) or 1
+      speed = math.max(0.01, speed)
+      local logv = math.log(speed) / math.log(2)
+      return clamp((logv + 2) / 4, 0, 1)
+    end
+  elseif page == 3 then
+    local looper = (idx % 8) + 1
+    if not looper_alive(looper, now_t) then return 0 end
+    local b = gbase(looper, active_part(looper))
+    if idx < 8 then
+      return clamp((reaper.gmem_read(b + 22) or 1) / 2, 0, 1)
+    else
+      return clamp((reaper.gmem_read(b + 19) or 1) / 2, 0, 1)
+    end
+  elseif page == 4 then
+    -- offsets de LECTURE gmem publies par le JSFX
+    local map = {
+      [0]={165,0.01,0.8},[1]={166,30,1000},[2]={16,10,2000},[3]={34,0,100},
+      [4]={167,1,32},[5]={168,0,64},[6]={169,1,4},[7]={14,0,5},
+      [8]={15,0,5},[9]={32,0,1},[12]={42,0,127},[13]={170,0,3000},[15]={171,0,1},
+    }
+    local sp = map[idx]
+    if not sp then return 0 end
+    local tg = page_targets()
+    local i = tg[1]
+    if not i or not looper_alive(i, now_t) then return 0 end
+    local b = gbase(i, active_part(i))
+    local v = reaper.gmem_read(b + sp[1]) or sp[2]
+    return clamp((v - sp[2]) / math.max(1e-9, sp[3] - sp[2]), 0, 1)
+  elseif page == 5 then
+    local map = {
+      [0]={26,0,1},[1]={27,0,1},[2]={28,0,1},[3]={35,0,100},
+      [4]={38,0,100},[5]={40,0.1,4},[6]={41,0,100},[7]={39,0,2},
+    }
+    local sp = map[idx]
+    if not sp then return 0 end
+    local tg = page_targets()
+    local i = tg[1]
+    if not i or not looper_alive(i, now_t) then return 0 end
+    local b = gbase(i, active_part(i))
+    local v = reaper.gmem_read(b + sp[1]) or sp[2]
+    return clamp((v - sp[2]) / math.max(1e-9, sp[3] - sp[2]), 0, 1)
+  end
+  return 0
+end
+
+
+local midi_fb_status = ""
+local midi_fb_count = 0
+local midi_fb_last_t = 0
+local midi_fb_last = {}
+for i = 0, 15 do midi_fb_last[i] = -1 end
+local midi_fb_sync_t = 0
+
+local function midi_out_name()
+  if midi_out_idx < 0 or not reaper.GetMIDIOutputName then return "(aucun)" end
+  local ok, name = reaper.GetMIDIOutputName(midi_out_idx, "")
+  return (ok and name) and name or ("out#" .. tostring(midi_out_idx))
+end
+
+local function resolve_midi_out()
+  local stored = tonumber(reaper.GetExtState(LEARN_EXT, "midi_out"))
+  if stored and stored >= 0 then
+    midi_out_idx = stored
+    return midi_out_idx
+  end
+  if midi_out_idx >= 0 then return midi_out_idx end
+  if not reaper.GetNumMIDIOutputs then return -1 end
+  local n = reaper.GetNumMIDIOutputs() or 0
+  local prefer = nil
+  for i = 0, n - 1 do
+    local ok, name = reaper.GetMIDIOutputName(i, "")
+    if ok and name then
+      local low = name:lower()
+      local skip = false
+      for _, sub in ipairs(IGNORE_DEV_SUBSTR) do
+        if low:find(sub, 1, true) then skip = true; break end
+      end
+      if not skip then
+        -- prefer "twister" / "fighter" in the name
+        if low:find("twister", 1, true) or low:find("fighter", 1, true) or low:find("djtechtools", 1, true) then
+          midi_out_idx = i
+          reaper.SetExtState(LEARN_EXT, "midi_out", tostring(i), true)
+          return i
+        end
+        if not prefer then prefer = i end
+      end
+    end
+  end
+  if prefer then
+    midi_out_idx = prefer
+    reaper.SetExtState(LEARN_EXT, "midi_out", tostring(prefer), true)
+    return prefer
+  end
+  return -1
+end
+
+local function pick_midi_out()
+  if not reaper.GetNumMIDIOutputs then return end
+  local n = reaper.GetNumMIDIOutputs() or 0
+  local menu, idxs = {}, {}
+  for i = 0, n - 1 do
+    local ok, name = reaper.GetMIDIOutputName(i, "")
+    if ok and name then
+      menu[#menu + 1] = ((i == midi_out_idx) and "!" or "") .. name
+      idxs[#idxs + 1] = i
+    end
+  end
+  menu[#menu + 1] = ""
+  menu[#menu + 1] = "Aucun"
+  local pick = gfx.showmenu(table.concat(menu, "|"))
+  if not pick or pick < 1 then return end
+  if pick <= #idxs then
+    midi_out_idx = idxs[pick]
+    reaper.SetExtState(LEARN_EXT, "midi_out", tostring(midi_out_idx), true)
+  else
+    midi_out_idx = -1
+    reaper.SetExtState(LEARN_EXT, "midi_out", "-1", true)
+  end
+  midi_fb_status = "OUT: " .. midi_out_name()
+  last_fighter_page = -1  -- force renvoi au prochain cycle
+end
+
+local function midi_feedback_page(page)
+  midi_reload_maps(true)
+  local nmaps = 0
+  for id, m in pairs(midi_maps) do
+    if id:find("tw:knob:", 1, true) and m.status and m.status > 0 then nmaps = nmaps + 1 end
+  end
+  if resolve_midi_out() < 0 then
+    midi_fb_status = "FB: pas de MIDI OUT (clic header)"
+    return
+  end
+  if nmaps == 0 then
+    midi_fb_status = "FB: aucun knob learn (tw:knob)"
+    return
+  end
+  local now_t = reaper.time_precise()
+  local sent = 0
+  for idx = 0, 15 do
+    local id = string.format("tw:knob:%d", idx)
+    local m = midi_maps[id]
+    if m and m.status and m.status > 0 then
+      local n = read_knob_norm(page, idx, now_t)
+      -- Toujours envoyer (meme si ret non coche) au changement de page
+      midi_send(m, n * 127)
+      sent = sent + 1
+    end
+  end
+  midi_fb_count = sent
+  midi_fb_last_t = now_t
+  midi_fb_status = string.format("FB P%d: %d CC -> %s", page, sent, midi_out_name())
+  for idx = 0, 15 do
+    local id = string.format("tw:knob:%d", idx)
+    if midi_maps[id] then
+      midi_fb_last[idx] = math.floor(read_knob_norm(page, idx, now_t) * 127 + 0.5)
+    end
+  end
+end
+
+-- Feedback continu quand gmem / UI virtuelle change
+local function midi_feedback_sync(page, force)
+  local t = reaper.time_precise()
+  if not force and (t - midi_fb_sync_t) < 0.03 then return end
+  midi_fb_sync_t = t
+  if resolve_midi_out() < 0 then return end
+  midi_reload_maps(false)
+  local changed = 0
+  for idx = 0, 15 do
+    local id = string.format("tw:knob:%d", idx)
+    local m = midi_maps[id]
+    if m and m.status and m.status > 0 then
+      local n = read_knob_norm(page, idx, t)
+      local v = math.max(0, math.min(127, math.floor(n * 127 + 0.5)))
+      if force or midi_fb_last[idx] ~= v then
+        midi_send(m, v)
+        midi_fb_last[idx] = v
+        changed = changed + 1
+      end
+    end
+  end
+  if changed > 0 then
+    midi_fb_last_t = t
+    midi_fb_status = string.format("FB live x%d | %s", changed, midi_out_name())
+  end
+end
+
+local function midi_apply_knob(idx, norm)
+  local page = fighter_page()
+  norm = math.max(0, math.min(1, norm))
+  local now_t = reaper.time_precise()
+  if page == 1 then
+    -- Mode Out (tw_mode_io==0) : In = cmd1 (Out fixe), Out = cmd2
+    -- Mode Width (tw_mode_io==1) : In = cmd5 (Width fixe), Width = cmd3
+    local looper = math.floor(idx / 2) + 1
+    local is_out = (idx % 2) == 1
+    if not looper_alive(looper, now_t) then return end
+    local b = gbase(looper, active_part(looper))
+    local len = reaper.gmem_read(b + 46) or 0
+    if len <= 0 then return end
+    local in_s = reaper.gmem_read(b + 44) or 0
+    local w_s = reaper.gmem_read(b + 45) or 0
+    local is_width = (tw_mode_io[looper] == 1)
+    if is_out then
+      if is_width then
+        local new_w = math.max(0, math.min(len - in_s, norm * len))
+        reaper.gmem_write(b + 162, new_w)
+        reaper.gmem_write(b + 160, 3)
+      else
+        local out = math.max(in_s, math.min(len, norm * len))
+        reaper.gmem_write(b + 162, out)
+        reaper.gmem_write(b + 160, 2)
+      end
+    else
+      local new_in = math.max(0, math.min(len, norm * len))
+      if is_width then
+        -- garder width : cmd 5
+        reaper.gmem_write(b + 161, new_in)
+        reaper.gmem_write(b + 160, 5)
+      else
+        -- garder Out : cmd 1 (JSFX recalcule width)
+        local out_pos = math.min(len, in_s + w_s)
+        new_in = math.max(0, math.min(out_pos, new_in))
+        reaper.gmem_write(b + 161, new_in)
+        reaper.gmem_write(b + 160, 1)
+      end
+    end
+  elseif page == 2 then
+    local looper = (idx % 8) + 1
+    if not looper_alive(looper, now_t) then return end
+    if idx < 8 then write_param(looper, 4, norm * 96 - 48)
+    else write_param(looper, 3, 2 ^ (norm * 4 - 2)) end
+  elseif page == 3 then
+    local looper = (idx % 8) + 1
+    if not looper_alive(looper, now_t) then return end
+    if idx < 8 then write_param(looper, 22, norm * 2)
+    else write_param(looper, 19, norm * 2) end
+  elseif page == 4 then
+    local map = {
+      [0]={50,0.01,0.8},[1]={51,30,1000},[2]={16,10,2000},[3]={34,0,100},
+      [4]={47,1,32},[5]={48,0,64},[6]={49,1,4},[7]={14,0,5},
+      [8]={15,0,5},[9]={32,0,1},[12]={42,0,127},[13]={44,0,3000},[15]={43,0,1},
+    }
+    local sp = map[idx]
+    if not sp then return end
+    local v = sp[2] + norm * (sp[3] - sp[2])
+    for _, i in ipairs(page_targets()) do
+      if looper_alive(i, now_t) then write_param(i, sp[1], v) end
+    end
+  elseif page == 5 then
+    local map = {
+      [0]={26,0,1},[1]={27,0,1},[2]={28,0,1},[3]={35,0,100},
+      [4]={38,0,100},[5]={40,0.1,4},[6]={41,0,100},[7]={39,0,2},
+    }
+    local sp = map[idx]
+    if not sp then return end
+    local v = sp[2] + norm * (sp[3] - sp[2])
+    for _, i in ipairs(page_targets()) do
+      if looper_alive(i, now_t) then write_param(i, sp[1], v) end
+    end
+  end
+end
+
+local function midi_apply_btn(idx)
+  local page = fighter_page()
+  local now_t = reaper.time_precise()
+  if page == 1 then
+    local looper = math.floor(idx / 2) + 1
+    local is_out = (idx % 2) == 1
+    if not looper_alive(looper, now_t) then return end
+    if is_out then
+      -- Push Out : bascule mode In/Out <-> In/Width
+      tw_mode_io[looper] = 1 - (tw_mode_io[looper] or 0)
+    else
+      -- Push In : reset In/Out (boucle pleine)
+      local b = gbase(looper, active_part(looper))
+      local len = reaper.gmem_read(b + 46) or 0
+      if len > 0 then
+        pending_reset[looper] = { gbase = b, len = len, step = 1 }
+      end
+    end
+  elseif page == 2 then
+    local looper = (idx % 8) + 1
+    if not looper_alive(looper, now_t) then return end
+    if idx < 8 then write_param(looper, 4, 0) else write_param(looper, 3, 1) end
+  elseif page == 3 then
+    local looper = (idx % 8) + 1
+    if not looper_alive(looper, now_t) then return end
+    if idx < 8 then write_param(looper, 22, 1) else write_param(looper, 19, 1) end
+  end
+end
+
+local function midi_process()
+  if not reaper.MIDI_GetRecentInputEvent then return end
+  midi_reload_maps(false)
+  local i = 0
+  while i < 64 do
+    local seq, msg, ts, dev = reaper.MIDI_GetRecentInputEvent(i)
+    if not seq or seq == 0 then break end
+    if seq == midi_last_seq and i == 0 then break end
+    if midi_last_seq ~= 0 and seq <= midi_last_seq then break end
+
+    local skip = false
+    if dev and type(dev) == "number" and reaper.GetMIDIInputName then
+      local ok, dname = reaper.GetMIDIInputName(dev, "")
+      if ok and dname then
+        local low = dname:lower()
+        for _, sub in ipairs(IGNORE_DEV_SUBSTR) do
+          if low:find(sub, 1, true) then skip = true; break end
+        end
+      end
+    end
+
+    if not skip and msg and #msg >= 2 then
+      local b1 = msg:byte(1)
+      local st, ch = b1 & 0xF0, b1 & 0x0F
+      local d1, d2 = msg:byte(2) or 0, msg:byte(3) or 0
+      if st == 0x80 then st, d2 = 0x90, 0 end
+      if st == 0x90 or st == 0xB0 then
+        for id, m in pairs(midi_maps) do
+          if m.status == st and m.ch == ch and m.d1 == d1 then
+            local idx = tonumber(id:match(":(%d+)$"))
+            -- idx 0 est valide (Knob 1) : ne pas utiliser "if idx then" (0 est falsy en Lua)
+            if idx ~= nil then
+              if id:find("knob", 1, true) then
+                if st == 0xB0 then
+                  midi_apply_knob(idx, d2 / 127)
+                elseif st == 0x90 and d2 > 0 then
+                  midi_apply_knob(idx, d2 / 127)
+                end
+              elseif id:find("btn", 1, true) then
+                local on = (st == 0x90 and d2 > 0) or (st == 0xB0 and d2 > 0)
+                if on then midi_apply_btn(idx) end
+              end
+            end
+          end
+        end
+      end
+    end
+    if i == 0 then midi_last_seq = seq end
+    i = i + 1
+  end
+  local seq0 = reaper.MIDI_GetRecentInputEvent(0)
+  if seq0 and seq0 > 0 then midi_last_seq = seq0 end
+end
+
 function main()
   local char = gfx.getchar()
   if char < 0 then return end
   NDDOCK.tick()
   reaper.gmem_attach(GMEM)
+  midi_process()
 
   for i, pr in pairs(pending_reset) do
     if pr.step == 1 then
@@ -530,6 +934,13 @@ function main()
   end
 
   local page = fighter_page()
+  if page ~= last_fighter_page then
+    last_fighter_page = page
+    for i = 0, 15 do midi_fb_last[i] = -1 end  -- forcer renvoi complet
+    midi_feedback_page(page)
+  else
+    midi_feedback_sync(page, false)
+  end
   local col = PAGE_COL[page] or PAGE_COL[1]
   local w, h = gfx.w, gfx.h
   local s = SCALE * math.min(w / 250, h / 320)
@@ -541,11 +952,20 @@ function main()
   gfx.set(0.08, 0.08, 0.10)
   gfx.rect(0, 0, w, h, 1)
 
-  -- Header
+  -- Header (clic = choix MIDI OUT + renvoi valeurs)
   gfx.setfont(1, "Arial", math.floor(11 * s), "b")
   gfx.set(col[1], col[2], col[3], 1)
   gfx.x, gfx.y = 6 * s, 4 * s
   gfx.drawstr(string.format("TWISTER  P%d %s", page, PAGE_NAME[page] or ""))
+  gfx.setfont(1, "Arial", math.floor(8 * s))
+  gfx.set(0.65, 0.65, 0.7, 1)
+  gfx.x, gfx.y = 6 * s, 16 * s
+  local fb = midi_fb_status
+  if fb == "" then fb = "OUT: " .. midi_out_name() .. " | clic ici = port MIDI" end
+  gfx.drawstr(fb)
+  if mouse_click and gfx.mouse_y < 26 * s then
+    pick_midi_out()
+  end
   if page >= 4 then
     gfx.setfont(1, "Arial", math.floor(9 * s))
     gfx.set(0.7, 0.7, 0.7, 1)
@@ -624,14 +1044,23 @@ function main()
                   kind, d_norm = "out", (drag.len0 > 0) and ((new_out - drag.out0) / drag.len0) or 0
                 end
               else
-                local out_pos = lock_out[tw_id] or math.min(len, out_s)
-                local new_in = math.max(0, math.min(out_pos, val * len))
-                local new_w = math.max(0, out_pos - new_in)
-                val = new_in / len
-                reaper.gmem_write(b + 161, new_in)
-                reaper.gmem_write(b + 160, 1)
-                pending_width[looper_1] = { gbase = b, w = new_w }
-                kind, d_norm = "in", (drag.len0 > 0) and ((new_in - drag.in0) / drag.len0) or 0
+                -- Mode Out : cmd1 (Out fixe). Mode Width : cmd5 (Width fixe).
+                local new_in
+                if is_width then
+                  new_in = math.max(0, math.min(len, val * len))
+                  val = new_in / len
+                  reaper.gmem_write(b + 161, new_in)
+                  reaper.gmem_write(b + 160, 5)
+                  kind, d_norm = "in", (drag.len0 > 0) and ((new_in - drag.in0) / drag.len0) or 0
+                else
+                  local out_pos = lock_out[tw_id] or math.min(len, out_s)
+                  new_in = math.max(0, math.min(out_pos, val * len))
+                  val = new_in / len
+                  reaper.gmem_write(b + 161, new_in)
+                  reaper.gmem_write(b + 160, 1)
+                  -- pas de pending_width : JSFX garde Out
+                  kind, d_norm = "in", (drag.len0 > 0) and ((new_in - drag.in0) / drag.len0) or 0
+                end
               end
               if kind then apply_peers_io(drag.peers, kind, d_norm) end
             end
@@ -770,4 +1199,8 @@ function main()
 end
 
 init()
+if reaper.MIDI_GetRecentInputEvent then midi_last_seq = reaper.MIDI_GetRecentInputEvent(0) or 0 end
+midi_reload_maps(true)
+resolve_midi_out()
+last_fighter_page = -1  -- force FB au 1er cycle
 reaper.defer(main)
