@@ -1,3 +1,8 @@
+-- @description NowUndo Virtual Launchpad
+-- @version 1.0
+-- @author joffo78-hash
+-- @changelog
+--   Initial ReaPack release.
 --[[
   Virtual_Launchpad.lua  -  nowundo
   Phase 0 + 1 : coeur logiciel du Virtual Launchpad.
