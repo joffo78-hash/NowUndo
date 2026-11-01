@@ -1,8 +1,3 @@
--- @description NowUndo Virtual Launchpad
--- @version 1.0
--- @author joffo78-hash
--- @changelog
---   Initial ReaPack release.
 --[[
   Virtual_Launchpad.lua  -  nowundo
   Phase 0 + 1 : coeur logiciel du Virtual Launchpad.
@@ -49,13 +44,14 @@
 ]]
 
 local VL = {}
-VL.VERSION = "0.9.6-launchqueue"
+VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
+VL.BUILD = "0.9.15-status-tap" -- numero de build (affiche a la console)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
 local function dbg(fmt, ...)
   if VL.debug and reaper and reaper.ShowConsoleMsg then reaper.ShowConsoleMsg("[VL] " .. string.format(fmt, ...) .. "\n") end
 end
 if reaper and reaper.ShowConsoleMsg then
-  reaper.ShowConsoleMsg("[VL] " .. VL.VERSION .. " charge depuis : " .. tostring(debug.getinfo(1, "S").source) .. "\n")
+  reaper.ShowConsoleMsg("[VL] build " .. VL.BUILD .. " charge depuis : " .. tostring(debug.getinfo(1, "S").source) .. "\n")
 end
 
 local NLOOP, NGROUP, NPAGE, NIN, NSLOT, NPRESET = 8, 4, 4, 8, 4, 8   -- NIN : nombre d'inputs (8, ou 4 pour une grille reduite)
@@ -183,11 +179,6 @@ local function new_state()
     cfg = {
       feedback_policy = "attenuate", feedback_gain_db = -6,   -- "allow" | "attenuate" | "block"
       auto_mute_unrouted_inputs = true,                       -- IN sans aucun send actif vers un looper => piste silencieuse
-      follow_aux_sends = true,                                -- les sources d'un looper suivent ses sends vers les pistes d'effets auxiliaires
-      aux_track_first = 20, aux_track_count = 4,              -- pistes d'effets auxiliaires : numeros REAPER 20 a 23
-      aux_follow_chain = true,                                -- inclut aussi les sources qui atteignent le looper via des routes looper -> looper
-      looper_window_fx = 0,                                   -- index (0 = premier) de l'effet looper dont on ouvre la fenetre sur la piste du looper
-      unrouted_mode = "parent",                               -- "parent" : coupe l'envoi au parent (B_MAINSEND) | "mute" : mute de piste (B_MUTE)
       -- Index 1-based REAPER (ta structure) : dossier IN=1, IN1..8=2..9, dossier L=10, L1..8=11..18
       in_track_first = 2,
       looper_track_first = 11,
@@ -360,6 +351,34 @@ VL.backend = {
       gmem_write_param(looper, 22, nxt)
       return
     end
+    if action == "reset_volume" then
+      S.loopers[looper].out_vol = 1.0
+      gmem_write_param(looper, 22, 1.0)
+      return
+    end
+    if action == "reset_pitch" then
+      S.loopers[looper].pitch = 0
+      gmem_write_param(looper, 4, 0)
+      return
+    end
+    if action == "reset_speed" then
+      S.loopers[looper].speed = 1
+      gmem_write_param(looper, 3, 1)
+      return
+    end
+    if action == "reset_loop_in" then
+      S.loopers[looper].loop_start = 0
+      gmem_write_edit(looper, 1, 0, nil)             -- edit_cmd 1 = In a 0
+      return
+    end
+    if action == "reset_loop_out" then
+      local len = S.loopers[looper].length or 0
+      if len > 0 then
+        S.loopers[looper].loop_width = len
+        gmem_write_edit(looper, 2, nil, len)         -- edit_cmd 2 = Out a la fin
+      end
+      return
+    end
     if action == "volume_pct" then
       local L = S.loopers[looper]
       local cur = L.out_vol or 1.0
@@ -444,6 +463,14 @@ VL.hooks = {
   find_looper_fx  = nil,                 -- (i) -> track, fxindex ; defaut : voir plus bas
 }
 VL.config = {
+  -- Reglages propres a ce script (hors S.cfg : la synchro avec le miroir / la remote web ecrase S.cfg)
+  unrouted_mode = "parent",        -- "parent" : coupe l'envoi au parent (B_MAINSEND) | "mute" : mute de piste (B_MUTE)
+  follow_aux_sends = true,         -- les sources d'un looper suivent ses sends vers les pistes d'effets auxiliaires
+  aux_track_first = 20, aux_track_count = 4,   -- pistes d'effets auxiliaires : numeros REAPER 20 a 23
+  aux_follow_chain = true,         -- inclut les sources qui atteignent le looper via des routes looper -> looper
+  sync_fx_patterns = { "master sync", "master_synchro", "central timebase" },   -- nom du JSFX Master Sync (minuscules)
+  sync_inbox = 96,                 -- gmem[96..98] : boite de commandes du JSFX Master Sync (Main / Chorus / Bridge)
+  looper_window_fx = 0,            -- index (0 = premier) de l'effet looper dont on ouvre la fenetre
   fx_patterns = { "nowundo", "noundo", "looper" },   -- nom du JSFX a reconnaitre sur les pistes
   -- Noms de secours si les index de piste ne collent pas
   in_name_patterns = { "^in%s*%d+", "^input%s*%d+", "^entree%s*%d+" },
@@ -561,13 +588,13 @@ local function set_track_prop(tr, key, want)
 end
 
 -- Rend une piste IN silencieuse (aucun send actif) ou audible (au moins un send actif).
--- NE TOUCHE JAMAIS au mute des sends. Deux modes (S.cfg.unrouted_mode) :
+-- NE TOUCHE JAMAIS au mute des sends. Deux modes (VL.config.unrouted_mode) :
 --   "parent" : B_MAINSEND = 0/1 (sortie vers le dossier parent coupee), mute de piste laisse a 0
 --   "mute"   : B_MUTE = 1/0 (mute de piste), envoi au parent laisse a 1
 local function set_input_silent(tr, silent)
   if not tr then return false end
   local ch
-  if S.cfg.unrouted_mode == "mute" then
+  if VL.config.unrouted_mode == "mute" then
     ch = set_track_prop(tr, "B_MAINSEND", 1)
     ch = set_track_prop(tr, "B_MUTE", silent and 1 or 0) or ch
   else
@@ -613,7 +640,7 @@ local function reachable_loopers(k)
   for i = 1, NLOOP do
     if S.routing.in_l[k][i] then seen[i] = true; queue[#queue + 1] = i end
   end
-  if S.cfg.aux_follow_chain ~= false then
+  if VL.config.aux_follow_chain ~= false then
     local L = S.routing.l_l
     local qi = 1
     while qi <= #queue do
@@ -627,10 +654,10 @@ local function reachable_loopers(k)
 end
 
 function VL.update_aux_follow()
-  if S.cfg.follow_aux_sends == false then return end
+  if VL.config.follow_aux_sends == false then return end
   if not (reaper and reaper.CountTracks) then return end
-  local first = S.cfg.aux_track_first or 20
-  local count = S.cfg.aux_track_count or 4
+  local first = VL.config.aux_track_first or 20
+  local count = VL.config.aux_track_count or 4
   local tracks = VL.resolve_tracks(false)
   local R = S.routing.in_l
   for a = first, first + count - 1 do
@@ -643,6 +670,17 @@ function VL.update_aux_follow()
         local idx = ltr and find_send(ltr, aux)
         if idx and send_val(ltr, idx, "B_MUTE") == 0 then
           ref[i] = { vol = send_val(ltr, idx, "D_VOL"), pan = send_val(ltr, idx, "D_PAN"), mode = send_val(ltr, idx, "I_SENDMODE") }
+        end
+      end
+      if VL.debug then
+        local who = {}
+        for i = 1, NLOOP do if ref[i] then who[#who + 1] = "L" .. i end end
+        local sig = a .. ":" .. table.concat(who, ",")
+        VL._auxdbg = VL._auxdbg or {}
+        if VL._auxdbg[a] ~= sig then
+          VL._auxdbg[a] = sig
+          local _, nm = reaper.GetTrackName(aux)
+          reaper.ShowConsoleMsg(string.format("[VL] piste %d '%s' : loopers qui envoient vers elle (send non mute) = {%s}\n", a, nm, table.concat(who, ",")))
         end
       end
       for k = 1, NIN do
@@ -677,8 +715,9 @@ end
 
 function VL.update_input_mutes()
   if not (reaper and reaper.CountTracks) then return end
-  pcall(VL.update_aux_follow)
-  if not S.cfg.auto_mute_unrouted_inputs then return end
+  local ok_aux, err_aux = pcall(VL.update_aux_follow)
+  if not ok_aux and VL._aux_err ~= err_aux then VL._aux_err = err_aux; log("error", "sends effets : %s", tostring(err_aux)) end
+  if S.cfg.auto_mute_unrouted_inputs == false then return end   -- nil (config ecrasee par la synchro) = actif
   local tracks = VL.resolve_tracks(false)
   local R = S.routing.in_l
   VL._mm = VL._mm or {}
@@ -743,7 +782,7 @@ function VL.set_auto_mute_unrouted(on)
 end
 
 function VL.toggle_auto_mute_unrouted()
-  VL.set_auto_mute_unrouted(not S.cfg.auto_mute_unrouted_inputs)
+  VL.set_auto_mute_unrouted(S.cfg.auto_mute_unrouted_inputs == false)
 end
 
 --------------------------------------------------------------------------
@@ -895,9 +934,12 @@ function VL.set_page(p)
   end
 end
 function VL.set_fighter_page(n)
-  S.fighter_page = n
-  VL.hooks.fighter_page(n)
-  log("info", "fighter page %d", n)
+  S.fighter_page = clamp(n, 1, 5)
+  VL.hooks.fighter_page(S.fighter_page)
+  if reaper and reaper.SetExtState then
+    reaper.SetExtState("nowundo_vl", "fighter_page", tostring(S.fighter_page), false)
+  end
+  log("info", "fighter page %d", S.fighter_page)
 end
 
 function VL.group_members(g)
@@ -948,6 +990,10 @@ local ACTIONS = {
   -- CLEAR ALL (global, ignore la selection) :
   --   court (clear_all)      = part active de CHAQUE looper vivant
   --   long  (clear_all_full) = les 3 parts de CHAQUE looper vivant
+  -- RESET : remet pitch / speed / volume / boucle (In-Out) a leur valeur d'origine sur les loopers cibles
+  reset       = { kind = "trig" },
+  reset_volume = { kind = "trig" }, reset_pitch = { kind = "trig" }, reset_speed = { kind = "trig" },
+  reset_loop_in = { kind = "trig" }, reset_loop_out = { kind = "trig" },
   clear       = { kind = "trig", reset = "part" },
   clear_part  = { kind = "trig", reset = "part" },
   clear_full  = { kind = "trig", reset = "all" },
@@ -968,14 +1014,15 @@ local ACTIONS = {
   part        = { kind = "select", key = "part" },                       -- args = 1 MAIN, 2 CHORUS, 3 BRIDGE
 }
 
--- Etat cible d'un toggle applique a plusieurs loopers : on part du looper selectionne s'il fait
--- partie des cibles, sinon de la majorite. Le groupe se resynchronise ainsi des le 1er appui.
+-- Affichage / reference : toujours le looper selectionne s'il est dans les cibles, sinon le 1er.
+-- Les toggles de groupe NE resynchronisent plus les etats : chaque membre bascule individuellement
+-- (ex. reverse inverse : A->B et B->A, l'inversion relative est conservee).
 local function ref_looper(targets)
   for _, t in ipairs(targets) do if t == S.sel_looper then return t end end
   return targets[1]
 end
 
--- etat "affiche" d'un toggle pour un ensemble de cibles (ce que l'appui va eteindre)
+-- etat LED d'un toggle : celui du looper selectionne (s'il est cible), sinon majorite (fallback)
 local function toggle_on(key, targets)
   for _, t in ipairs(targets) do
     if t == S.sel_looper then return S.loopers[t][key] end
@@ -984,8 +1031,6 @@ local function toggle_on(key, targets)
   for _, t in ipairs(targets) do if S.loopers[t][key] then on = on + 1 end end
   return on * 2 > #targets
 end
-
-local function desired_toggle(key, targets) return not toggle_on(key, targets) end
 
 local RESET_FLAGS = { "rec", "replace", "multiply", "auto", "rev", "pingpong", "playing", "oneshot", "cloud", "slicer", "link" }
 local function reset_looper(t, back_to_main)
@@ -999,9 +1044,175 @@ local function send(looper, action, value)
   if def and def.key and value ~= nil then S.loopers[looper][def.key] = value end   -- miroir optimiste
 end
 
+-- loopers vivants (heartbeat gmem) ; sans feedback gmem : tous
+function VL.alive_loopers()
+  local list = {}
+  if reaper and reaper.gmem_attach and reaper.gmem_read then
+    reaper.gmem_attach(GMEM_NAME)
+    for i = 1, NLOOP do
+      if (reaper.gmem_read(100 + (i - 1)) or 0) > 0 then list[#list + 1] = i end
+    end
+  end
+  if #list == 0 then for i = 1, NLOOP do list[i] = i end end
+  return list
+end
+
+-- ======================================================================================
+-- Module JSFX "Nowundo Master Sync" (gmem nowundo_sync) : un slot de synchro par part
+--   gmem[0] Main | gmem[10] Chorus | gmem[20] Bridge  :  0 = LIBRE | 1 = MASTER (un looper) | 2 = HOST (Reaper)
+--   gmem[slot+1] = alias du looper maitre (etat 1)
+--   Host Sync = sliders 1..3 du JSFX (Main / Chorus / Bridge) : on les pilote par parametre FX, et par la
+--   boite de commandes gmem[96..98] du JSFX corrige (1 = Host ON, 2 = OFF / unlock).
+-- Les loopers qui ont deja une boucle gardent leur synchro : seuls les NOUVEAUX rec sont concernes (gere par le JSFX).
+-- ======================================================================================
+local SYNCMOD = { mem = {}, tr = nil, fx = nil, warned = false, params = nil }
+local function sync_off(p) return (p - 1) * 10 end
+
+local function sync_fx_matches(tr, fx)
+  local ok, name = reaper.TrackFX_GetFXName(tr, fx, "")
+  if not (ok and type(name) == "string") then return false end
+  name = name:lower()
+  for _, pat in ipairs(VL.config.sync_fx_patterns) do
+    if name:find(pat, 1, true) then return true end
+  end
+  return false
+end
+
+local function sync_find_fx()
+  if not (reaper and reaper.CountTracks and reaper.TrackFX_GetCount) then return nil end
+  if SYNCMOD.tr and SYNCMOD.fx and reaper.ValidatePtr2 and reaper.ValidatePtr2(0, SYNCMOD.tr, "MediaTrack*")
+     and SYNCMOD.fx < reaper.TrackFX_GetCount(SYNCMOD.tr) and sync_fx_matches(SYNCMOD.tr, SYNCMOD.fx) then
+    return SYNCMOD.tr, SYNCMOD.fx
+  end
+  local list = {}
+  if reaper.GetMasterTrack then list[#list + 1] = reaper.GetMasterTrack(0) end
+  for i = 0, reaper.CountTracks(0) - 1 do list[#list + 1] = reaper.GetTrack(0, i) end
+  for _, tr in ipairs(list) do
+    for fx = 0, reaper.TrackFX_GetCount(tr) - 1 do
+      if sync_fx_matches(tr, fx) then
+        SYNCMOD.tr, SYNCMOD.fx, SYNCMOD.params = tr, fx, nil
+        return tr, fx
+      end
+    end
+  end
+  return nil
+end
+
+-- index des parametres FX "Host Sync (Main/Chorus/Bridge)" (les sliders caches peuvent ne pas etre exposes)
+local function sync_param_index(tr, fx, p)
+  if not SYNCMOD.params then
+    SYNCMOD.params = {}
+    local want = { "main", "chorus", "bridge" }
+    for i = 0, reaper.TrackFX_GetNumParams(tr, fx) - 1 do
+      local ok, nm = reaper.TrackFX_GetParamName(tr, fx, i, "")
+      nm = ok and type(nm) == "string" and nm:lower() or ""
+      if nm:find("host sync", 1, true) and not nm:find("meas", 1, true) then
+        for k, w in ipairs(want) do if nm:find(w, 1, true) then SYNCMOD.params[k] = i end end
+      end
+    end
+  end
+  return SYNCMOD.params[p]
+end
+
+local function sync_state(p)
+  if not (reaper and reaper.gmem_attach and reaper.gmem_read) then return 0, 0 end
+  reaper.gmem_attach(GMEM_NAME)
+  return math.floor((reaper.gmem_read(sync_off(p)) or 0) + 0.5), (reaper.gmem_read(sync_off(p) + 1) or 0)
+end
+
+-- Host sync ON/OFF d'une part : parametre FX si expose + boite de commandes gmem du JSFX corrige
+local function sync_set_host(p, on)
+  local tr, fx = sync_find_fx()
+  if not tr then
+    if not SYNCMOD.warned then
+      SYNCMOD.warned = true
+      log("warn", "module Master Sync introuvable (cherche : %s)", table.concat(VL.config.sync_fx_patterns, " / "))
+    end
+  else
+    local pi = sync_param_index(tr, fx, p)
+    if pi then reaper.TrackFX_SetParam(tr, fx, pi, on and 1 or 0) end
+  end
+  reaper.gmem_attach(GMEM_NAME)
+  reaper.gmem_write(VL.config.sync_inbox + p - 1, on and 1 or 2)
+end
+
+local function sync_alias_exists(alias)
+  if alias <= 0 then return false end
+  for si = 0, 4 do
+    if (reaper.gmem_read(1000 + si * 600 + 1) or 0) == alias then return true end
+  end
+  return false
+end
+
+-- libere la synchro engagee sur la part p (comme le bouton Unlock) ; se souvient de ce qui etait engage
+local function sync_release(p)
+  local locked, mid = sync_state(p)
+  if locked == 0 then return false end
+  SYNCMOD.mem[p] = { mode = locked, mid = mid }
+  reaper.gmem_attach(GMEM_NAME)
+  reaper.gmem_write(sync_off(p), 0)
+  sync_set_host(p, false)
+  return true
+end
+
+-- reengage la synchro precedente (looper maitre s'il existe encore, sinon Host Reaper)
+local function sync_engage(p)
+  local locked = sync_state(p)
+  if locked ~= 0 then return false end
+  local m = SYNCMOD.mem[p]
+  reaper.gmem_attach(GMEM_NAME)
+  if m and m.mode == 1 and sync_alias_exists(m.mid) then
+    reaper.gmem_write(sync_off(p), 1)
+    reaper.gmem_write(sync_off(p) + 1, m.mid)
+    sync_set_host(p, false)
+  else
+    sync_set_host(p, true)
+  end
+  return true
+end
+
+-- part en cours = part la plus utilisee parmi les loopers vivants (1 Main, 2 Chorus, 3 Bridge)
+function VL.current_part()
+  local cnt = { 0, 0, 0 }
+  for _, i in ipairs(VL.alive_loopers()) do
+    local p = S.loopers[i].part or 1
+    if p >= 1 and p <= 3 then cnt[p] = cnt[p] + 1 end
+  end
+  local best = 1
+  for p = 2, 3 do if cnt[p] > cnt[best] then best = p end end
+  return best
+end
+
+function VL.sync_is_on(p)
+  return (sync_state(p or VL.current_part())) ~= 0
+end
+
+-- SYNC / UNSYNC : court = part en cours ; long = les 3 parts. Une part engagee -> on libere ; sinon -> on reengage.
+function VL.sync_toggle(all)
+  local parts = all and { 1, 2, 3 } or { VL.current_part() }
+  local any = false
+  for _, p in ipairs(parts) do if sync_state(p) ~= 0 then any = true end end
+  local n = 0
+  for _, p in ipairs(parts) do
+    if any then if sync_release(p) then n = n + 1 end
+    else if sync_engage(p) then n = n + 1 end end
+  end
+  log("info", "SYNC %s : %d part(s)%s", any and "OFF (libere)" or "ON", n, all and " (toutes)" or " (en cours)")
+end
+
 local function exec(action, args, targets)
   local def = ACTIONS[action]
   if not def then log("error", "action inconnue : %s", tostring(action)) return end
+  -- RESET : une operation par parametre, cadencee (un seul slot gmem par type de commande et par looper)
+  if action == "reset" then
+    for _, t in ipairs(targets) do
+      for _, sub in ipairs({ "reset_volume", "reset_pitch", "reset_speed", "reset_loop_in", "reset_loop_out" }) do
+        VL.queue_op({ action = sub, targets = { t } })
+      end
+    end
+    log("info", "reset -> %d looper(s)", #targets)
+    return
+  end
   -- CLEAR ALL / CLEAR ALL FULL : global — une seule diffusion + reset miroir de TOUS les loopers
   if action == "clear_all" or action == "clear_all_full" then
     VL.backend.send(1, action, nil)   -- broadcast (looper ignore)
@@ -1011,16 +1222,18 @@ local function exec(action, args, targets)
     return
   end
   if def.kind == "toggle" then
-    local want = desired_toggle(def.key, targets)
+    -- Mode A (toggles) : chaque cible bascule depuis SON etat courant.
+    -- Les inversions relatives dans un groupe sont conservees (reverse, slicer, cloud, rec...).
+    -- Seules les actions ponctuelles (trig : clear, undo, steps...) restent communes absolues.
     for _, t in ipairs(targets) do
-      if S.loopers[t][def.key] ~= want then
-        if want and def.excl then                     -- ex. REC <-> REPLACE : l'un coupe l'autre
-          for _, ex in ipairs(def.excl) do
-            if S.loopers[t][ACTIONS[ex].key] then send(t, ex, false) end
-          end
+      local cur = S.loopers[t][def.key] and true or false
+      local want = not cur
+      if want and def.excl then                       -- ex. REC <-> REPLACE : l'un coupe l'autre
+        for _, ex in ipairs(def.excl) do
+          if S.loopers[t][ACTIONS[ex].key] then send(t, ex, false) end
         end
-        send(t, action, want)
       end
+      send(t, action, want)
     end
   else
     for _, t in ipairs(targets) do
@@ -1059,6 +1272,24 @@ function VL.toggle_launch()
   log("info", "mode Launch %s", S.launch and "ON" or "OFF")
 end
 
+-- LAUNCH / GO sur un seul pad : OFF -> active la memorisation ; ON -> execute tout ce qui est arme (Go) et quitte Launch
+function VL.launch_go()
+  if not S.launch then
+    S.launch, S.armed = true, {}
+    log("info", "mode Launch ON : les operations sont memorisees")
+  else
+    VL.fire()
+  end
+end
+
+-- appui long : quitte Launch SANS rien executer
+function VL.launch_cancel()
+  if S.launch then
+    S.launch, S.armed = false, {}
+    log("info", "mode Launch OFF : operations annulees")
+  end
+end
+
 -- Chaque looper n'a qu'UN slot de commande gmem : ecrire plusieurs commandes dans le meme cycle ne laisse que la derniere.
 -- Le fire met donc les operations en file et les envoie dans l'ordre, au plus UNE par looper tous les FIRE_GAP_S
 -- (des loopers differents partent en meme temps).
@@ -1074,6 +1305,8 @@ local function fire_lanes(a)
   end
   return a.targets
 end
+
+function VL.queue_op(a) fire_queue[#fire_queue + 1] = a end
 
 function VL.fire_pump(t)
   if #fire_queue == 0 then return end
@@ -1274,7 +1507,54 @@ for p = 1, NPAGE do bind_all(NGROUP + p, 9, fn(function() VL.set_page(p) end, fu
 
 -- Page 1 : Main
 -- row 0 = selection loopers | row 1 = statut loopers | rows 2-5 = ancienne grille 1-4 decalee
+
+-- Appui intelligent sur le pad statut (rangee 1) : sort du mode affiche, sinon play/stop
+function VL.status_pad_tap(i)
+  local L = S.loopers[i]
+  if not L then return end
+  VL.select_looper(i)
+  local function do_send(action, want)
+    local def = ACTIONS[action]
+    local cur = def and def.key and (L[def.key] and true or false) or false
+    if want ~= nil and cur == (want and true or false) then return end
+    send(i, action, want ~= nil and want or (not cur))
+  end
+  if L.wait_sync or L.rec_led or L.overdub or L.rec then
+    do_send("rec_overdub", false)
+  elseif L.replace then
+    do_send("replace", false)
+  elseif L.multiply then
+    do_send("multiply", false)
+  elseif L.playing then
+    if L.cloud then do_send("cloud", false)
+    elseif L.slicer then do_send("slicer", false)
+    elseif L.rev then do_send("reverse", false)
+    else do_send("stop_play", false) end
+  else
+    if L.cloud then do_send("cloud", false)
+    elseif L.slicer then do_send("slicer", false)
+    elseif L.rev then do_send("reverse", false)
+    elseif (L.length or 0) > 0 then do_send("stop_play", true)
+    end
+  end
+  if VL.sync_out then VL.sync_out() end
+end
+
 for n = 1, 5 do bind(1, 2, n, fn(function() VL.set_fighter_page(n) end, function() return S.fighter_page == n and "on" or "idle" end)) end
+
+-- Rangee statut (row 1) : appui intelligent play/stop / sortie de mode
+for i = 1, NLOOP do
+  bind(1, 1, i, fn(function() VL.status_pad_tap(i) end))
+end
+
+
+-- Twister pages (rangee 2 apres decalage statut)
+PAD_LABEL[1]["2,1"] = "Twister 1 In/Out"
+PAD_LABEL[1]["2,2"] = "Twister 2 Pitch/Speed"
+PAD_LABEL[1]["2,3"] = "Twister 3 Vol/Feedback"
+PAD_LABEL[1]["2,4"] = "Twister 4 Slicer"
+PAD_LABEL[1]["2,5"] = "Twister 5 Cloud"
+
 bind(1, 2, 7, fn(function() VL.step_looper(-1) end))
 bind(1, 2, 8, fn(function() VL.step_looper(1) end))
 for n = 1, NPRESET do
@@ -1287,8 +1567,15 @@ for n = 1, NPRESET do
       fn(function() VL.preset_revert(bank, n) end))
   end
 end
-bind(1, 5, 1, fn(function() VL.toggle_launch() end, function() return S.launch and "on" or "idle" end))
-bind(1, 5, 2, fn(function() VL.fire() end, function() return #S.armed > 0 and "armed" or "idle" end))
+-- LAUNCH / GO : un appui active la memorisation, l'appui suivant execute tout (Go) ; appui long = annuler sans executer
+bind(1, 5, 1, fn(function() VL.launch_go() end,
+                 function() return S.launch and (#S.armed > 0 and "armed" or "on") or "idle" end),
+               fn(function() VL.launch_cancel() end))
+PAD_LABEL[1]["5,1"] = "LAUNCH / GO (long = annuler)"
+-- SYNC / UNSYNC du module Master Sync : court = part en cours (Main/Chorus/Bridge), long = les 3 parts. Allume = synchro engagee.
+bind(1, 5, 2, fn(function() VL.sync_toggle(false) end, function() return VL.sync_is_on() and "on" or "idle" end),
+               fn(function() VL.sync_toggle(true) end))
+PAD_LABEL[1]["5,2"] = "SYNC on/off (court = part en cours, long = 3 parts)"; PAD_RGB[1]["5,2"] = 0x40C0FF
 bind(1, 5, 7, act("quantise_inout"))
 bind(1, 5, 8, act("full_loop"))
 for n = 1, 3 do bind(1, 6, n, act("part", n)) end
@@ -1301,6 +1588,9 @@ bind(1, 7, 5, act("cloud"));   bind(1, 7, 6, act("slicer"));   bind(1, 7, 7, act
 bind(1, 8, 1, act("clear_all"), act("clear_all_full"))
 -- CLEAR individuel : court = part active | long = 3 parts de ce looper (ou groupe)
 bind(1, 8, 2, act("clear"), act("clear_full"))
+-- RESET (au-dessus de CLEAR) : pitch / speed / volume / boucle des loopers cibles remis a l'origine
+bind(1, 7, 2, act("reset"))
+PAD_LABEL[1]["7,2"] = "RESET (pitch/speed/vol/loop)"; PAD_RGB[1]["7,2"] = 0xFF8040
 bind(1, 8, 3, act("reverse"), act("auto_rev"))
 bind(1, 8, 4, act("stop_play")); bind(1, 8, 5, act("multiply")); bind(1, 8, 6, act("replace"))
 bind(1, 8, 7, act("rerec"));     bind(1, 8, 8, act("rec_overdub"))
@@ -1370,7 +1660,7 @@ end
 
 -- libelle d'un pad (fenetre de test) : dynamique pour la page 4 et le bouton PAGE 4
 
--- Rangee 5 (4e en partant du bas) page Main : statut des 8 loopers (affichage seul, pas d'action)
+-- Rangee 1 page Main : statut des 8 loopers (affichage + appui intelligent)
 local STATUS_HEX = {
   empty     = 0x202020,
   rec       = 0xFF0000,   -- premier rec
@@ -1740,7 +2030,7 @@ end
 -- Piste + index d'effet de la fenetre looper i : piste du looper (index fixe, comme le script openlooper), effet looper_window_fx
 local function looper_window_target(i)
   local tr = VL.resolve_tracks(false).loopers[i]
-  local fx = S.cfg.looper_window_fx or 0
+  local fx = VL.config.looper_window_fx or 0
   if tr and fx < reaper.TrackFX_GetCount(tr) then return tr, fx end
   return nil
 end
@@ -1780,7 +2070,7 @@ function VL.open_looper_window(i)
   if not (reaper and reaper.CountTracks) then log("warn", "looper %d : pas de REAPER", i) return false end
   VL.close_looper_windows(i)                                   -- un seul looper ouvert a la fois
   local tr, fx = looper_window_target(i)
-  if not tr then log("warn", "looper %d : piste ou effet %d introuvable", i, S.cfg.looper_window_fx or 0) return false end
+  if not tr then log("warn", "looper %d : piste ou effet %d introuvable", i, VL.config.looper_window_fx or 0) return false end
   if not looper_window_is_open(tr, fx) then
     reaper.TrackFX_Show(tr, fx, 3)                             -- 3 = fenetre flottante
     log("info", "looper %d : fenetre ouverte", i)
@@ -1954,14 +2244,8 @@ main_state = function(b)
         if L.rec_led then return "on" end        -- rouge (couleur famille du pad) : rec
         return "idle"
       end
-      -- groupe : priorite wait_sync > overdub > rec parmi les cibles
-      mode = "idle"
-      for _, t in ipairs(targets) do
-        local m = rec_mode_for(S.loopers[t])
-        if m == "armed" then mode = "armed"; break
-        elseif m == "warn" and mode ~= "armed" then mode = "warn"
-        elseif m == "on" and mode == "idle" then mode = "on" end
-      end
+      -- Affiche UNIQUEMENT le looper de reference (selectionne), pas un agregat du groupe
+      mode = rec_mode_for(ref)
       mode = armed_mode(sh.action, sh.args) or mode
       return mode
     end
@@ -2167,7 +2451,13 @@ end
 
 function VL.render(t)
   t = t or now()
-  if not VL.hardware_test then VL.dash_publish(false, t) end
+  -- Toujours publier groupes/routing pour Twister & dashboard (meme en hardware_test)
+  VL.dash_publish(false, t)
+  if reaper and reaper.SetExtState then
+    reaper.SetExtState("nowundo_vl", "fighter_page", tostring(S.fighter_page or 1), false)
+    reaper.SetExtState("nowundo_vl", "sel_looper", tostring(S.sel_looper or 1), false)
+    reaper.SetExtState("nowundo_vl", "sel_group", tostring(S.sel_group or 0), false)
+  end
   -- Garder active_page a jour pour le miroir (chaque frame, cout negligeable)
   if SYNC.enabled and not VL.mirror_mode and reaper and reaper.SetExtState then
     reaper.SetExtState(SYNC.section, "active_page", tostring(S.page), false)
