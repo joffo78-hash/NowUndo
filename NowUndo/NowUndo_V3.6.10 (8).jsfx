@@ -1,4 +1,4 @@
-desc:aNowUndo V3.6.12 Looper (slicer: gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
+desc:aNowUndo V3.6.13 Looper (slicer: gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
 options:gmem=nowundo_sync
 options:maxmem=128000000
 slider1:speed=1.0<0.01,100.0,0.01>-Speed
@@ -592,13 +592,38 @@ function multiply_extend() local(old_len, n, t) (
   analysing == 0 ? ( n = trans_count; t = 0; loop(n, (trans_mem[t] < mult_len && trans_count < max_transients) ? ( trans_mem[trans_count] = trans_mem[t] + old_len; trans_str[trans_count] = trans_str[t]; trans_count += 1; ); t += 1; ); slicer_mode == 5 ? slicer_regen(); ); 
   sync_hard_resync = 1;
 );
-function do_clear(clear_type) local(ms_off) (
+function do_clear(clear_type) local(ms_off, wipe_n, wipe1, wipe2, wipe3, hi) (
+  // Sauver tailles a zero AVANT de reset length/dirty_len
+  wipe_n = max(dirty_len, length);
+  wipe_n = min(max(wipe_n, 0), single_buf_len);
+  wipe1 = min(max(len_part1, 0), single_buf_len);
+  wipe2 = min(max(len_part2, 0), single_buf_len);
+  wipe3 = min(max(len_part3, 0), single_buf_len);
+  // Aussi le slot historique actif (peut differer de left_buf si hist)
+  hi = 0; loop(max_history, wipe_n = max(wipe_n, min(max(hist_len[hi], 0), single_buf_len)); hi += 1;);
+
   dub_discard(); speed = 1.0; slider1 = speed; pitch = 0.0; slider2 = pitch; rev_on = 0; slider16 = rev_on; pingpong_on = 0; slider17 = pingpong_on; grain_ms = 80.0; slider4 = grain_ms; grain_fade = 25; slider12 = grain_fade; wg_fade = 0.25; fade_ms = 10; slider5 = fade_ms; auto_on = 0;
   cloud_on = 0; slider23 = cloud_on; cloud_density = 0.5; slider25 = cloud_density; cloud_chaos = 0.0; slider26 = cloud_chaos; cloud_spread = 0.1; slider27 = cloud_spread; cloud_pitch_spread = 0.0; slider34 = cloud_pitch_spread; cloud_mix = 1.0; slider35 = cloud_mix; cloud_pos_mode = 1; slider36 = cloud_pos_mode; cloud_pos_pct = 50.0; slider37 = cloud_pos_pct; cloud_lfo_shape = 0; slider38 = cloud_lfo_shape; cloud_lfo_rate = 1.0; slider39 = cloud_lfo_rate; cloud_lfo_depth = 0.0; slider40 = cloud_lfo_depth;
   play_mode = 0; slider6 = play_mode; dens_occ = 100; slider28 = dens_occ; loop_beats = 0; slider30 = loop_beats; loop_quant = 0; slider24 = loop_quant; slicer_pitch_spread = 0.0; slider33 = slicer_pitch_spread;
   state_target = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; trans_count = 0; analysing = 0; one_shot_playing = 0; history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0;
-  // IMPORTANT: ne PAS memset tout le buffer ici (thread audio) -> freeze/xruns.
-  // length=0 / dirty_len=0 suffit pour ne plus lire l'audio ; memoire reecrite au prochain rec.
+
+  // Vider uniquement la zone UTILISEE (pas tout le mem_budget) : audio silencieux + pas de freeze
+  wipe_n > 0 ? (
+    memset(left_buf, 0, wipe_n);
+    memset(right_buf, 0, wipe_n);
+  );
+  // Parts (buffers fixes)
+  wipe1 > 0 ? ( memset(buf_part1_l, 0, wipe1); memset(buf_part1_r, 0, wipe1); );
+  clear_type == 1 ? (
+    wipe2 > 0 ? ( memset(buf_part2_l, 0, wipe2); memset(buf_part2_r, 0, wipe2); );
+    wipe3 > 0 ? ( memset(buf_part3_l, 0, wipe3); memset(buf_part3_r, 0, wipe3); );
+  ) : (
+    active_part == 2 && wipe2 > 0 ? ( memset(buf_part2_l, 0, wipe2); memset(buf_part2_r, 0, wipe2); );
+    active_part == 3 && wipe3 > 0 ? ( memset(buf_part3_l, 0, wipe3); memset(buf_part3_r, 0, wipe3); );
+  );
+  // Reset longueurs hist
+  hi = 0; loop(max_history, hist_len[hi] = 0; hi += 1;);
+
   clear_type == 1 ? (
     len_part1 = 0; len_part2 = 0; len_part3 = 0; base_len_part1 = 0; base_len_part2 = 0; base_len_part3 = 0; master_pos1 = 0; master_pos2 = 0; master_pos3 = 0; active_part = 1; target_part = 1; pending_part_switch = 0;
     i = 0; loop(3, part_speed[i] = 1.0; part_pitch[i] = 0.0; part_rev[i] = 0; part_pingpong[i] = 0; part_play_mode[i] = 0; part_cloud_on[i] = 0; part_link_on[i] = 0; i += 1; ); switch_history_slot(0);
