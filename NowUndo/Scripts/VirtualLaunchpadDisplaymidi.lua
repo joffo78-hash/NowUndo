@@ -1,3 +1,8 @@
+-- @description NowUndo Virtual Launchpad Mirror
+-- @version 1.0
+-- @author joffo78-hash
+-- @changelog
+--   Initial ReaPack release.
 --[[
   Virtual_Launchpad_secondary.lua  -  nowundo (miroir)
   Affiche les 3 pages NON selectionnees du Virtual Launchpad.
