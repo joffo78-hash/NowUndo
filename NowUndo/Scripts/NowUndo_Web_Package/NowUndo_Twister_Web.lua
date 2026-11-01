@@ -1,3 +1,8 @@
+-- @description NowUndo Twister Web Backend
+-- @version 1.0
+-- @author joffo78-hash
+-- @changelog
+--   Initial ReaPack release.
 --[[
   NowUndo_Twister_Web.lua
   Bridge gmem nowundo_sync ↔ ExtState pour la page web Twister (In/Out).
