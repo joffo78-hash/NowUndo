@@ -1,0 +1,48 @@
+name: Update ReaPack index
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Install reapack-index
+        run: gem install reapack-index
+
+      - name: Build repository index
+        run: >
+          reapack-index
+          --rebuild
+          --no-commit
+          --name "NowUndo"
+          --link "https://github.com/joffo78-hash/NowUndo"
+          --about "NowUndo/README.md"
+
+      - name: Commit updated index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.xml
+          if git diff --cached --quiet; then
+            echo "ReaPack index is already up to date."
+          else
+            git commit -m "Update ReaPack index"
+            git push
+          fi
