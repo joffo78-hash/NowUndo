@@ -1,3 +1,9 @@
+-- @description NowUndo Open Looper 8
+-- @version 1.0
+-- @author joffo78-hash
+-- @changelog
+--   Initial ReaPack release.
+
 -- Script : basculer (ouvrir/fermer) la fenêtre flottante de l'effet à un index spécifié sur la PISTE 2
 -- Indice de l'effet (0 = premier effet)
 
