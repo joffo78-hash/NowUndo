@@ -1,3 +1,10 @@
+-- @description NowUndo Virtual Launchpad Web Backend
+-- @version 1.0
+-- @author joffo78-hash
+-- @changelog
+--   Initial ReaPack release.
+-- @provides
+--   [webinterface] NowUndo.html
 --[[
   Virtual_Launchpad_Web.lua
   Backend web pour le Virtual Launchpad (nowundo).
