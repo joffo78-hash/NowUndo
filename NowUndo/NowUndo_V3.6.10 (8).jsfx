@@ -1,10 +1,4 @@
-// @description NowUndo Looper
-// @version 3.6.10
-// @author joffo78-hash
-// @changelog
-//   Initial ReaPack release.
-
-desc:aNowUndo V3.6.10 Looper (slicer: gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
+desc:aNowUndo V3.6.12 Looper (slicer: gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
 options:gmem=nowundo_sync
 options:maxmem=128000000
 slider1:speed=1.0<0.01,100.0,0.01>-Speed
@@ -80,13 +74,17 @@ function host_measure_len() local(t, n) (
   srate * (60.0 / t) * n; 
 );
 
-// ---- IDENTIFICATION MANUELLE (slider45 + Sérialisation) ----
-manual_id > 0 ? (slider45 = manual_id;) : (manual_id = slider45;);
-
+// ---- IDENTIFICATION MANUELLE (slider45 + @serialize) ----
+// manual_id est la variable du slider45. On force un entier 0..8.
+// 0 = Auto -> instance_id 1 (attention collisions si plusieurs Auto).
+manual_id = floor(manual_id + 0.5);
+manual_id < 0 ? manual_id = 0 : manual_id > 8 ? manual_id = 8;
+slider45 = manual_id;
 instance_id = manual_id > 0 ? manual_id : 1;
 instance_alias = instance_id;
 inst_idx = instance_id - 1;
 max_inst = 8;
+saved_manual_id = manual_id; // miroir pour @serialize (survit mieux aux re-init)
 
 max_loop_sec = 90;
 mem_budget = 120000000;
@@ -599,18 +597,24 @@ function do_clear(clear_type) local(ms_off) (
   cloud_on = 0; slider23 = cloud_on; cloud_density = 0.5; slider25 = cloud_density; cloud_chaos = 0.0; slider26 = cloud_chaos; cloud_spread = 0.1; slider27 = cloud_spread; cloud_pitch_spread = 0.0; slider34 = cloud_pitch_spread; cloud_mix = 1.0; slider35 = cloud_mix; cloud_pos_mode = 1; slider36 = cloud_pos_mode; cloud_pos_pct = 50.0; slider37 = cloud_pos_pct; cloud_lfo_shape = 0; slider38 = cloud_lfo_shape; cloud_lfo_rate = 1.0; slider39 = cloud_lfo_rate; cloud_lfo_depth = 0.0; slider40 = cloud_lfo_depth;
   play_mode = 0; slider6 = play_mode; dens_occ = 100; slider28 = dens_occ; loop_beats = 0; slider30 = loop_beats; loop_quant = 0; slider24 = loop_quant; slicer_pitch_spread = 0.0; slider33 = slicer_pitch_spread;
   state_target = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; trans_count = 0; analysing = 0; one_shot_playing = 0; history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0;
+  // IMPORTANT: ne PAS memset tout le buffer ici (thread audio) -> freeze/xruns.
+  // length=0 / dirty_len=0 suffit pour ne plus lire l'audio ; memoire reecrite au prochain rec.
   clear_type == 1 ? (
     len_part1 = 0; len_part2 = 0; len_part3 = 0; base_len_part1 = 0; base_len_part2 = 0; base_len_part3 = 0; master_pos1 = 0; master_pos2 = 0; master_pos3 = 0; active_part = 1; target_part = 1; pending_part_switch = 0;
-    i = 0; loop(3, part_speed[i] = 1.0; part_pitch[i] = 0.0; part_rev[i] = 0; part_pingpong[i] = 0; part_play_mode[i] = 0; part_cloud_on[i] = 0; part_link_on[i] = 0; i += 1; ); switch_history_slot(0); memset(0, 0, hist_mem_start + (max_history * slot_size));
+    i = 0; loop(3, part_speed[i] = 1.0; part_pitch[i] = 0.0; part_rev[i] = 0; part_pingpong[i] = 0; part_play_mode[i] = 0; part_cloud_on[i] = 0; part_link_on[i] = 0; i += 1; ); switch_history_slot(0);
+    history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; active_history_idx = 0;
     (gmem[0] == 1 && (gmem[1] == instance_id || gmem[1] == instance_alias)) ? gmem[0] = 0;
     (gmem[10] == 1 && (gmem[11] == instance_id || gmem[11] == instance_alias)) ? gmem[10] = 0;
     (gmem[20] == 1 && (gmem[21] == instance_id || gmem[21] == instance_alias)) ? gmem[20] = 0;
   ) : (
     active_part == 1 ? (len_part1 = 0; base_len_part1 = 0; master_pos1 = 0;) : active_part == 2 ? (len_part2 = 0; base_len_part2 = 0; master_pos2 = 0;) : (len_part3 = 0; base_len_part3 = 0; master_pos3 = 0;);
-    idx_clr = active_part - 1; part_speed[idx_clr] = 1.0; part_pitch[idx_clr] = 0.0; part_rev[idx_clr] = 0; part_pingpong[idx_clr] = 0; part_play_mode[idx_clr] = 0; part_cloud_on[idx_clr] = 0; part_link_on[idx_clr] = 0; switch_history_slot(0); memset(left_buf, 0, slot_size); pending_part_switch = 0;
+    idx_clr = active_part - 1; part_speed[idx_clr] = 1.0; part_pitch[idx_clr] = 0.0; part_rev[idx_clr] = 0; part_pingpong[idx_clr] = 0; part_play_mode[idx_clr] = 0; part_cloud_on[idx_clr] = 0; part_link_on[idx_clr] = 0; switch_history_slot(0);
+    history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; active_history_idx = 0;
+    pending_part_switch = 0;
     ms_off = (active_part - 1) * 10; (gmem[ms_off] == 1 && (gmem[ms_off+1] == instance_id || gmem[ms_off+1] == instance_alias)) ? gmem[ms_off] = 0;
   );
   last_state_target = 0; state = 0;
+  state_transition_fade = 0;
   sync_hard_resync = 1;
 );
 function slicer_mode_name(m) ( m == 0 ? "Random" : (m == 5 ? "All" : "Steps"); );
@@ -737,7 +741,23 @@ function ui_hbar(id, x, y, w, h, val, mn, mx, def, fmt) local(hot, nv, tw, th, t
 function ui_log_knob(id, cx, cy, r, val, mn, mx, label, fmt, def) local(log_mn, log_mx, log_rng, log_val, hot, d, norm, ang, ua, tw, th, act) ( ui_chg = 0; log_mn = log(mn); log_mx = log(mx); log_rng = max(log_mx - log_mn, 0.000001); log_val = log(max(val, mn)); hot = ui_en && abs(mouse_x - cx) <= r + 5 && abs(mouse_y - cy) <= r + 5; ui_en && mouse_click && active_control == 0 && hot ? ( (mouse_cap & 4) ? ( val = def; ui_chg = 1; ) : ( active_control = id; ); ); ui_en && active_control == id ? ( d = last_mouse_y - mouse_y; (mouse_cap & 8) ? d *= 0.2; d != 0 ? ( log_val = max(log_mn, min(log_mx, log_val + d * log_rng / 200)); val = exp(log_val); ui_chg = 1; ); ); ua = ui_en ? 1 : 0.4; act = (active_control == id); norm = max(0, min(1, (log_val - log_mn) / log_rng)); ang = 0.75 * $pi + norm * 1.5 * $pi; gfx_set(0.12, 0.04, 0.05, ua); gfx_circle(cx, cy, r - 2, 1); gfx_set(0.30, 0.12, 0.15, ua); gfx_circle(cx, cy, r - 2, 0); gfx_set(0.24, 0.09, 0.11, ua); ui_arc(cx, cy, r + 3, 0.75 * $pi, 2.25 * $pi); norm > 0.004 ? ( gfx_set(ui_ar, ui_ag, ui_ab, ua); ui_arc(cx, cy, r + 3, 0.75 * $pi, ang); ); gfx_set(1, 1, 1, ua * (act ? 1 : 0.9)); gfx_line(cx + cos(ang) * r * 0.3, cy + sin(ang) * r * 0.3, cx + cos(ang) * (r - 4), cy + sin(ang) * (r - 4)); gfx_setfont(1); gfx_set(0.85, 0.75, 0.78, ua); gfx_measurestr(label, tw, th); gfx_x = cx - tw * 0.5; gfx_y = cy - r - 18; gfx_drawstr(label); sprintf(#knobval, fmt, val); (act || hot) ? gfx_set(1, 1, 1, ua) : gfx_set(0.9, 0.82, 0.84, ua); gfx_measurestr(#knobval, tw, th); gfx_x = cx - tw * 0.5; gfx_y = cy + r + 7; gfx_drawstr(#knobval); val; );
 
 @serialize
-file_var(0, manual_id);
+// Sauvegarde dediee de l'ID (entier). Au chargement projet, restaure
+// slider45/manual_id meme si un re-init a reinitialise le slider.
+file_var(0, saved_manual_id);
+file_avail(0) >= 0 ? (
+  // lecture projet
+  saved_manual_id = floor(saved_manual_id + 0.5);
+  saved_manual_id < 0 ? saved_manual_id = 0 : saved_manual_id > 8 ? saved_manual_id = 8;
+  manual_id = saved_manual_id;
+  slider45 = manual_id;
+  instance_id = manual_id > 0 ? manual_id : 1;
+  instance_alias = instance_id;
+  inst_idx = instance_id - 1;
+) : (
+  // ecriture projet
+  saved_manual_id = floor(manual_id + 0.5);
+  saved_manual_id < 0 ? saved_manual_id = 0 : saved_manual_id > 8 ? saved_manual_id = 8;
+);
 
 @block
 smp_ev_n = 0; smp_ev_i = 0;
@@ -798,7 +818,14 @@ analysing == 1 ? (
   ana_k >= ana_end - ana_win_size ? ( slicer_src == 0 ? trans_cap(floor(max_slices + 0.5)); step_len = get_slicer_len(); generate_slicer_sequence(step_len); analysing = 0; );
 );
 
-// MAJ DE L'ID (slider manuel)
+// MAJ DE L'ID (slider manuel) — entier stable 0..8
+manual_id = floor(manual_id + 0.5);
+manual_id < 0 ? manual_id = 0 : manual_id > 8 ? manual_id = 8;
+// Si le slider a ete remis a 0 par un glitch de restore mais saved_manual_id est valide
+(manual_id == 0 && saved_manual_id > 0 && saved_manual_id <= 8) ? (
+  manual_id = saved_manual_id; slider45 = manual_id;
+);
+saved_manual_id = manual_id;
 instance_id = manual_id > 0 ? manual_id : 1;
 instance_alias = instance_id;
 inst_idx = instance_id - 1;
@@ -958,6 +985,23 @@ loop(3,
     wr_id == 38 ? ( cloud_pos_pct = max(0, min(100, wr_v)); slider37 = cloud_pos_pct; ) :
     wr_id == 40 ? ( cloud_lfo_rate = max(0.1, min(4, wr_v)); slider39 = cloud_lfo_rate; ) :
     wr_id == 41 ? ( cloud_lfo_depth = max(0, min(100, wr_v)); slider40 = cloud_lfo_depth; ) :
+    wr_id == 11 ? ( trans_sens = max(0.01, min(0.8, wr_v)); slider10 = trans_sens; ) :
+    wr_id == 12 ? ( trans_hold_ms = max(30, min(1000, wr_v)); slider11 = trans_hold_ms; ) :
+    wr_id == 14 ? ( slicer_mode = max(0, min(5, floor(wr_v + 0.5))); slider13 = slicer_mode; slicer_regen(); ) :
+    wr_id == 15 ? ( slicer_sub = max(0, min(5, floor(wr_v + 0.5))); slider14 = slicer_sub; ) :
+    wr_id == 16 ? ( slice_decay_ms = max(10, min(2000, wr_v)); slider15 = slice_decay_ms; ) :
+    wr_id == 32 ? ( slicer_src = wr_v >= 0.5 ? 1 : 0; slider31 = slicer_src; ) :
+    wr_id == 33 ? ( grid_sub = max(0, min(5, floor(wr_v + 0.5))); slider32 = grid_sub; ) :
+    wr_id == 37 ? ( cloud_pos_mode = wr_v >= 0.5 ? 1 : 0; slider36 = cloud_pos_mode; ) :
+    wr_id == 39 ? ( cloud_lfo_shape = max(0, min(2, floor(wr_v + 0.5))); slider38 = cloud_lfo_shape; ) :
+    wr_id == 42 ? ( sampler_root = max(0, min(127, floor(wr_v + 0.5))); slider42 = sampler_root; ) :
+    wr_id == 43 ? ( sampler_pitch_mode = wr_v >= 0.5 ? 1 : 0; slider43 = sampler_pitch_mode; ) :
+    wr_id == 44 ? ( sampler_release = max(0, min(3000, wr_v)); slider44 = sampler_release; ) :
+    wr_id == 47 ? ( slicer_steps = max(1, min(32, floor(wr_v + 0.5))); slider47 = slicer_steps; ) :
+    wr_id == 48 ? ( max_slices = max(0, min(64, floor(wr_v + 0.5))); slider48 = max_slices; ) :
+    wr_id == 49 ? ( slicer_preset = max(1, min(4, floor(wr_v + 0.5))); slider49 = slicer_preset; ) :
+    wr_id == 50 ? ( det_thresh = max(0.01, min(0.8, wr_v)); slider50 = det_thresh; start_analysis(); ) :
+    wr_id == 51 ? ( det_hold_ms = max(30, min(1000, wr_v)); slider51 = det_hold_ms; start_analysis(); ) :
     0;
     gmem[gmem_base + 180] = 0;
     gmem[gmem_base + 181] = 0;
@@ -1017,6 +1061,13 @@ loop(3,
     gmem[gmem_base + 45] = loop_width;
     gmem[gmem_base + 46] = length;
     gmem[gmem_base + gm_sampler_root] = sampler_root;
+    gmem[gmem_base + 165] = det_thresh;
+    gmem[gmem_base + 166] = det_hold_ms;
+    gmem[gmem_base + 167] = slicer_steps;
+    gmem[gmem_base + 168] = max_slices;
+    gmem[gmem_base + 169] = slicer_preset;
+    gmem[gmem_base + 170] = sampler_release;
+    gmem[gmem_base + 171] = sampler_pitch_mode;
     gmem[gmem_base + gm_sampler_armed] = smp_mode;
     gmem[gmem_base + gm_sampler_pmode] = sampler_pitch_mode;
     gmem[gmem_base + gm_sampler_release] = sampler_release;
@@ -1059,7 +1110,7 @@ loop(3,
 );
 
 @slider
-manual_id != slider45 ? manual_id = slider45;
+// slider45 == manual_id (meme variable JSFX)
 loop_pos_pct != last_slider9 ? ( length > 0 ? ( req_p = (loop_pos_pct * 0.01) * length; abs(req_p - pos) > 10 ? trigger_pos_jump(req_p); ); last_slider9 = loop_pos_pct; );
 (det_thresh != last_det_t || det_hold_ms != last_det_h) ? ( start_analysis(); last_det_t = det_thresh; last_det_h = det_hold_ms; ) : slicer_mode != last_slicer_mode ? ( step_len = get_slicer_len(); generate_slicer_sequence(step_len); last_slicer_mode = slicer_mode; slicer_current_step = 0; );
 slicer_pitch_spread != last_pitch_spread ? ( last_pitch_spread = slicer_pitch_spread; update_slicer_pitches(get_slicer_len()); );
@@ -1181,12 +1232,13 @@ state_target != last_state_target ? (
   state_target == 0 ? ( 
     state == 1 || state == 8 ? finish_rec(0) : ( pos = 0; analysing = 0; );
     state = 0; one_shot_playing = 0;
+    state_transition_fade = 0;
   ) : state_target == 1 ? ( 
     state == 1 || state == 8 ? try_finish_rec(2, 0) : ( 
-      analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; memset(left_buf, 0, dirty_len); memset(right_buf, 0, dirty_len); dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 1; trans_count = 0; 
+      analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 1; trans_count = 0; state_transition_fade = 0; 
     ); 
   ) : state_target == 2 ? (
-    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( length > 0 ? state = 2 );
+    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( length > 0 ? ( state = 2; state_transition_fade = 0; ); );
   ) : state_target == 3 ? (
     state == 3 ? state = 2 : ( state == 1 || state == 8 ? try_finish_rec(3, 0) : ( push_new_history_state(); state = 3; ); dub_pan = (rand(2.0) - 1.0); );
     (state != 3 && state != 8) ? state_target = 2;
@@ -1200,7 +1252,7 @@ state_target != last_state_target ? (
     state == 6 ? state = 2 : ( state == 1 || state == 8 ? try_finish_rec(6, 0) : ( push_new_history_state(); state = 6; memcpy(base_backup_l, left_buf, length); memcpy(base_backup_r, right_buf, length); mult_len = length; ); dub_pan = (rand(2.0) - 1.0); );
     (state != 6 && state != 8) ? state_target = 2;
   ) : state_target == 7 ? (
-    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; memset(left_buf, 0, dirty_len); memset(right_buf, 0, dirty_len); dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 7; trans_count = 0; );
+    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 7; trans_count = 0; state_transition_fade = 0; );
   );
   last_state_target = state_target;
 );
@@ -1448,6 +1500,11 @@ wet_s0 += smp_l; wet_s1 += smp_r;
 dry_gain = cos(mix * $pi * 0.5); 
 wet_gain = sin(mix * $pi * 0.5);
 
+// Fade de transition stop/clear (~8 ms) pour eviter click ; state_transition_fade remonte vers 1 en lecture
+state_transition_fade < 0.999 ? (
+  wet_s0 *= state_transition_fade; wet_s1 *= state_transition_fade;
+  state_transition_fade = min(1.0, state_transition_fade + (1.0 / max(1, srate * 0.008)));
+);
 out0 = in0 * dry_gain + wet_s0 * wet_gain;
 out1 = in1 * dry_gain + wet_s1 * wet_gain;
 
@@ -1522,6 +1579,7 @@ mouse_click && id_hov && active_control == 0 ? (
   qsel_id > 0 ? (
     manual_id = qsel_id == 1 ? 0 : qsel_id - 1;
     slider45 = manual_id;
+    saved_manual_id = manual_id;
     instance_id = manual_id > 0 ? manual_id : 1;
     instance_alias = instance_id;
     inst_idx = instance_id - 1;
