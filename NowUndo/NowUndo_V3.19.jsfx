@@ -2233,7 +2233,7 @@ stop_hold = 0;
       sy_clear(active_part - 1); rec_ref_capture(); 
     ); 
   ) : state_target == 2 ? (
-    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( length > 0 ? ( state = 2; state_transition_fade = 0; ); );
+    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( length > 0 ? ( (state < 2 || state == 7) ? state_transition_fade = 0; state = 2; ); );   // V3.19 : Dub/Replace -> Play ne coupe plus la sortie
   ) : state_target == 3 ? (
     state == 3 ? state = 2 : ( state == 1 || state == 8 ? try_finish_rec(3, 0) : ( push_new_history_state(); state = 3; ); dub_pan = (rand(2.0) - 1.0); );
     (state != 3 && state != 8) ? state_target = 2;
