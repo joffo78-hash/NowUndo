@@ -1,4 +1,4 @@
-adesc:aNowUndo V3.18 [In/Out fix r12 brf+BRmix+SLmix] Looper (beat repeat) (sync point + reference master, slicer: auto-refresh each buffer change, Rate Link grid, auto-detect leger (enveloppe+seuil+hold), gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
+adesc:aNowUndo V3.19 [anti-clic: crossfades, slicer precis, glide, queues dub/replace] [In/Out fix r12 brf+BRmix+SLmix] Looper (beat repeat) (sync point + reference master, slicer: auto-refresh each buffer change, Rate Link grid, auto-detect leger (enveloppe+seuil+hold), gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
 options:gmem=nowundo_sync
 options:maxmem=128000000
 slider1:speed=1.0<0.01,100.0,0.01>-Speed
@@ -61,6 +61,7 @@ slider57:slicer_link=0<0,1,1{Off,On}>-Slicer Rate Link (Grid : slice = subdivisi
 slider58:det_strict=1<0,1,1{Off,On}>-Detect Strict (que des vraies detections : ni grille de secours, ni remplissage)
 slider59:br_mix=1<0,1,0.01>-BR Dry/Wet (0 = boucle d'origine, 1 = beat repeat)
 slider60:slx_mix=1<0,1,0.01>-Slicer Dry/Wet (0 = boucle d'origine, 1 = slicer)
+slider61:glide_ms=30<0,500,1>-Pitch/Speed Glide (ms) [V3.19 lissage pitch/stretch]
 
 @init
 // Decay : position 0..100 <-> ms, interpolation exponentielle entre points :
@@ -313,8 +314,26 @@ sync_a = 0; sync_b = 0; sync_c_w = 0; sync_c_l = 0; sync_c_r = 0; prev_sync_key 
 ml_ok = 0; ml_fwd_free = 0; ml_cool = 0;
 active_control = 0; smooth_start = 0; smooth_width = 0; param_smooth_coeff = 0.95;
 xfade_pos_active = 0; xfade_pos_len = srate * 0.015; xfade_pos_count = 0;
-slice_env = 1.0; slice_decay_samples = srate * 0.15; slice_decay_step = 1.0 / slice_decay_samples; slice_att = 1.0; slice_att_step = 0; slice_att_eff_ms = 0;
-replace_fade = 0; replace_fade_coeff = 1.0 / (srate * 0.02); state_transition_fade = 1.0;
+// ===== V3.19 : CHASSE AUX CLICS =====
+// xf_* : "voix fantome" = l'ancienne tete de lecture qui continue (meme buffer, meme sens, meme gain) pendant le fondu
+//        apres un saut de position (resync, slicer, Pos, In/Out, reverse, undo/redo...). Avant : saut sec.
+// pd_* : declic par offset AVANT la ligne a retard (cas ou aucune voix fantome n'est possible)
+// dk_* : declic par offset sur la sortie (clear, part switch, REC, fin de one-shot...)
+// tl1_* / tl2_* : queues d'ecriture (overdub / replace) : l'ecriture se termine par un fondu au lieu d'une coupure
+xf_on = 0; xf_k = 0; xf_inc = 0; xf_eqp = 0; xf_l = 0; xf_r = 0; xf_p = 0; xf_st = 0; xf_ws = 0; xf_we = 1; xf_g = 0; xf_pan = 0; xf_pamt = 0;
+rd_valid = 0; rd_last_l = 0; rd_last_r = 0; rd_last_p = 0; rd_last_st = 0; rd_last_ws = 0; rd_last_we = 1; rd_last_g = 0; rd_last_pan = 0; rd_last_pamt = 0;
+xf_len_jump = max(16, floor(srate * 0.012));   // saut "musical" (Pos, resync, In/Out...) : 12 ms
+xf_len_slice = max(16, floor(srate * 0.0025)); // nouveau slice : 2.5 ms equi-puissance
+sl_pre_t = floor(srate * 0.002);               // pre-roll slicer : le fondu d'entree se termine SUR le point de coupe
+pd_l = 0; pd_r = 0; pd_arm = 0; pd_prev_l = 0; pd_prev_r = 0; pd_k = exp(-1 / (srate * 0.0025));
+dk_l = 0; dk_r = 0; dk_arm = 0; dk_prev_l = 0; dk_prev_r = 0; dk_k = exp(-1 / (srate * 0.003));
+stop_fo = 0; stop_go = 0; stop_hold = 0; stop_fo_step = 1.0 / max(1, srate * 0.010);
+dub_fade = 0; tw_g = 1; w1_prev = 0; w2_prev = 0; w_last_p = 0; w_last_st = 0; w_last_ws = 0; w_last_we = 1;
+tl1_on = 0; tl1_p = 0; tl1_st = 0; tl1_ws = 0; tl1_we = 1; tl2_on = 0; tl2_p = 0; tl2_st = 0; tl2_ws = 0; tl2_we = 1;
+sl_pan_amt = 0; sl_pan_k = 1 - exp(-1 / (srate * 0.004)); cloud_x = 0; cloud_x_step = 1.0 / (srate * 0.015); os_prev = 0;
+gl_on = 0; gl_settled = 1; gl_k = 1; speed_c = -1; lspeed = 0; gl_p1 = 0; gl_s1 = 0; gl_s2 = 0;
+slice_env = 1.0; slice_hold = 0; slice_decay_samples = srate * 0.15; slice_decay_step = 1.0 / slice_decay_samples; slice_att = 1.0; slice_att_step = 0; slice_att_eff_ms = 0;
+replace_fade = 0; replace_fade_coeff = 1.0 / (srate * 0.012); state_transition_fade = 1.0;   // V3.19 : meme rampe pour overdub et replace (somme = 1 aux transitions)
 prev_in0 = 0; prev_in1 = 0; grain_mix = 0; xfade_coeff = 1.0 / (srate * 0.01); init_done = 0;
 tape_lpf_l = 0; tape_lpf_r = 0; tape_lpf_l_b = 0; tape_lpf_r_b = 0; tape_lpf_l_c = 0; tape_lpf_r_c = 0; tape_lpf_l_d = 0; tape_lpf_r_d = 0;
 slice_pan = 0; dub_pan = 0; last_slider9 = loop_pos_pct; last_sens = trans_sens; last_hold = trans_hold_ms; last_det_t = det_thresh; last_det_h = det_hold_ms;
@@ -452,7 +471,7 @@ function rd_pick(p0, ts, ph_prev, Sn, Wn, rr, dir) local(k, n, dd, best, bestd, 
 function dub_grain_tick(head, rev, spawn_ok) local(dur, hop_t, d, gi, gb, fslot, ph0, ph1, pn, e, a, b, sb, pa, rr, max_l, Sn, Wn, Ln, dl, s_nom, t0, ot, src, si, ip, ic) (
   dur = srate * dub_grain_ms * 0.001; rr = pitch_ratio; d = rev ? -1 : 1;
   hop_t = max(wg_hop * dur * rr / max(sm_speed, 0.0001), dur / (max_wgrains - 1)); max_l = length > 0 ? length : buf_len;
-  wg_es = floor(eff_start); wg_el = max(floor(eff_end) - wg_es, 16); sb = acc_cur ? acc_set1 : acc_set0; acc_mode = (state == 3) ? 1 : 2; wg_rf = (state == 3) ? 1.0 : replace_fade; wg_rf *= dens_g * sl_gate;
+  wg_es = floor(eff_start); wg_el = max(floor(eff_end) - wg_es, 16); sb = acc_cur ? acc_set1 : acc_set0; acc_mode = (state == 3) ? 1 : 2; wg_rf = (state == 3) ? dub_fade : replace_fade; wg_rf *= dens_g * sl_gate;   // V3.19 : entree d'overdub granulaire en fondu (dub_fade)
   wg_fade = max(0.01, min(0.5, grain_fade * 0.01));
  stereo_width > 0.0001 ? ( 
   pa = (dub_pan * stereo_width + 1.0) * 0.25 * $pi; 
@@ -674,6 +693,28 @@ function rp_check() local(idx, M, P, n, ok, thr, ph, e) (
   ) : ( rp_cnt = 0; rp_pend = 0; );
 );
 
+// ===================== V3.19 : OUTILS ANTI-CLIC =====================
+// Demarre un fondu croise entre l'ancienne tete de lecture (voix fantome, figee dans son buffer / sens / gain)
+// et la nouvelle position. eqp = 1 : equi-puissance (materiau different) ; 0 : somme constante (materiau proche).
+// Si un fondu est deja en cours : on garde la voix la plus presente et on lisse le reste par offset (pd).
+function xf_begin(len, eqp) (
+  rd_valid ? (
+    !(xf_on && xf_k < 0.5) ? (
+      xf_l = rd_last_l; xf_r = rd_last_r; xf_p = rd_last_p + rd_last_st; xf_st = rd_last_st;
+      xf_ws = rd_last_ws; xf_we = rd_last_we; xf_g = rd_last_g; xf_pan = rd_last_pan; xf_pamt = rd_last_pamt;
+    );
+    xf_on ? pd_arm = 1;
+    xf_on = 1; xf_k = 0; xf_inc = 1 / max(1, len); xf_eqp = eqp;
+  ) : ( pd_arm = 1; );
+);
+// pan slicer (meme loi qu'avant) -> pan_ol / pan_or
+function pan_lr(l, r, pn, amt) local(a, gl, gr, m) (
+  a = (pn * amt + 1.0) * 0.25 * $pi; gl = min(1.0, cos(a) * 1.414); gr = min(1.0, sin(a) * 1.414); m = (l + r) * 0.5;
+  pan_ol = l * (1.0 - amt) + m * gl * amt; pan_or = r * (1.0 - amt) + m * gr * amt;
+);
+// coupe net les queues d'ecriture (changement de buffer : undo/redo, part, clear, nouveau REC)
+function wr_tail_kill() ( tl1_on = 0; tl2_on = 0; w1_prev = 0; w2_prev = 0; dub_fade = 0; replace_fade = 0; );
+
 function finish_rec(new_state) local(ms_off) (
   length = max(pos, 1); base_loop_length = length; mult_len = length;
   memcpy(base_backup_l, left_buf, length); memcpy(base_backup_r, right_buf, length);
@@ -683,7 +724,7 @@ function finish_rec(new_state) local(ms_off) (
   hist_len[active_history_idx] = length; dirty_len = max(dirty_len, length);
   loop_start = 0; loop_width = length; smooth_start = 0; smooth_width = length; pos = 0; master_pos = 0; clk_cyc = 0;
   active_part == 1 ? master_pos1 = 0 : active_part == 2 ? master_pos2 = 0 : master_pos3 = 0;
-  xfade_pos_active = 0; memset(delay_buf_l, 0, delay_len * 2); delay_idx = 0;
+  xfade_pos_active = 0; memset(delay_buf_l, 0, delay_len * 2); delay_idx = 0; xf_on = 0; rd_valid = 0; dk_arm = 1;
   state = new_state; start_analysis();
   sync_hard_resync = 1;
   sync_store(active_part - 1);
@@ -786,6 +827,7 @@ function try_finish_rec(target, from_auto) local(ms_off, locked, mid, is_self, i
   );
 );
 function switch_part(new_part) local(target_len, target_base_len, idx_old, idx_new) (
+  xf_on = 0; rd_valid = 0; dk_arm = 1; wr_tail_kill();   // V3.19 : changement de buffer -> declic de sortie
   dub_flush(); state == 1 ? try_finish_rec(2, 0);
   idx_old = active_part - 1; part_speed[idx_old] = speed; part_pitch[idx_old] = pitch; part_rev[idx_old] = rev_on; part_pingpong[idx_old] = pingpong_on; part_play_mode[idx_old] = play_mode; part_cloud_on[idx_old] = cloud_on; part_link_on[idx_old] = link_on;
   active_part == 1 ? ( master_pos1 = master_pos; clk_cyc1 = clk_cyc; len_part1 = length; base_len_part1 = base_loop_length; left_buf != buf_part1_l ? (memcpy(buf_part1_l, left_buf, length); memcpy(buf_part1_r, right_buf, length);); ) :
@@ -816,6 +858,7 @@ function sync_length_from_history() local(nl) ( nl = hist_len[active_history_idx
 function undo_state() ( 
   dub_flush(); 
   hist_undo > 0 ? ( 
+    xf_begin(xf_len_jump, 0); wr_tail_kill();   // V3.19 : fondu entre l'ancien et le nouvel etat (meme position)
     active_history_idx = (active_history_idx - 1 + max_history) % max_history; 
     switch_history_slot(active_history_idx); 
     hist_undo -= 1; hist_redo += 1; 
@@ -826,6 +869,7 @@ function undo_state() (
 function redo_state() ( 
   dub_flush(); 
   hist_redo > 0 ? ( 
+    xf_begin(xf_len_jump, 0); wr_tail_kill();
     active_history_idx = (active_history_idx + 1) % max_history; 
     switch_history_slot(active_history_idx); 
     hist_redo -= 1; hist_undo += 1; 
@@ -839,7 +883,7 @@ function generate_slicer_sequence(step_len) local(i, rnd_idx, temp, p) ( trans_c
 function calc_cloud_pitch(spread_val) local(ratio_p, impact_pct, ext_pct, r) ( ratio_p = spread_val * 0.01; ratio_p <= 0.0001 ? 0.0 : ( ratio_p <= 0.5 ? ( impact_pct = ratio_p * 2.0; rand(1.0) < impact_pct ? (rand(1.0) < 0.5 ? -12.0 : 12.0) : 0.0; ) : ( ext_pct = (ratio_p - 0.5) * 2.0; r = rand(1.0); r < 0.5 ? ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) : ( r < (0.5 + ext_pct * 0.5) ? ( rand(1.0) < 0.5 ? -24.0 : 24.0 ) : ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) ); ); ); );
 function tape_write_span(w_from, w_to, w_mode) local(k, k_end, seg_a, seg_b, wgt, tn, vL, vR, w2, oldL, oldR, steps, total_span, fb, targetL, targetR, dev, cutoff, lpf_alpha, deg, deg_amt, p_angle, gL, gR, mono_src, clippedL, clippedR, drive, souffle) (
   deg = degradation; w_to > w_from ? ( k = floor(w_from); k_end = floor(w_to); k_end < k ? k_end = k; steps = min(k_end - k + 1, 24); total_span = max(w_to - w_from, 0.0001);
-    loop(steps, k < buf_len ? ( seg_a = max(w_from, k); seg_b = min(w_to, k + 1); wgt = (seg_b - seg_a) * dens_g * sl_gate; wgt > 0 ? (
+    loop(steps, k < buf_len ? ( seg_a = max(w_from, k); seg_b = min(w_to, k + 1); wgt = (seg_b - seg_a) * dens_g * sl_gate * tw_g; wgt > 0 ? (
           tn = (((seg_a + seg_b) * 0.5) - w_from) / total_span; vL = prev_in0 + (in0 - prev_in0) * tn; vR = prev_in1 + (in1 - prev_in1) * tn;
           stereo_width > 0.0001 ? ( p_angle = (dub_pan * stereo_width + 1.0) * 0.25 * $pi; gL = cos(p_angle) * 1.414; gR = sin(p_angle) * 1.414; mono_src = (vL + vR) * 0.5; vL = mono_src * gL; vR = mono_src * gR; );
           w_mode == 2 ? ( w2 = wgt * replace_fade; oldL = left_buf[k]; oldR = right_buf[k]; targetL = oldL * (1.0 - w2) + vL * w2; targetR = oldR * (1.0 - w2) + vR * w2; ) : ( fb = 1.0 - wgt * (1.0 - feedback); oldL = left_buf[k]; oldR = right_buf[k]; targetL = oldL * fb + vL * wgt; targetR = oldR * fb + vR * wgt; );
@@ -858,14 +902,28 @@ function tape_write_span(w_from, w_to, w_mode) local(k, k_end, seg_a, seg_b, wgt
           left_buf[k]  = targetL; right_buf[k] = targetR; ); ); k += 1; ); );
 );
 function write_move(o, n, wrapped, rev, wmode) ( wrapped ? ( pingpong_on ? ( rev ? ( tape_write_span(eff_start, o, wmode); tape_write_span(eff_start, n, wmode); ) : ( tape_write_span(o, eff_end - 0.0001, wmode); tape_write_span(n, eff_end - 0.0001, wmode); ); ) : ( rev ? ( tape_write_span(n, eff_end - 0.0001, wmode); tape_write_span(eff_start, o, wmode); ) : ( tape_write_span(o, eff_end - 0.0001, wmode); tape_write_span(eff_start, n, wmode); ); ); ) : ( rev ? tape_write_span(max(n, eff_start), min(o, eff_end - 0.0001), wmode) : tape_write_span(max(o, eff_start), min(n, eff_end - 0.0001), wmode); ); );
+// V3.19 : tete d'ecriture autonome (queue d'overdub / de replace) : avance de st dans [ws, we) et ecrit en mode wmode
+function tl_write(p, st, ws, we, wmode) local(n, w) (
+  n = p + st; w = we - ws;
+  w >= 16 && abs(st) > 0.000001 ? (
+    st > 0 ? (
+      n >= we ? ( n -= w; tape_write_span(max(p, ws), we - 0.0001, wmode); tape_write_span(ws, n, wmode); )
+              : tape_write_span(max(p, ws), min(n, we - 0.0001), wmode);
+    ) : (
+      n < ws ? ( n += w; tape_write_span(ws, min(p, we - 0.0001), wmode); tape_write_span(n, we - 0.0001, wmode); )
+             : tape_write_span(max(n, ws), min(p, we - 0.0001), wmode);
+    );
+  );
+  n;
+);
 function hermite(frac, y0, y1, y2, y3) local(c0, c1, c2, c3) ( c0 = y1; c1 = 0.5 * (y2 - y0); c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3; c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2); c0 + frac * (c1 + frac * (c2 + frac * c3)); );
-function trigger_pos_jump(new_target) ( 
+// V3.19 : le saut n'est plus sec : l'ancienne tete continue en voix fantome et s'efface (xf_begin).
+// clampit = 0 : position brute (slicer : pre-roll + compensation de la ligne a retard, peut deborder de la fenetre).
+function trigger_pos_jump_ex(new_target, clampit, xlen, eqp) ( 
   length > 0 ? ( 
-    old_pos_ptr = pos; 
-    pos = max(loop_start, min(loop_start + loop_width, new_target)); 
-    xfade_pos_active = 0; 
-    xfade_pos_count = 0; 
-    slice_env = 1.0; 
+    xf_begin(xlen, eqp);
+    pos = clampit ? max(loop_start, min(loop_start + loop_width, new_target)) : new_target; 
+    slice_env = 1.0; slice_hold = 0; 
     slice_att = slice_att_eff_ms > 0 ? 0 : 1.0; 
     slice_att_step = 1.0 / max(1, srate * slice_att_eff_ms * 0.001); 
     slice_decay_samples = max(2, srate * (slice_decay_ms * 0.001)); 
@@ -873,7 +931,26 @@ function trigger_pos_jump(new_target) (
     slice_pan = (rand(2.0) - 1.0); 
   ); 
 );
-function slicer_fire(tp, p_offset) local(i, nx, st) ( nx = loop_start + loop_width; i = 0; loop(trans_count, (trans_mem[i] > tp + 1 && trans_mem[i] < nx) ? nx = trans_mem[i]; i += 1; ); sl_lo = tp; sl_hi = max(nx, tp + srate * 0.005); st = effective_rev ? sl_hi : sl_lo; trigger_pos_jump(st); current_slice_pitch = p_offset; sl_run = 1; );
+// saut standard : equi-puissance si on part loin (materiau different), somme constante si petit recalage
+function trigger_pos_jump(new_target) local(d) (
+  d = abs(max(loop_start, min(loop_start + loop_width, new_target)) - pos);
+  trigger_pos_jump_ex(new_target, 1, xf_len_jump, d > srate * 0.01 ? 1 : 0);
+);
+// V3.19 : coupe precise. La lecture se fait delay_len samples EN AVANCE (ligne a retard) : avant, un slice demarrait
+// donc 32 samples APRES son point de coupe (attaque tronquee + clic) et 32 samples en retard. Maintenant :
+//  - la tete est placee delay_len + pre-roll avant le point (le step est declenche d'autant plus tot, cf. @sample)
+//  - le fondu d'entree (2.5 ms) se termine sur le point de coupe -> l'attaque est intacte et tombe pile sur le temps
+//  - l'ancien slice s'efface en voix fantome (equi-puissance) au lieu d'etre coupe
+function slicer_fire(tp, p_offset) local(i, nx, st, rr, dr, pre) (
+  nx = loop_start + loop_width; i = 0; loop(trans_count, (trans_mem[i] > tp + 1 && trans_mem[i] < nx) ? nx = trans_mem[i]; i += 1; );
+  sl_lo = tp; sl_hi = max(nx, tp + srate * 0.005);
+  dr = effective_rev ? -1 : 1; pre = effective_rev ? 0 : sl_pre_t;
+  rr = max(0.0001, varispeed * (2 ^ (p_offset / 12)));
+  st = effective_rev ? sl_hi : sl_lo;
+  trigger_pos_jump_ex(st - dr * (rr * pre + delay_len), 0, xf_len_slice, 1);
+  slice_hold = pre;   // attaque / decay demarrent au point de coupe, pas au debut du pre-roll
+  current_slice_pitch = p_offset; sl_run = 1;
+);
 function dub_slice_restart(fwd) local(gi, gb) ( dub_commit_begin(fwd); gi = 0; loop(max_wgrains, gb = wg_mem + gi * wg_stride; gb[2] = 0; gi += 1; ); wg_timer = 1000000000; wg_prev_ok = 0; );
 function sync_eval() local(a, b, ratio, best_err, err) (
   sync_a = 0; sync_b = 0; best_err = 1000000;
@@ -1081,6 +1158,7 @@ function do_clear(clear_type) local(ms_off, wipe_n, wipe1, wipe2, wipe3, hi) (
   );
   last_state_target = 0; state = 0;
   state_transition_fade = 0;
+  xf_on = 0; rd_valid = 0; dk_arm = 1; wr_tail_kill(); stop_fo = 0; stop_go = 0;   // V3.19
   sync_hard_resync = 1;
 );
 function slicer_mode_name(m) ( m == 0 ? "Random" : (m == 5 ? "All" : "Steps"); );
@@ -1315,7 +1393,7 @@ function ld_begin() local(n) (
     analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0;
     pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0;
     sy_clear(active_part - 1); rec_ref_kind = 0;
-    ld_active = 1; ld_i = 0; ld_n = n; ld_part = active_part;
+    ld_active = 1; ld_i = 0; ld_n = n; ld_part = active_part; xf_on = 0; rd_valid = 0; dk_arm = 1; wr_tail_kill();
   );
 );
 function ld_finish() local(idx, mb, sp, locked) (
@@ -1371,6 +1449,8 @@ file_avail(0) >= 0 ? (
 
 @block
 smp_ev_n = 0; smp_ev_i = 0;
+// V3.19 : glide pitch/speed = 2 filtres 1-pole en cascade (courbe en S), constante totale ~ glide_ms
+gl_k = glide_ms >= 0.5 ? 1 - exp(-1 / (srate * glide_ms * 0.0005)) : 1;
 qs_b0 = beat_position; qs_i = 0;
 rp_check();   // V3.12 : re-phasage Host
 // V3.6.10: Cloud et Slicer exclusifs. Le dernier active gagne.
@@ -2014,11 +2094,25 @@ is_slave && length > 0 ? (
 curr_peak = max(abs(in0), abs(in1));
 ih_n += 1; ih_n >= 1073741824 ? ih_wrap(); ih_l[ih_n & ih_mask] = in0; ih_r[ih_n & ih_mask] = in1;
 curr_peak >= trans_sens ? ( input_signal_active = 1; hold_samples_left = srate * (trans_hold_ms * 0.001); ) : ( hold_samples_left > 0 ? ( hold_samples_left -= 1; input_signal_active = 1; ) : ( input_signal_active = 0; ); );
-init_done == 0 ? ( sm_pitch = pitch; sm_speed = speed; init_done = 1; );
-sm_pitch += (pitch - sm_pitch) * 0.005; sm_speed += (speed - sm_speed) * 0.005;
+// V3.19 : glide pitch / speed. Avant : rampe ~4 ms (saut quasi instantane = "raide") + un resync (saut de tete) A CHAQUE
+// sample pendant la rampe -> craquements. Maintenant : courbe en S (domaine demi-tons / log-vitesse), resync seulement
+// une fois la valeur posee (gl_settled).
+init_done == 0 ? ( sm_pitch = pitch; gl_p1 = pitch; speed_c = speed; lspeed = log(max(0.01, speed)); gl_s1 = lspeed; gl_s2 = lspeed; sm_speed = speed; init_done = 1; );
+speed != speed_c ? ( speed_c = speed; lspeed = log(max(0.01, speed)); );
+(sm_pitch != pitch || gl_p1 != pitch || gl_s1 != lspeed || gl_s2 != lspeed) ? (
+  gl_p1 += (pitch - gl_p1) * gl_k; sm_pitch += (gl_p1 - sm_pitch) * gl_k;
+  gl_s1 += (lspeed - gl_s1) * gl_k; gl_s2 += (gl_s1 - gl_s2) * gl_k;
+  (abs(pitch - sm_pitch) < 0.0005 && abs(pitch - gl_p1) < 0.0005 && abs(lspeed - gl_s2) < 0.000005 && abs(lspeed - gl_s1) < 0.000005) ? (
+    sm_pitch = pitch; gl_p1 = pitch; gl_s1 = lspeed; gl_s2 = lspeed; sm_speed = speed;
+  ) : ( sm_speed = exp(gl_s2); );
+  gl_settled = 0;
+) : ( sm_speed = speed; gl_settled = 1; );
 pitch_ratio = 2 ^ (sm_pitch / 12); varispeed = sm_speed * pitch_ratio; rec_speed = varispeed;
 // V3.7: en Slicer et Cloud le moteur granulaire pitch/speed est inactif -> vari-speed applique meme si Link est Off
 link_eff = (link_on || play_mode == 1 || cloud_on);
+w1_now = 0; w2_now = 0; tw_g = 1;   // V3.19 : ecriture directe overdub (1) / replace (2) faite ce sample ?
+cloud_x = cloud_on ? min(1, cloud_x + cloud_x_step) : max(0, cloud_x - cloud_x_step);   // V3.19 : entree/sortie Cloud en fondu
+dub_fade = (state == 3 || state == 6) ? min(1, dub_fade + replace_fade_coeff) : max(0, dub_fade - replace_fade_coeff);   // V3.19 : fondu d'ecriture overdub
 is_one_shot_mode = (play_mode == 2);
 slice_att_eff_ms = slice_decay_ms > 1950 ? slice_attack_ms : min(slice_attack_ms, slice_decay_ms);
 
@@ -2038,7 +2132,8 @@ state >= 2 && play_mode == 1 && trans_count > 0 ? (
     sl_linked() ? samples_per_step = max(1, loop_beat_len() * grid_beats());
   );
   
-  current_step_calc = floor(clock_abs_pos / samples_per_step);
+  // V3.19 : step declenche delay_len (+ pre-roll) samples en avance -> le point de coupe sort PILE sur le temps
+  current_step_calc = floor((clock_abs_pos + delay_len + (effective_rev ? 0 : sl_pre_t)) / samples_per_step);
   
   (current_step_calc != last_slicer_step) ? (
     last_slicer_step = current_step_calc;
@@ -2110,7 +2205,17 @@ xarm != 0 ? (
   );
 );
 
-state_target != last_state_target ? (
+// V3.19 : Stop = fondu de sortie de 10 ms (la lecture continue en Play pendant le fondu), puis arret reel.
+// Avant : la sortie etait coupee net (state_transition_fade n'agissait qu'en remontee).
+stop_fo && state_target != 0 ? ( stop_fo = 0; stop_go = 0; );
+stop_hold = 0;
+(state_target != last_state_target && state_target == 0 && !stop_go && state >= 2 && state <= 6 && length > 0 && state_transition_fade > 0.0001) ? (
+  (state == 3 || state == 4 || state == 5) ? dub_flush();
+  state >= 3 ? state = 2;
+  stop_fo = 1; stop_hold = 1;
+);
+(state_target != last_state_target && !stop_hold) ? (
+  stop_fo = 0; stop_go = 0;
   (state == 3 || state == 4 || state == 5) ? dub_flush();
   // V3.7 Start Sync : uniquement pour le 1er REC (boucle vide / Re-Rec), jamais en Auto-Rec ni pour les overdubs.
   // Le REC passe par l'etat 7 jusqu'au point de synchro du maitre.
@@ -2124,7 +2229,7 @@ state_target != last_state_target ? (
     state_transition_fade = 0;
   ) : state_target == 1 ? ( 
     state == 1 || state == 8 ? try_finish_rec(2, 0) : ( 
-      analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 1; trans_count = 0; state_transition_fade = 0; 
+      analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 1; trans_count = 0; state_transition_fade = 0; xf_on = 0; rd_valid = 0; dk_arm = 1; wr_tail_kill(); 
       sy_clear(active_part - 1); rec_ref_capture(); 
     ); 
   ) : state_target == 2 ? (
@@ -2142,7 +2247,7 @@ state_target != last_state_target ? (
     state == 6 ? state = 2 : ( state == 1 || state == 8 ? try_finish_rec(6, 0) : ( push_new_history_state(); state = 6; memcpy(base_backup_l, left_buf, length); memcpy(base_backup_r, right_buf, length); mult_len = length; ); dub_pan = (rand(2.0) - 1.0); );
     (state != 6 && state != 8) ? state_target = 2;
   ) : state_target == 7 ? (
-    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 7; trans_count = 0; state_transition_fade = 0; sy_clear(active_part - 1); );
+    state == 1 || state == 8 ? try_finish_rec(2, 0) : ( analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 7; trans_count = 0; state_transition_fade = 0; xf_on = 0; rd_valid = 0; dk_arm = 1; wr_tail_kill(); sy_clear(active_part - 1); );
   );
   last_state_target = state_target;
 );
@@ -2194,7 +2299,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     sync_c_w = -1; sync_c_l = -1;
   );
   
-  (abs(sm_speed - prev_sm_speed) > 0.00005 || abs(pitch_ratio - prev_pitch_ratio_sig) > 0.00005) ? (
+  gl_settled && (abs(sm_speed - prev_sm_speed) > 0.00005 || abs(pitch_ratio - prev_pitch_ratio_sig) > 0.00005) ? (   // V3.19 : pas pendant le glide
     prev_sm_speed = sm_speed; prev_pitch_ratio_sig = pitch_ratio;
     sync_hard_resync = 1;
   );
@@ -2214,12 +2319,13 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
   leave_slicer = (prev_play_mode == 1 && play_mode == 0);
   leave_oneshot = (prev_play_mode == 2 && play_mode == 0);
   (leave_slicer || leave_oneshot || play_mode_changed) ? sync_hard_resync = 1;
+  play_mode_changed ? pd_arm = 1;   // V3.19 : gates slicer / one-shot retires d'un coup -> declic
 
   // Redémarrage lecture après Stop/Wait : recalage instantané sur l'horloge
   leave_stop = (prev_state_for_sync < 2 && state >= 2);
   leave_stop ? sync_hard_resync = 1;
   
-  (abs(loop_width - sync_c_w) > 0.01 || abs(length - sync_c_l) > 0.01 || abs(rate_t - sync_c_r) > 0.000000001) ? ( 
+  (abs(loop_width - sync_c_w) > 0.01 || abs(length - sync_c_l) > 0.01 || (gl_settled && abs(rate_t - sync_c_r) > 0.000000001)) ? ( 
     sync_c_w = loop_width; sync_c_l = length; sync_c_r = rate_t; 
     sync_eval(); 
   );
@@ -2234,6 +2340,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
   sync_key = sync_a * 16 + sync_b;
   
   rev_changed = (rev_on != prev_rev_on);
+  rev_changed && play_mode != 0 ? xf_begin(xf_len_jump, 0);   // V3.19 : reverse en slicer / one-shot (sans saut de position) : fondu
   // force_mode_exit : sortie reverse / slicer / one-shot / stop -> même priorité
   force_mode_exit = (rev_changed || leave_slicer || leave_oneshot || leave_stop);
   need_resync = is_normal_playback && ( !prev_normal_playback 
@@ -2246,7 +2353,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     trigger_pos_jump(sync_expected()); 
     sync_hard_resync = 0;
   ) : ( 
-    is_normal_playback && wrapped ? ( 
+    is_normal_playback && wrapped && gl_settled ? ( 
       sync_exp = sync_expected(); 
       sync_dev = pos - sync_exp; 
       sync_dev -= loop_width * floor(sync_dev / loop_width + 0.5); 
@@ -2268,19 +2375,41 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
   p1 = floor(safe_pos); p1 < eff_start ? p1 = eff_start; p1 >= eff_end ? p1 = eff_end - 1; frac = safe_pos - p1;
   p0 = p1 - 1; p0 < eff_start ? p0 += eff_len; p2 = p1 + 1; p2 >= eff_end ? p2 -= eff_len; p3 = p2 + 1; p3 >= eff_end ? p3 -= eff_len;
   s0_safe = hermite(frac, left_buf[p0], left_buf[p1], left_buf[p2], left_buf[p3]); s1_safe = hermite(frac, right_buf[p0], right_buf[p1], right_buf[p2], right_buf[p3]);
-  xfade_pos_active ? (
-    old_safe_pos = old_pos_ptr + delay_len * (effective_rev ? -1 : 1); old_safe_pos >= eff_end ? old_safe_pos -= eff_len; old_safe_pos < eff_start ? old_safe_pos += eff_len;
-    op1 = floor(old_safe_pos); op1 < eff_start ? op1 = eff_start; op1 >= eff_end ? op1 = eff_end - 1; ofrac = old_safe_pos - op1;
-    op0 = op1 - 1; op0 < eff_start ? op0 += eff_len; op2 = op1 + 1; op2 >= eff_end ? op2 -= eff_len; op3 = op2 + 1; op3 >= eff_end ? op3 -= eff_len;
-    old_s0 = hermite(ofrac, left_buf[op0], left_buf[op1], left_buf[op2], left_buf[op3]); old_s1 = hermite(ofrac, right_buf[op0], right_buf[op1], right_buf[op2], right_buf[op3]);
-    xfade_gain = xfade_pos_count / xfade_pos_len; s0_safe = old_s0 * (1.0 - xfade_gain) + s0_safe * xfade_gain; s1_safe = old_s1 * (1.0 - xfade_gain) + s1_safe * xfade_gain;
-    old_pos_ptr += pos_step * (effective_rev ? -1 : 1); old_pos_ptr < eff_start ? old_pos_ptr += eff_len : old_pos_ptr >= eff_end ? old_pos_ptr -= eff_len;
-    xfade_pos_count += 1; xfade_pos_count >= xfade_pos_len ? xfade_pos_active = 0;
-  );
-  play_mode == 1 ? ( slice_env = max(0, slice_env - slice_decay_step); slice_att = min(1, slice_att + slice_att_step); s0_safe *= slice_env * slice_att * sl_gate * slice_mute_gate; s1_safe *= slice_env * slice_att * sl_gate * slice_mute_gate; ) : ( slice_env = 1.0; );
+  // V3.19 : gains de la voix principale (slice + enveloppe de boucle). En slicer, pas d'enveloppe de bord de boucle :
+  // les slices ont leurs propres fondus (sinon le slice pose au debut de la boucle perdait son attaque sur fade_ms).
+  play_mode == 1 ? ( slice_hold > 0 ? slice_hold -= 1 : ( slice_env = max(0, slice_env - slice_decay_step); slice_att = min(1, slice_att + slice_att_step); ); g_main = slice_env * slice_att * sl_gate * slice_mute_gate; ) : ( slice_env = 1.0; g_main = 1.0; );
   fade_samps = min((fade_ms * 0.001) * srate, eff_len * 0.5); rel_pos = safe_pos - eff_start; loop_envelope = 1.0;
-  fade_samps > 0 && rel_pos < fade_samps ? loop_envelope = min(loop_envelope, rel_pos / fade_samps); dist_from_end = eff_end - safe_pos; fade_samps > 0 && dist_from_end < fade_samps && !ml_fwd_free ? loop_envelope = min(loop_envelope, dist_from_end / fade_samps);
-  s0_safe *= loop_envelope; s1_safe *= loop_envelope;
+  play_mode != 1 ? (
+    fade_samps > 0 && rel_pos < fade_samps ? loop_envelope = min(loop_envelope, rel_pos / fade_samps); dist_from_end = eff_end - safe_pos; fade_samps > 0 && dist_from_end < fade_samps && !ml_fwd_free ? loop_envelope = min(loop_envelope, dist_from_end / fade_samps);
+  );
+  g_main *= loop_envelope;
+  !(!is_one_shot_mode || one_shot_playing) ? g_main = 0;   // V3.19 : one-shot a l'arret : la ligne a retard ne se remplit plus de son (relance sans clic)
+  s0_safe *= g_main; s1_safe *= g_main;
+  // V3.19 : pan des slices applique AVANT la ligne a retard (avant : apres -> le nouveau pan frappait les 32 derniers samples
+  // de l'ancien slice) et lisse a l'entree/sortie du mode.
+  sl_pan_amt += ((play_mode == 1 ? stereo_width : 0) - sl_pan_amt) * sl_pan_k;
+  sl_pan_amt > 0.0001 ? ( pan_lr(s0_safe, s1_safe, slice_pan, sl_pan_amt); s0_safe = pan_ol; s1_safe = pan_or; );
+  rd_last_l = left_buf; rd_last_r = right_buf; rd_last_p = safe_pos; rd_last_ws = eff_start; rd_last_we = eff_end;
+  rd_last_g = g_main; rd_last_pan = slice_pan; rd_last_pamt = sl_pan_amt; rd_valid = 1;
+  // V3.19 : voix fantome (ancienne tete) -> fondu croise apres un saut
+  xf_on ? (
+    xf_w = xf_we - xf_ws;
+    xf_w >= 2 ? (
+      xp = xf_p - xf_ws; xp -= floor(xp / xf_w) * xf_w; xp += xf_ws;
+      xq1 = floor(xp); xfr = xp - xq1; xq1 >= xf_we ? xq1 -= xf_w;
+      xq0 = xq1 - 1; xq0 < xf_ws ? xq0 += xf_w; xq2 = xq1 + 1; xq2 >= xf_we ? xq2 -= xf_w; xq3 = xq2 + 1; xq3 >= xf_we ? xq3 -= xf_w;
+      xq0 = floor(xq0); xq1 = floor(xq1); xq2 = floor(xq2); xq3 = floor(xq3);
+      gh_l = hermite(xfr, xf_l[xq0], xf_l[xq1], xf_l[xq2], xf_l[xq3]) * xf_g; gh_r = hermite(xfr, xf_r[xq0], xf_r[xq1], xf_r[xq2], xf_r[xq3]) * xf_g;
+      xf_pamt > 0.0001 ? ( pan_lr(gh_l, gh_r, xf_pan, xf_pamt); gh_l = pan_ol; gh_r = pan_or; );
+    ) : ( gh_l = 0; gh_r = 0; );
+    xf_eqp ? ( xa = sin(xf_k * $pi * 0.5); xb = cos(xf_k * $pi * 0.5); ) : ( xa = 0.5 - 0.5 * cos(xf_k * $pi); xb = 1.0 - xa; );
+    s0_safe = s0_safe * xa + gh_l * xb; s1_safe = s1_safe * xa + gh_r * xb;
+    xf_p += xf_st; xf_k += xf_inc; xf_k >= 1 ? xf_on = 0;
+  );
+  // V3.19 : declic par offset (avant la ligne a retard) quand un saut n'a pas pu etre fondu
+  pd_arm ? ( pd_l = pd_prev_l - s0_safe; pd_r = pd_prev_r - s1_safe; pd_arm = 0; );
+  (pd_l != 0 || pd_r != 0) ? ( s0_safe += pd_l; s1_safe += pd_r; pd_l *= pd_k; pd_r *= pd_k; abs(pd_l) + abs(pd_r) < 0.0000001 ? ( pd_l = 0; pd_r = 0; ); );
+  pd_prev_l = s0_safe; pd_prev_r = s1_safe;
   delay_buf_l[delay_idx] = s0_safe; delay_buf_r[delay_idx] = s1_safe; read_idx = delay_idx + 1; read_idx >= delay_len ? read_idx = 0; s0 = delay_buf_l[read_idx]; s1 = delay_buf_r[read_idx]; delay_idx += 1; delay_idx >= delay_len ? delay_idx = 0;
   // V3.6.10: overdub/replace en lecture granulaire (pitch et/ou speed sans Link).
   // La couche entrante est ecrite par le moteur de grains avec compensation (espacement = pitch_ratio sur la bande),
@@ -2301,7 +2430,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     grain_target = gran_now ? 1 : 0;
   );
   grain_target != grain_mix ? ( grain_mix += (grain_target > grain_mix ? 1 : -1) * xfade_coeff; grain_mix < 0 ? grain_mix = 0 : grain_mix > 1 ? grain_mix = 1; );
-  (grain_mix > 0.001 || cloud_on) && play_mode != 1 && (!is_one_shot_mode || one_shot_playing) ? (
+  (grain_mix > 0.001 || cloud_x > 0.001) && play_mode != 1 && (!is_one_shot_mode || one_shot_playing) ? (
     cloud_on ? (
       d_norm = cloud_density; c_factor = cloud_chaos; target_grain_ms = 2.0 + (d_norm ^ 2.0) * 798.0; grain_dur = srate * target_grain_ms * 0.001;
       base_gt_ms = 28.0 + (1.0 - d_norm) * 52.0; rnd_factor = (rand(2.0) - 1.0) * c_factor; target_gt_ms = max(28.0, base_gt_ms + rnd_factor * 26.0);
@@ -2311,13 +2440,13 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       base_cloud_center = (cloud_pos_mode == 0) ? pos : (eff_start + (cloud_pos_pct * 0.01) * eff_len); lfo_offset = lfo_val * (cloud_lfo_depth * 0.01) * eff_len * 0.5; cloud_center = base_cloud_center + lfo_offset; cloud_center_draw = cloud_center;
     ) : ( grain_dur = srate * grain_ms * 0.001; gT = grain_dur * effective_pitch_ratio / max(pos_step, 0.0001); gT = max(min(gT, grain_dur * 0.5), grain_dur * 0.15); );
     spawn_timer += 1;
-    spawn_timer >= gT ? ( spawn_timer = 0; gi = 0; loop(max_grains, g_base = grain_mem + (gi * grain_data_size); g_base[2] == 0 ? (
+    spawn_timer >= gT ? ( spawn_timer = min(spawn_timer - gT, gT); gi = 0; loop(max_grains, g_base = grain_mem + (gi * grain_data_size); g_base[2] == 0 ? (
           cloud_on ? ( spread_offset = (rand(2.0) - 1.0) * (cloud_spread * eff_len * 0.5); spawn_target_pos = cloud_center + spread_offset; c_factor > 0.001 ? spawn_target_pos += (rand(2.0) - 1.0) * (cloud_spread * eff_len * 0.5 * c_factor);
             spawn_target_pos -= eff_start; spawn_target_pos -= floor(spawn_target_pos / eff_len) * eff_len; spawn_target_pos += eff_start;
             g_base[0] = spawn_target_pos; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = (rand(2.0) - 1.0) * cloud_spread; g_base[5] = cloud_density; g_base[6] = spawn_target_pos; g_base[7] = calc_cloud_pitch(cloud_pitch_spread);
           ) : ( rd_dl = 0; rd_Sn = floor(read_align_ms * 0.001 * srate + 0.5); rd_Wn = min(512, floor(0.4 * grain_dur));
           (rd_Sn > 0 && rd_Wn >= 64 && rd_prev_ok) ? ( rd_ph = ih_n - rd_prev_n; (rd_ph > 0 && rd_ph + rd_Wn < rd_prev_dur) ? rd_dl = rd_pick(pos, rd_prev_start, rd_ph, rd_Sn, rd_Wn, effective_pitch_ratio, effective_rev ? -1 : 1); );
-          g_base[0] = pos + rd_dl; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = 0; g_base[5] = 0; g_base[6] = pos; g_base[7] = 0; rd_prev_start = g_base[0]; rd_prev_n = ih_n; rd_prev_dur = grain_dur; rd_prev_ok = 1; ); gi = max_grains; ); gi += 1; ); );
+          g_base[0] = pos + rd_dl; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = 0; g_base[5] = max(0, (grain_fade * 0.01 - 0.02) / 0.48); g_base[6] = pos; g_base[7] = 0; rd_prev_start = g_base[0]; rd_prev_n = ih_n; rd_prev_dur = grain_dur; rd_prev_ok = 1; ); gi = max_grains; ); gi += 1; ); );
     granular_l = 0; granular_r = 0; total_w = 0; gi = 0; g_dir = effective_rev ? -1 : 1;
     loop(max_grains, g_base = grain_mem + (gi * grain_data_size); g_base[2] == 1 ? (
         g_phase = g_base[1]; g_dur = g_base[3]; g_pan = g_base[4]; g_dens = g_base[5]; g_pitch_off = g_base[7]; g_phase >= g_dur ? (g_base[2] = 0);
@@ -2328,43 +2457,48 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
         g_l = hermite(rd_frac, left_buf[rp0], left_buf[rp1], left_buf[rp2], left_buf[rp3]) * env; g_r = hermite(rd_frac, right_buf[rp0], right_buf[rp1], right_buf[rp2], right_buf[rp3]) * env;
         cloud_on && abs(g_pan) > 0.0001 ? ( p_ang = (g_pan + 1.0) * 0.25 * $pi; gl_gain = cos(p_ang) * 1.414; gr_gain = sin(p_ang) * 1.414; g_mono = (g_l + g_r) * 0.5; g_l = g_mono * gl_gain; g_r = g_mono * gr_gain; );
         granular_l += g_l; granular_r += g_r; total_w += env; g_base[1] = g_phase + 1; ); gi += 1; );
-    total_w < 0.001 ? total_w = 0.001; loop_env_pos = 1.0; fade_samps > 0 && (pos - eff_start) < fade_samps ? loop_env_pos = min(loop_env_pos, (pos - eff_start) / fade_samps); fade_samps > 0 && (eff_end - pos) < fade_samps && !ml_fwd_free ? loop_env_pos = min(loop_env_pos, (eff_end - pos) / fade_samps);
+    total_w < 1 ? total_w = 1; loop_env_pos = 1.0;   // V3.19 : on ne normalise que le recouvrement (>1) : un grain isole garde son enveloppe (avant : grain rectangulaire = clic)
+    fade_samps > 0 && (pos - eff_start) < fade_samps ? loop_env_pos = min(loop_env_pos, (pos - eff_start) / fade_samps); fade_samps > 0 && (eff_end - pos) < fade_samps && !ml_fwd_free ? loop_env_pos = min(loop_env_pos, (eff_end - pos) / fade_samps);
     slice_g = play_mode == 1 ? slice_env * slice_att * sl_gate * slice_mute_gate : 1.0; base_mix_factor = grain_mix;
     s0 = s0 * (1.0 - base_mix_factor) + (granular_l / total_w) * loop_env_pos * slice_g * base_mix_factor; s1 = s1 * (1.0 - base_mix_factor) + (granular_r / total_w) * loop_env_pos * slice_g * base_mix_factor;
-    cloud_on ? ( s0 = s0 * (1.0 - cloud_mix) + (granular_l / total_w) * loop_env_pos * slice_g * cloud_mix; s1 = s1 * (1.0 - cloud_mix) + (granular_r / total_w) * loop_env_pos * slice_g * cloud_mix; );
+    cloud_x > 0 ? ( cmx = cloud_mix * cloud_x; s0 = s0 * (1.0 - cmx) + (granular_l / total_w) * loop_env_pos * slice_g * cmx; s1 = s1 * (1.0 - cmx) + (granular_r / total_w) * loop_env_pos * slice_g * cmx; );
   );
-  play_mode == 1 && stereo_width > 0.0001 ? ( s_angle = (slice_pan * stereo_width + 1.0) * 0.25 * $pi; s_gL = min(1.0, cos(s_angle) * 1.414); s_gR = min(1.0, sin(s_angle) * 1.414); s_mono = (s0 + s1) * 0.5; s0 = s0 * (1.0 - stereo_width) + s_mono * s_gL * stereo_width; s1 = s1 * (1.0 - stereo_width) + s_mono * s_gR * stereo_width; );
   dub_gran && (!is_one_shot_mode || one_shot_playing) ? dub_grain_tick(pos, effective_rev, state != 5 || auto_rep_active);
   (!is_one_shot_mode || one_shot_playing) ? (
-    old_pos = pos; pos_step_actual = pos_step * (effective_rev ? -1 : 1); pos += pos_step_actual; wrapped = 0;
+    old_pos = pos; pos_step_actual = pos_step * (effective_rev ? -1 : 1); pos += pos_step_actual; wrapped = 0; rd_last_st = pos_step_actual; os_prev = 1;
+    // V3.19 : une tete qui ARRIVE dans la fenetre (pre-roll du slicer) n'est pas renvoyee a l'autre bout
+    wr_guard = delay_len + 2 * sl_pre_t * max(1, abs(pos_step)) + 8;
     is_one_shot_mode ? ( pingpong_on ? ( (pos >= eff_end || pos < eff_start) ? ( one_shot_pp_state ? ( pos = max(eff_start, min(eff_end, pos)); one_shot_playing = 0; ) : ( pos = (pos >= eff_end) ? 2 * eff_end - pos : 2 * eff_start - pos; ping_pong_dir = -ping_pong_dir; one_shot_pp_state = 1; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ); ); ) : ( pos >= eff_end ? ( pos = eff_end; one_shot_playing = 0; ); pos < eff_start ? ( pos = eff_start; one_shot_playing = 0; ); );
     ) : (
       ml_guard = min(delay_len + 4 * abs(pos_step) + 16, length * 0.25); ml_trig = effective_rev ? (pos <= ml_guard) : (pos >= length - ml_guard); !ml_trig ? ml_cool = 0;
       ml_ok && ml_trig && !ml_cool ? ( multiply_extend(); ml_cool = 1; );
       pingpong_on ? ( pos < eff_start ? ( pos = 2 * eff_start - pos; ping_pong_dir = -ping_pong_dir; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ) : pos >= eff_end ? ( pos = 2 * eff_end - pos; ping_pong_dir = -ping_pong_dir; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); );
-      ) : ( pos < eff_start ? ( pos += eff_len; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ); pos >= eff_end ? ( pos -= eff_len; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ); );
+      ) : ( (pos < eff_start && (effective_rev || pos < eff_start - wr_guard)) ? ( pos += eff_len; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ); (pos >= eff_end && (!effective_rev || pos >= eff_end + wr_guard)) ? ( pos -= eff_len; wrapped = 1; pending_part_switch ? ( switch_part(target_part); pending_part_switch = 0; ); ); );
     );
      wrapped ? dens_force = 1; 
     (wrapped && state >= 3 && state <= 6) ? an_wrap_pending = 1;
     
+    // V3.19 : fin de slice mesuree sur la tete de LECTURE (pos + delay_len) : avant, le slice debordait de 32 samples
+    // sur le transitoire suivant (flam / clic) avant de se fermer.
     (play_mode == 1 && trans_count > 0 && sl_hi > sl_lo) ? ( 
-      slice_end_dist = effective_rev ? (pos - sl_lo) : (sl_hi - pos);
+      sl_rd = pos + delay_len * (effective_rev ? -1 : 1);
+      slice_end_dist = effective_rev ? (sl_rd - sl_lo) : (sl_hi - sl_rd);
       slice_end_dist < (srate * 0.005) ? ( 
         sl_run = max(0, min(sl_run, slice_end_dist / (srate * 0.005))); 
       ) : (
-        (effective_rev ? pos <= sl_lo : pos >= sl_hi) ? sl_run = 0; 
+        (effective_rev ? sl_rd <= sl_lo : sl_rd >= sl_hi) ? sl_run = 0; 
       );
     );
     state == 3 ? (
       dub_gran ? (
         wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); dub_pan = rand(2.0) - 1.0; )
                : ( !effective_rev ? dub_merge_behind(pos) : 0 );
-      ) : ( write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; );
+      ) : ( tw_g = dub_fade; write_move(old_pos, pos, wrapped, effective_rev, 1); tw_g = 1; w1_now = 1; wrapped ? dub_pan = rand(2.0) - 1.0; );
       replace_fade = max(0, replace_fade - replace_fade_coeff);
-      wet_s0 = s0 * (1.0 - replace_fade * dens_g); wet_s1 = s1 * (1.0 - replace_fade * dens_g);
+      wet_s0 = s0; wet_s1 = s1;   // V3.19 : plus de "trou" de 20 ms dans la boucle a la sortie d'un Replace
     ) : state == 4 ? (
       dub_gran ? ( wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); dub_pan = rand(2.0) - 1.0; ) : 0 )
-               : ( write_move(old_pos, pos, wrapped, effective_rev, 2); wrapped ? dub_pan = rand(2.0) - 1.0; );
+               : ( write_move(old_pos, pos, wrapped, effective_rev, 2); w2_now = 1; wrapped ? dub_pan = rand(2.0) - 1.0; );
       replace_fade = min(1.0, replace_fade + replace_fade_coeff);
       wet_s0 = s0; wet_s1 = s1;
     ) : state == 5 ? (
@@ -2374,14 +2508,33 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       auto_rep_hold_counter > 0 ? auto_rep_hold_counter -= 1 : auto_rep_active = 0;
       dub_gran && wrapped ? dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0)));
       auto_rep_active ? (
-        !dub_gran ? write_move(old_pos, pos, wrapped, effective_rev, 2) : 0;
+        !dub_gran ? ( write_move(old_pos, pos, wrapped, effective_rev, 2); w2_now = 1; ) : 0;
         replace_fade = min(1.0, replace_fade + replace_fade_coeff);
       ) : ( replace_fade = max(0, replace_fade - replace_fade_coeff); );
       wet_s0 = s0; wet_s1 = s1;
-    ) : state == 6 ? ( write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0 * (1.0 - replace_fade * dens_g); wet_s1 = s1 * (1.0 - replace_fade * dens_g);
-    ) : ( replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0 * (1.0 - replace_fade * dens_g); wet_s1 = s1 * (1.0 - replace_fade * dens_g); );
-  ) : ( wet_s0 = 0; wet_s1 = 0; acc_cur_dirty ? dub_commit_begin(1); );
+    ) : state == 6 ? ( tw_g = dub_fade; write_move(old_pos, pos, wrapped, effective_rev, 1); tw_g = 1; w1_now = 1; wrapped ? dub_pan = rand(2.0) - 1.0; replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0; wet_s1 = s1;
+    ) : ( replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0; wet_s1 = s1; );
+    (w1_now || w2_now) ? ( w_last_p = pos; w_last_st = pos_step_actual; w_last_ws = eff_start; w_last_we = eff_end; );
+  ) : ( wet_s0 = 0; wet_s1 = 0; acc_cur_dirty ? dub_commit_begin(1); os_prev ? ( dk_arm = 1; os_prev = 0; ); rd_valid = 0; pd_prev_l = 0; pd_prev_r = 0; );   // V3.19 : fin de one-shot sans clic
 );
+!(state >= 2 && length > 0) ? ( rd_valid = 0; pd_prev_l = 0; pd_prev_r = 0; xf_on = 0; );
+// ===== V3.19 : QUEUES D'ECRITURE =====
+// Quand l'ecriture directe s'arrete (sortie d'overdub, de replace, auto-replace qui retombe, Stop...), la tete d'ecriture
+// continue seule pendant ~12 ms avec un gain qui descend : la couche enregistree se raccorde en fondu a l'ancienne
+// (avant : marche nette dans le buffer = clic a CHAQUE tour de boucle). Overdub et replace utilisent la meme rampe :
+// replace -> overdub ou overdub -> replace = fondu croise a somme constante.
+(w1_prev && !w1_now && length > 0) ? ( tl1_on = 1; tl1_g = dub_fade; tl1_p = w_last_p; tl1_st = w_last_st; tl1_ws = w_last_ws; tl1_we = w_last_we; );
+(w2_prev && !w2_now && length > 0) ? ( tl2_on = 1; tl2_g = replace_fade; tl2_p = w_last_p; tl2_st = w_last_st; tl2_ws = w_last_ws; tl2_we = w_last_we; );
+w1_now ? tl1_on = 0; w2_now ? tl2_on = 0;
+tl2_on ? (
+  tl2_g = max(0, tl2_g - replace_fade_coeff);
+  (tl2_g <= 0 || length <= 0) ? tl2_on = 0 : ( tl_rf = replace_fade; replace_fade = tl2_g; tl2_p = tl_write(tl2_p, tl2_st, tl2_ws, min(tl2_we, length), 2); replace_fade = tl_rf; );
+);
+tl1_on ? (
+  tl1_g = max(0, tl1_g - replace_fade_coeff);
+  (tl1_g <= 0 || length <= 0) ? tl1_on = 0 : ( tw_g = tl1_g; tl1_p = tl_write(tl1_p, tl1_st, tl1_ws, min(tl1_we, length), 1); tw_g = 1; );
+);
+w1_prev = w1_now; w2_prev = w2_now;
 cm_active ? dub_commit_step(16 + floor(abs(sm_speed) * 4));
 prev_in0 = in0; prev_in1 = in1; 
 
@@ -2450,10 +2603,18 @@ dry_gain = cos(mix * $pi * 0.5);
 wet_gain = sin(mix * $pi * 0.5);
 
 // Fade de transition stop/clear (~8 ms) pour eviter click ; state_transition_fade remonte vers 1 en lecture
-state_transition_fade < 0.999 ? (
-  wet_s0 *= state_transition_fade; wet_s1 *= state_transition_fade;
-  state_transition_fade = min(1.0, state_transition_fade + (1.0 / max(1, srate * 0.008)));
+// V3.19 : et descend (10 ms) pendant un Stop avant l'arret reel (stop_fo -> stop_go)
+state_transition_fade < 1 ? ( stf_g = 0.5 - 0.5 * cos(state_transition_fade * $pi); wet_s0 *= stf_g; wet_s1 *= stf_g; );
+stop_fo ? (
+  state_transition_fade = max(0, state_transition_fade - stop_fo_step);
+  state_transition_fade <= 0 ? ( stop_fo = 0; stop_go = 1; );
+) : (
+  state_transition_fade < 1 ? state_transition_fade = min(1.0, state_transition_fade + (1.0 / max(1, srate * 0.008)));
 );
+// V3.19 : declic de sortie par offset (clear, changement de part, nouveau REC, fin de one-shot, chargement...)
+dk_arm ? ( dk_l = dk_prev_l - wet_s0; dk_r = dk_prev_r - wet_s1; dk_arm = 0; );
+(dk_l != 0 || dk_r != 0) ? ( wet_s0 += dk_l; wet_s1 += dk_r; dk_l *= dk_k; dk_r *= dk_k; abs(dk_l) + abs(dk_r) < 0.0000001 ? ( dk_l = 0; dk_r = 0; ); );
+dk_prev_l = wet_s0; dk_prev_r = wet_s1;
 out0 = in0 * dry_gain + wet_s0 * wet_gain;
 out1 = in1 * dry_gain + wet_s1 * wet_gain;
 
