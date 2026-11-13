@@ -1012,8 +1012,8 @@ local function fx_child_addr(tr, cidx, n)
 end
 
 -- Source courante du FX Router
-local function fx_source()
-  local cur = math.floor(tonumber(reaper.GetExtState(FXR_EXT, "src")) or 1)
+local function fx_source(force)   -- force : source imposee (1..8 entrees, 9..16 loopers), sinon celle du FX Router
+  local cur = force or math.floor(tonumber(reaper.GetExtState(FXR_EXT, "src")) or 1)
   if cur < 1 or cur > 2 * FX_NB_SOURCES then cur = 1 end
   if cur > FX_NB_SOURCES then
     return cur, FX_LOOPER_FIRST_TRACK - 1 + (cur - FX_NB_SOURCES - 1), true, "Looper " .. (cur - FX_NB_SOURCES)
@@ -1028,9 +1028,9 @@ end
 
 -- Structure (containers / effets) en cache 150 ms : le feedback lit 16 knobs toutes les 30 ms
 local fx_cache, fx_cache_t = nil, -1
-local function fx_struct()
+local function fx_struct(force)
   local t = reaper.time_precise()
-  local cur, track0, is_looper, label = fx_source()
+  local cur, track0, is_looper, label = fx_source(force)
   if fx_cache and fx_cache.src == cur and (t - fx_cache_t) < 0.15 then return fx_cache end
   local st = { src = cur, label = label, is_looper = is_looper, slots = {} }
   local tr = reaper.GetTrack(0, track0)
@@ -2172,7 +2172,7 @@ function CU.web_tick()
   if page == 4 then ex = "S|" .. ((looper_alive(s1, now) and read_fb(s1, 8) == 1) and 1 or 0)
   elseif page == 5 then ex = "C|" .. ((looper_alive(s1, now) and read_fb(s1, 24) > 0.5) and 1 or 0)
   elseif page == 6 then
-    local st = fx_struct()
+    local st = fx_struct(FX_NB_SOURCES + s1)   -- boutons web : toujours le looper selectionne
     local e = { "F", CU.web_esc(st.label) }
     for k = 1, FX_NB_SLOTS do
       local sl = st.slots[k] or {}
@@ -2201,7 +2201,7 @@ function CU.web_extra_cmd(op, a)
       end
     end
   elseif op == "F" and a >= 1 and a <= FX_NB_SLOTS then
-    local st = fx_struct()
+    local st = fx_struct(FX_NB_SOURCES + sel_looper())   -- effet du looper selectionne (pas de la source FX Router)
     local id = st.is_looper and (st.src - FX_NB_SOURCES) or st.src
     local hb = tonumber(reaper.GetExtState("nowundo_vl", "heartbeat")) or 0
     if now - hb < 2 then
