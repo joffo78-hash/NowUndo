@@ -2154,32 +2154,35 @@ for p = 1, NPAGE do bind_all(NGROUP + p, 9, fn(function() VL.set_page(p) end, fu
 -- row 0 = selection loopers | row 1 = statut loopers | rows 2-5 = ancienne grille 1-4 decalee
 
 -- Appui intelligent sur le pad statut (rangee 1) : sort du mode affiche, sinon play/stop
+-- Groupes : l'action est decidee d'apres l'etat du looper touche, puis appliquee a tous les membres de son groupe
+-- (chacun n'est modifie que s'il n'est pas deja dans l'etat voulu).
 function VL.status_pad_tap(i)
   local L = S.loopers[i]
   if not L then return end
   VL.select_looper(i)
-  local function do_send(action, want)
-    local def = ACTIONS[action]
-    local cur = def and def.key and (L[def.key] and true or false) or false
-    if want ~= nil and cur == (want and true or false) then return end
-    send(i, action, want ~= nil and want or (not cur))
+  local action, want
+  if L.wait_sync or L.rec_led or L.overdub or L.rec then action, want = "rec_overdub", false
+  elseif L.replace then action, want = "replace", false
+  elseif L.multiply then action, want = "multiply", false
+  elseif L.cloud then action, want = "cloud", false
+  elseif L.slicer then action, want = "slicer", false
+  elseif L.rev then action, want = "reverse", false
+  elseif L.playing then action, want = "stop_play", false
+  elseif (L.length or 0) > 0 then action, want = "stop_play", true
   end
-  if L.wait_sync or L.rec_led or L.overdub or L.rec then
-    do_send("rec_overdub", false)
-  elseif L.replace then
-    do_send("replace", false)
-  elseif L.multiply then
-    do_send("multiply", false)
-  elseif L.playing then
-    if L.cloud then do_send("cloud", false)
-    elseif L.slicer then do_send("slicer", false)
-    elseif L.rev then do_send("reverse", false)
-    else do_send("stop_play", false) end
-  else
-    if L.cloud then do_send("cloud", false)
-    elseif L.slicer then do_send("slicer", false)
-    elseif L.rev then do_send("reverse", false)
-    elseif (L.length or 0) > 0 then do_send("stop_play", true)
+  if action then
+    local targets, g = { i }, S.group_of[i] or 0
+    if g ~= 0 and not (VL.group_inhibit and VL.group_inhibit()) then
+      local m = VL.group_members(g)
+      if #m > 0 then targets = m end
+    end
+    local def = ACTIONS[action]
+    for _, m in ipairs(targets) do
+      local Lm = S.loopers[m]
+      if Lm and (action ~= "stop_play" or not want or (Lm.length or 0) > 0) then
+        local cur = def and def.key and (Lm[def.key] and true or false) or false
+        if cur ~= want then send(m, action, want) end
+      end
     end
   end
   if VL.sync_out then VL.sync_out() end
