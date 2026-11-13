@@ -1998,13 +1998,19 @@ function VL.set_fx(kind, id, slot, value)
 end
 function VL.toggle_fx(kind, id, slot) return VL.set_fx(kind, id, slot, not S.fx[kind][id][slot]) end
 -- NAVIGATION AUTO (geste utilisateur sur un pad d'effet) : effet active -> Twister page Effets sur CET effet
--- (source + slot du FX Router) ; effet desactive -> page Volume. Slot vide : rien.
+-- (source + slot du FX Router). Effet desactive : si un autre effet reste actif sur la MEME source (looper / entree),
+-- on reste sur la page Effets, positionne sur un effet encore actif ; plus aucun effet actif -> page Volume.
+-- Slot vide : rien.
 function VL.fx_nav(kind, id, slot)
   if VL.mirror_mode or not S.fx_present[kind][id][slot] then return end
-  if S.fx[kind][id][slot] then
+  local on_slot = S.fx[kind][id][slot] and slot or nil
+  if not on_slot then
+    for k = 1, NSLOT do if S.fx_present[kind][id][k] and S.fx[kind][id][k] then on_slot = k break end end
+  end
+  if on_slot then
     S.fx_source = (kind == "input") and id or (NIN + id)
     VL.publish_fx_source()
-    VL.set_fx_slot(slot)
+    VL.set_fx_slot(on_slot)
     VL.set_fighter_page(6)
   else
     VL.set_fighter_page(1)
