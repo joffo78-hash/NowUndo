@@ -95,6 +95,45 @@ local function reset_all()
   end
 end
 
+-- Le controleur Launchpad republie "fighter_page" depuis SON etat a chaque image : une simple ecriture d'ExtState
+-- etait aussitot ecrasee. On modifie donc l'etat partage du Launchpad (meme methode que le MIDI Learn), qu'il recharge.
+local function vl_sorted_keys(t)
+  local keys = {}
+  for k in pairs(t) do keys[#keys + 1] = k end
+  table.sort(keys, function(x, y)
+    local tx, ty = type(x), type(y)
+    if tx ~= ty then return tx < ty end
+    return x < y
+  end)
+  return keys
+end
+local function vl_ser(v)
+  local tv = type(v)
+  if tv == "number" then return math.type(v) == "integer" and tostring(v) or string.format("%.17g", v)
+  elseif tv == "boolean" then return tostring(v)
+  elseif tv == "string" then return string.format("%q", v)
+  elseif tv == "table" then
+    local parts = {}
+    for _, k in ipairs(vl_sorted_keys(v)) do parts[#parts + 1] = "[" .. vl_ser(k) .. "]=" .. vl_ser(v[k]) end
+    return "{" .. table.concat(parts, ",") .. "}"
+  end
+  return "nil"
+end
+local vl_edit_n = 0
+local function set_fighter_page(p)
+  reaper.SetExtState("nowundo_vl", "fighter_page", tostring(p), false)   -- suffit si le Launchpad n'est pas lance
+  local raw = reaper.GetExtState("nowundo_vl", "state")
+  if raw == "" then return end
+  local f = load("return " .. raw, "vl_state", "t", {})
+  if not f then return end
+  local ok, t = pcall(f)
+  if not ok or type(t) ~= "table" then return end
+  t.fighter_page = p
+  vl_edit_n = vl_edit_n + 1
+  reaper.SetExtState("nowundo_vl", "state", vl_ser(t), false)
+  reaper.SetExtState("nowundo_vl", "rev", "twweb:" .. vl_edit_n .. ":" .. string.format("%.3f", reaper.time_precise()), false)
+end
+
 local function process_cmd(cmd)
   cmd = (cmd or ""):match("^%s*(.-)%s*$")
   if cmd == "" then return end
@@ -111,7 +150,11 @@ local function process_cmd(cmd)
   elseif op == "PAGE" then
     local p = tonumber(a)
     if p then
-      reaper.SetExtState("nowundo_vl", "fighter_page", tostring(p), false)
+      -- La page web numerote les pages par CONTENU (1 In/Out, 2 Pitch, 3 Volume, 4 Slicer, 5 Cloud...).
+      -- Twister v3.3+ : le BOUTON 1 = Vol/Feedback et le bouton 3 = In/Out -> conversion contenu -> bouton.
+      p = math.max(1, math.min(8, math.floor(p)))
+      if p == 1 then p = 3 elseif p == 3 then p = 1 end
+      set_fighter_page(p)
       -- si le Launchpad tourne, on peut aussi pousser via une cmd dédiée plus tard
     end
   end

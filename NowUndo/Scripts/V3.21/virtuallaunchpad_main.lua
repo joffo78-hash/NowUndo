@@ -60,6 +60,9 @@ VL.heartbeat_key = "heartbeat"
 VL.LOADED_FROM = tostring(debug.getinfo(1, "S").source)
 dbg("build %s charge depuis : %s", VL.BUILD, VL.LOADED_FROM)
 
+-- Fonctions internes rangees dans une table : le chunk principal etait a la limite Lua de 200 variables locales
+-- (199). Meme comportement ; chaque fonction ici libere une place pour de futures evolutions.
+local LPF = {}
 local NLOOP, NGROUP, NPAGE, NIN, NSLOT, NPRESET = 8, 4, 4, 8, 4, 8   -- NIN : nombre d'inputs (8, ou 4 pour une grille reduite)
 local DOUBLE_S = 0.40       -- double clic (CLEAR : double clic = tout effacer)
 local LONG_PRESS_S = 1.0     -- appui long (REVERSE/AUTO REV, revert preset ; pas CLEAR/RESET)
@@ -510,19 +513,19 @@ VL.config = {
 -- Routing REAPER : sends IN->L et L->L + mute auto des entrees non routees
 -- Ne touche PAS aux parent sends (dossier Inputs / dossier Loopers).
 --------------------------------------------------------------------------
-local function track_by_index_1based(n)
+function LPF.track_by_index_1based(n)
   if not (reaper and reaper.GetTrack and n and n >= 1) then return nil end
   local tr = reaper.GetTrack(0, n - 1)
   return tr
 end
 
-local function track_name(tr)
+function LPF.track_name(tr)
   if not tr then return "" end
   local _, name = reaper.GetTrackName(tr)
   return name or ""
 end
 
-local function match_indexed_name(name, patterns)
+function LPF.match_indexed_name(name, patterns)
   local lower = (name or ""):lower()
   for _, pat in ipairs(patterns or {}) do
     local n = lower:match(pat)
@@ -547,19 +550,19 @@ function VL.resolve_tracks(force)
   local cfg = S.cfg
   -- 1) index fixes (structure projet)
   for i = 1, NIN do
-    inputs[i] = track_by_index_1based((cfg.in_track_first or 2) + (i - 1))
+    inputs[i] = LPF.track_by_index_1based((cfg.in_track_first or 2) + (i - 1))
   end
   for i = 1, NLOOP do
-    loopers[i] = track_by_index_1based((cfg.looper_track_first or 11) + (i - 1))
+    loopers[i] = LPF.track_by_index_1based((cfg.looper_track_first or 11) + (i - 1))
   end
   -- 2) secours par nom si une piste manque
   local named_in, named_l = {}, {}
   for t = 0, n - 1 do
     local tr = reaper.GetTrack(0, t)
-    local nm = track_name(tr)
-    local ii = match_indexed_name(nm, VL.config.in_name_patterns)
+    local nm = LPF.track_name(tr)
+    local ii = LPF.match_indexed_name(nm, VL.config.in_name_patterns)
     if ii and ii >= 1 and ii <= NIN then named_in[ii] = tr end
-    local li = match_indexed_name(nm, VL.config.looper_name_patterns)
+    local li = LPF.match_indexed_name(nm, VL.config.looper_name_patterns)
     if li and li >= 1 and li <= NLOOP then named_l[li] = tr end
   end
   for i = 1, NIN do if not inputs[i] then inputs[i] = named_in[i] end end
@@ -568,7 +571,7 @@ function VL.resolve_tracks(force)
   return _route_cache
 end
 
-local function find_send(src, dst)
+function LPF.find_send(src, dst)
   if not (src and dst) then return nil end
   local ns = reaper.GetTrackNumSends(src, 0)
   for i = 0, ns - 1 do
@@ -578,8 +581,8 @@ local function find_send(src, dst)
   return nil
 end
 
-local function ensure_send(src, dst)
-  local idx = find_send(src, dst)
+function LPF.ensure_send(src, dst)
+  local idx = LPF.find_send(src, dst)
   if idx then return idx end
   if not (src and dst) then return nil end
   idx = reaper.CreateTrackSend(src, dst)
@@ -593,9 +596,9 @@ local function ensure_send(src, dst)
   return nil
 end
 
-local function set_send_open(src, dst, open, gain_db)
+function LPF.set_send_open(src, dst, open, gain_db)
   if not (src and dst) then return false end
-  local idx = open and ensure_send(src, dst) or find_send(src, dst)
+  local idx = open and LPF.ensure_send(src, dst) or LPF.find_send(src, dst)
   if not idx then return false end
   -- mute si ferme ; unmute + volume si ouvert
   reaper.SetTrackSendInfo_Value(src, 0, idx, "B_MUTE", open and 0 or 1)
@@ -608,7 +611,7 @@ local function set_send_open(src, dst, open, gain_db)
 end
 
 -- Ecrit une propriete de piste seulement si elle change (retourne true si modifiee)
-local function set_track_prop(tr, key, want)
+function LPF.set_track_prop(tr, key, want)
   if reaper.GetMediaTrackInfo_Value(tr, key) ~= want then
     reaper.SetMediaTrackInfo_Value(tr, key, want)
     return true
@@ -621,7 +624,7 @@ end
 -- Seul le MUTE de la piste est utilise (visible dans REAPER). Le script ne demute que ce qu'il a lui-meme mute
 -- (marqueur persistant dans le projet, P_EXT) : un mute manuel de l'utilisateur est respecte.
 local AUTOMUTE_KEY = "P_EXT:nowundo_vl_automute"
-local function set_input_silent(tr, silent)
+function LPF.set_input_silent(tr, silent)
   if not tr then return false end
   local _, mark = reaper.GetSetMediaTrackInfo_String(tr, AUTOMUTE_KEY, "", false)
   local muted = reaper.GetMediaTrackInfo_Value(tr, "B_MUTE") == 1
@@ -640,7 +643,7 @@ local function set_input_silent(tr, silent)
 end
 
 -- Retire le mute automatique pose par le script (pas les mutes manuels)
-local function clear_input_automute(tr)
+function LPF.clear_input_automute(tr)
   if not tr then return end
   local _, mark = reaper.GetSetMediaTrackInfo_String(tr, AUTOMUTE_KEY, "", false)
   if mark == "1" then
@@ -650,7 +653,7 @@ local function clear_input_automute(tr)
 end
 
 -- Vrai s'il existe au moins un send NON mute de cette IN vers un looper (etat REEL REAPER)
-local function input_has_active_send(tr, loopers)
+function LPF.input_has_active_send(tr, loopers)
   local ns = reaper.GetTrackNumSends(tr, 0)
   for s = 0, ns - 1 do
     if reaper.GetTrackSendInfo_Value(tr, 0, s, "B_MUTE") == 0 then
@@ -680,7 +683,7 @@ local function set_send_val(tr, idx, key, want)
 end
 
 -- Loopers atteints par l'entree k : routes IN->looper allumees, puis (option) routes looper->looper en cascade
-local function reachable_loopers(k)
+function LPF.reachable_loopers(k)
   local seen, queue = {}, {}
   for i = 1, NLOOP do
     if S.routing.in_l[k][i] then seen[i] = true; queue[#queue + 1] = i end
@@ -706,13 +709,13 @@ function VL.update_aux_follow()
   local tracks = VL.resolve_tracks(false)
   local R = S.routing.in_l
   for a = first, first + count - 1 do
-    local aux = track_by_index_1based(a)
+    local aux = LPF.track_by_index_1based(a)
     if aux then
       -- reglages de reference : un looper qui envoie (non mute) vers cette piste d'effets
       local ref = {}
       for i = 1, NLOOP do
         local ltr = tracks.loopers[i]
-        local idx = ltr and find_send(ltr, aux)
+        local idx = ltr and LPF.find_send(ltr, aux)
         if idx and send_val(ltr, idx, "B_MUTE") == 0 then
           ref[i] = { vol = send_val(ltr, idx, "D_VOL"), pan = send_val(ltr, idx, "D_PAN"), mode = send_val(ltr, idx, "I_SENDMODE") }
         end
@@ -732,12 +735,12 @@ function VL.update_aux_follow()
         local src = tracks.inputs[k]
         if src then
           local best
-          local reach = reachable_loopers(k)
+          local reach = LPF.reachable_loopers(k)
           for i = 1, NLOOP do
             if reach[i] and ref[i] and (not best or ref[i].vol > best.vol) then best = ref[i] end
           end
           if best then
-            local idx = ensure_send(src, aux)
+            local idx = LPF.ensure_send(src, aux)
             if idx then
               local ch = set_send_val(src, idx, "B_MUTE", 0)
               ch = set_send_val(src, idx, "D_VOL", best.vol) or ch
@@ -746,7 +749,7 @@ function VL.update_aux_follow()
               if ch then log("info", "IN%d -> piste %d : send effet suit le looper", k, a) end
             end
           else
-            local idx = find_send(src, aux)
+            local idx = LPF.find_send(src, aux)
             if idx and send_val(src, idx, "B_MUTE") == 0 then
               reaper.SetTrackSendInfo_Value(src, 0, idx, "B_MUTE", 1)
               log("info", "IN%d -> piste %d : send effet coupe", k, a)
@@ -775,14 +778,14 @@ function VL.update_input_mutes()
       for i = 1, NLOOP do
         if R[k][i] then active = true; break end
       end
-      local real = input_has_active_send(tr, tracks.loopers)
+      local real = LPF.input_has_active_send(tr, tracks.loopers)
       if real ~= active and VL._mm[k] ~= (tostring(active) .. tostring(real)) then
         VL._mm[k] = tostring(active) .. tostring(real)
         log("warn", "IN%d : pad=%s mais sends REAPER=%s (ecart)", k, tostring(active), tostring(real))
       elseif real == active then
         VL._mm[k] = nil
       end
-      local ch = set_input_silent(tr, not active)
+      local ch = LPF.set_input_silent(tr, not active)
       if ch then
         changed = true
         log("info", "IN%d : %s", k, active and "demutee (send actif)" or "mutee (aucun send actif)")
@@ -811,7 +814,7 @@ function VL.apply_routing(edges)
     elseif e.kind == "l_l" then
       src = tracks.loopers[e.a]; dst = tracks.loopers[e.b]
     end
-    if src and dst then set_send_open(src, dst, e.open, e.gain_db or 0) end
+    if src and dst then LPF.set_send_open(src, dst, e.open, e.gain_db or 0) end
   end
   VL.update_input_mutes()
 end
@@ -820,7 +823,7 @@ function VL.set_auto_mute_unrouted(on)
   S.cfg.auto_mute_unrouted_inputs = not not on
   if not S.cfg.auto_mute_unrouted_inputs then
     local tracks = VL.resolve_tracks(true)
-    for k = 1, NIN do clear_input_automute(tracks.inputs[k]) end
+    for k = 1, NIN do LPF.clear_input_automute(tracks.inputs[k]) end
   else
     VL.update_input_mutes()
   end
@@ -853,7 +856,7 @@ end
 -- FX inserts : 4 slots par IN (haut page FX) + 4 slots par looper (bas)
 -- Slot N = N-ieme effet "utile" sur la piste (les JSFX nowundo sont ignores sur les L).
 --------------------------------------------------------------------------
-local function is_nowundo_fx(tr, fx)
+function LPF.is_nowundo_fx(tr, fx)
   local _, nm = reaper.TrackFX_GetFXName(tr, fx, "")
   nm = (nm or ""):lower()
   for _, pat in ipairs(VL.config.fx_patterns or {}) do
@@ -863,12 +866,12 @@ local function is_nowundo_fx(tr, fx)
 end
 
 -- Retourne l'index TrackFX (0-based) du slot logique 1..NSLOT, ou nil si absent
-local function fx_index_for_slot(tr, slot, skip_nowundo)
+function LPF.fx_index_for_slot(tr, slot, skip_nowundo)
   if not tr or slot < 1 then return nil end
   local n = reaper.TrackFX_GetCount(tr)
   local seen = 0
   for fx = 0, n - 1 do
-    if not (skip_nowundo and is_nowundo_fx(tr, fx)) then
+    if not (skip_nowundo and LPF.is_nowundo_fx(tr, fx)) then
       seen = seen + 1
       if seen == slot then return fx end
     end
@@ -877,7 +880,7 @@ local function fx_index_for_slot(tr, slot, skip_nowundo)
 end
 
 -- Identite stable d'un effet : detecte un remplacement sans reprendre son activation par defaut.
-local function fx_identity(tr, fx)
+function LPF.fx_identity(tr, fx)
   if not tr or fx == nil then return nil end
   if reaper.TrackFX_GetFXGUID then
     local guid = reaper.TrackFX_GetFXGUID(tr, fx)
@@ -899,8 +902,8 @@ function VL.scan_fx_present()
       VL._fx_identity[kind][id] = VL._fx_identity[kind][id] or {}
       local tr = track_list[id]
       for slot = 1, NSLOT do
-        local fx = tr and fx_index_for_slot(tr, slot, skip_nowundo) or nil
-        local identity = fx and fx_identity(tr, fx) or nil
+        local fx = tr and LPF.fx_index_for_slot(tr, slot, skip_nowundo) or nil
+        local identity = fx and LPF.fx_identity(tr, fx) or nil
         local previous = VL._fx_identity[kind][id][slot]
         local present = fx ~= nil
         S.fx_present[kind][id][slot] = present
@@ -937,7 +940,7 @@ function VL.apply_fx(slots)
   for _, s in ipairs(slots) do
     local tr = (s.kind == "input") and tracks.inputs[s.id] or tracks.loopers[s.id]
     if tr then
-      local fx = fx_index_for_slot(tr, s.slot, s.kind == "looper")
+      local fx = LPF.fx_index_for_slot(tr, s.slot, s.kind == "looper")
       if not fx then
         if s.present then VL.set_fx_present(s.kind, s.id, s.slot, false) end
       else
@@ -1095,10 +1098,10 @@ end
 local EXCL = { job = nil }
 -- messages EXCLU : journal du Launchpad uniquement (pas de console)
 local function elog(level, fmt, ...) log(level, fmt, ...) end
-local function excl_alive(i)
+function LPF.excl_alive(i)
   return (reaper.gmem_read(100 + (i - 1)) or 0) > 0 and (now() - (reaper.gmem_read(130 + (i - 1)) or 0)) <= 3.0
 end
-local function looper_ref(i)       -- uid de la reference du looper (part active), 0 = aucune (pas de boucle)
+function LPF.looper_ref(i)       -- uid de la reference du looper (part active), 0 = aucune (pas de boucle)
   if not (reaper and reaper.gmem_attach and reaper.gmem_read) then return 0 end
   reaper.gmem_attach(GMEM_NAME)
   if (reaper.gmem_read(100 + (i - 1)) or 0) <= 0 then return 0 end
@@ -1106,43 +1109,43 @@ local function looper_ref(i)       -- uid de la reference du looper (part active
   if ap < 1 or ap > 3 then ap = 1 end
   return math.floor((reaper.gmem_read(gmem_base(i, ap) + 183) or 0) + 0.5)
 end
-local function group_ref(g, except)
+function LPF.group_ref(g, except)
   for i = 1, NLOOP do
     if i ~= except and S.group_of[i] == g then
-      local r = looper_ref(i); if r > 0 then return r end
+      local r = LPF.looper_ref(i); if r > 0 then return r end
     end
   end
   return 0
 end
 function VL.excl_can_join(looper, g)
   if not S.exclusive or g == 0 then return true end
-  local r, gr = looper_ref(looper), group_ref(g, looper)
+  local r, gr = LPF.looper_ref(looper), LPF.group_ref(g, looper)
   return r == 0 or gr == 0 or r == gr           -- un looper sans boucle (reference inconnue) est accepte
 end
 -- etat / longueur du looper (part active) : state 0 = stoppe, 7 = attente de depart, 1 = REC
-local function looper_info(i)
+function LPF.looper_info(i)
   reaper.gmem_attach(GMEM_NAME)
   local ap = math.floor((reaper.gmem_read(gmem_base(i, 1) + 42) or 1) + 0.5)
   if ap < 1 or ap > 3 then ap = 1 end
   local b = gmem_base(i, ap)
   return math.floor((reaper.gmem_read(b + 2) or 0) + 0.5), (reaper.gmem_read(b + 46) or 0)
 end
-local function group_all_empty(g)      -- vrai si le groupe a des loopers vivants et qu'ils sont TOUS vides
+function LPF.group_all_empty(g)      -- vrai si le groupe a des loopers vivants et qu'ils sont TOUS vides
   local n = 0
   for i = 1, NLOOP do
-    if S.group_of[i] == g and excl_alive(i) then
+    if S.group_of[i] == g and LPF.excl_alive(i) then
       n = n + 1
-      local _, len = looper_info(i)
+      local _, len = LPF.looper_info(i)
       if len > 0 then return false end
     end
   end
   return n > 0
 end
-local function excl_cancel_all()
+function LPF.excl_cancel_all()
   EXCL.job = nil
   if reaper and reaper.gmem_attach then
     reaper.gmem_attach(GMEM_NAME)
-    for i = 1, NLOOP do if excl_alive(i) then gmem_write_cmd(i, 27) end end   -- annule les armements en cours
+    for i = 1, NLOOP do if LPF.excl_alive(i) then gmem_write_cmd(i, 27) end end   -- annule les armements en cours
   end
 end
 function VL.excl_super_toggle()               -- appui long : EXCLU <-> SUPER EXCLU (active le mode si besoin), meme en cours de jeu
@@ -1151,7 +1154,7 @@ function VL.excl_super_toggle()               -- appui long : EXCLU <-> SUPER EX
     S.super = true
   else
     S.super = not S.super
-    excl_cancel_all()
+    LPF.excl_cancel_all()
   end
   elog("info", S.super and "SUPER EXCLU ON (loopers seuls = groupes)" or "EXCLU (loopers seuls non concernes)")
 end
@@ -1165,7 +1168,7 @@ function VL.excl_toggle()
       local gr = 0
       for i = 1, NLOOP do
         if S.group_of[i] == g then
-          local r = looper_ref(i)
+          local r = LPF.looper_ref(i)
           if r > 0 then
             if gr == 0 then gr = r elseif r ~= gr then
               S.group_of[i] = 0; changed = true
@@ -1180,7 +1183,7 @@ function VL.excl_toggle()
   else
     if reaper and reaper.gmem_attach then
       reaper.gmem_attach(GMEM_NAME)
-      for i = 1, NLOOP do if excl_alive(i) then gmem_write_cmd(i, 27) end end   -- annule les armements en cours
+      for i = 1, NLOOP do if LPF.excl_alive(i) then gmem_write_cmd(i, 27) end end   -- annule les armements en cours
     end
     elog("info", "EXCLU OFF")
   end
@@ -1403,7 +1406,7 @@ end
 local SYNCMOD = { mem = {}, tr = nil, fx = nil, warned = false, params = nil }
 local function sync_off(p) return (p - 1) * 10 end
 
-local function sync_fx_matches(tr, fx)
+function LPF.sync_fx_matches(tr, fx)
   local ok, name = reaper.TrackFX_GetFXName(tr, fx, "")
   if not (ok and type(name) == "string") then return false end
   name = name:lower()
@@ -1413,10 +1416,10 @@ local function sync_fx_matches(tr, fx)
   return false
 end
 
-local function sync_find_fx()
+function LPF.sync_find_fx()
   if not (reaper and reaper.CountTracks and reaper.TrackFX_GetCount) then return nil end
   if SYNCMOD.tr and SYNCMOD.fx and reaper.ValidatePtr2 and reaper.ValidatePtr2(0, SYNCMOD.tr, "MediaTrack*")
-     and SYNCMOD.fx < reaper.TrackFX_GetCount(SYNCMOD.tr) and sync_fx_matches(SYNCMOD.tr, SYNCMOD.fx) then
+     and SYNCMOD.fx < reaper.TrackFX_GetCount(SYNCMOD.tr) and LPF.sync_fx_matches(SYNCMOD.tr, SYNCMOD.fx) then
     return SYNCMOD.tr, SYNCMOD.fx
   end
   local list = {}
@@ -1424,7 +1427,7 @@ local function sync_find_fx()
   for i = 0, reaper.CountTracks(0) - 1 do list[#list + 1] = reaper.GetTrack(0, i) end
   for _, tr in ipairs(list) do
     for fx = 0, reaper.TrackFX_GetCount(tr) - 1 do
-      if sync_fx_matches(tr, fx) then
+      if LPF.sync_fx_matches(tr, fx) then
         SYNCMOD.tr, SYNCMOD.fx, SYNCMOD.params = tr, fx, nil
         return tr, fx
       end
@@ -1434,7 +1437,7 @@ local function sync_find_fx()
 end
 
 -- index des parametres FX "Host Sync (Main/Chorus/Bridge)" (les sliders caches peuvent ne pas etre exposes)
-local function sync_param_index(tr, fx, p)
+function LPF.sync_param_index(tr, fx, p)
   if not SYNCMOD.params then
     SYNCMOD.params = {}
     local want = { "main", "chorus", "bridge" }
@@ -1457,21 +1460,21 @@ end
 
 -- Host sync ON/OFF d'une part : parametre FX si expose + boite de commandes gmem du JSFX corrige
 local function sync_set_host(p, on)
-  local tr, fx = sync_find_fx()
+  local tr, fx = LPF.sync_find_fx()
   if not tr then
     if not SYNCMOD.warned then
       SYNCMOD.warned = true
       log("warn", "module Master Sync introuvable (cherche : %s)", table.concat(VL.config.sync_fx_patterns, " / "))
     end
   else
-    local pi = sync_param_index(tr, fx, p)
+    local pi = LPF.sync_param_index(tr, fx, p)
     if pi then reaper.TrackFX_SetParam(tr, fx, pi, on and 1 or 0) end
   end
   reaper.gmem_attach(GMEM_NAME)
   reaper.gmem_write(VL.config.sync_inbox + p - 1, on and 1 or 2)
 end
 
-local function sync_alias_exists(alias)
+function LPF.sync_alias_exists(alias)
   if alias <= 0 then return false end
   for si = 0, 4 do
     if (reaper.gmem_read(1000 + si * 600 + 1) or 0) == alias then return true end
@@ -1480,7 +1483,7 @@ local function sync_alias_exists(alias)
 end
 
 -- libere la synchro engagee sur la part p (comme le bouton Unlock) ; se souvient de ce qui etait engage
-local function sync_release(p)
+function LPF.sync_release(p)
   local locked, mid = sync_state(p)
   if locked == 0 then return false end
   SYNCMOD.mem[p] = { mode = locked, mid = mid }
@@ -1491,7 +1494,7 @@ local function sync_release(p)
 end
 
 -- verrouille la synchro de la part p sur le looper SELECTIONNE (il doit etre vivant et avoir une boucle dans cette part)
-local function sync_lock_selected(p)
+function LPF.sync_lock_selected(p)
   local i = S.sel_looper
   if not i then return false end
   reaper.gmem_attach(GMEM_NAME)
@@ -1506,14 +1509,14 @@ local function sync_lock_selected(p)
 end
 
 -- reengage la synchro : par defaut verrouillage sur le looper selectionne ; a defaut le maitre precedent (s'il existe encore), sinon Host Reaper
-local function sync_engage(p)
+function LPF.sync_engage(p)
   local locked = sync_state(p)
   if locked ~= 0 then return false end
-  local ok, who = sync_lock_selected(p)
+  local ok, who = LPF.sync_lock_selected(p)
   if ok then log("info", "SYNC part %d : verrouille sur le looper %d (selectionne)", p, who); return true end
   local m = SYNCMOD.mem[p]
   reaper.gmem_attach(GMEM_NAME)
-  if m and m.mode == 1 and sync_alias_exists(m.mid) then
+  if m and m.mode == 1 and LPF.sync_alias_exists(m.mid) then
     reaper.gmem_write(sync_off(p), 1)
     reaper.gmem_write(sync_off(p) + 1, m.mid)
     sync_set_host(p, false)
@@ -1546,8 +1549,8 @@ function VL.sync_toggle(all)
   for _, p in ipairs(parts) do if sync_state(p) ~= 0 then any = true end end
   local n = 0
   for _, p in ipairs(parts) do
-    if any then if sync_release(p) then n = n + 1 end
-    else if sync_engage(p) then n = n + 1 end end
+    if any then if LPF.sync_release(p) then n = n + 1 end
+    else if LPF.sync_engage(p) then n = n + 1 end end
   end
   log("info", "SYNC %s : %d part(s)%s", any and "OFF (libere)" or "ON", n, all and " (toutes)" or " (en cours)")
   if n > 0 and not VL._scn_quiet then VL.scn_emit_glob((any and "unsync" or "sync") .. (all and "all" or "")) end   -- [SCN] capture
@@ -1558,14 +1561,14 @@ function VL.sync_set(on, all)
   local parts = all and { 1, 2, 3 } or { VL.current_part() }
   local n = 0
   for _, p in ipairs(parts) do
-    if on then if sync_engage(p) then n = n + 1 end
-    else if sync_release(p) then n = n + 1 end end
+    if on then if LPF.sync_engage(p) then n = n + 1 end
+    else if LPF.sync_release(p) then n = n + 1 end end
   end
   log("info", "SYNC %s : %d part(s)%s", on and "ON" or "OFF (libere)", n, all and " (toutes)" or " (en cours)")
 end
 
 -- ===== MODE EXCLU : logique d'enregistrement (apres les fonctions SYNC, avant exec) =====
-local function sync_lock_looper(i, p)               -- verrouille la synchro de la part p sur le looper i (vivant, avec boucle)
+function LPF.sync_lock_looper(i, p)               -- verrouille la synchro de la part p sur le looper i (vivant, avec boucle)
   reaper.gmem_attach(GMEM_NAME)
   if (reaper.gmem_read(100 + (i - 1)) or 0) <= 0 then return false end
   local base = 1000 + (i - 1) * 600 + (p - 1) * 200
@@ -1576,11 +1579,11 @@ local function sync_lock_looper(i, p)               -- verrouille la synchro de 
   sync_set_host(p, false)
   return true
 end
-local function excl_rec_state(st) return st == 1 or st == 7 or st == 8 end
-local function excl_solo_running()                   -- un looper hors groupe, avec boucle, qui joue
+function LPF.excl_rec_state(st) return st == 1 or st == 7 or st == 8 end
+function LPF.excl_solo_running()                   -- un looper hors groupe, avec boucle, qui joue
   for i = 1, NLOOP do
     local L = S.loopers[i]
-    if (S.group_of[i] or 0) == 0 and (L.length or 0) > 0 and excl_alive(i) then
+    if (S.group_of[i] or 0) == 0 and (L.length or 0) > 0 and LPF.excl_alive(i) then
       local st = L.state or 0
       if st >= 2 and st <= 6 then return true end
     end
@@ -1588,12 +1591,12 @@ local function excl_solo_running()                   -- un looper hors groupe, a
   return false
 end
 -- appele par exec() AVANT l'envoi de REC. Retourne true si le REC est DIFFERE (le looper l'executera au synchro point).
-local function excl_cancel_armed()
+function LPF.excl_cancel_armed()
   reaper.gmem_attach(GMEM_NAME)
-  for i = 1, NLOOP do if excl_alive(i) then gmem_write_cmd(i, 27) end end
+  for i = 1, NLOOP do if LPF.excl_alive(i) then gmem_write_cmd(i, 27) end end
 end
 -- arme le basculement differe : le groupe actif s'arrete a son synchro point, le groupe selectionne passe en REC a cet instant
-local function excl_arm_switch(g, p, running, fresh, loops, solo_sync)
+function LPF.excl_arm_switch(g, p, running, fresh, loops, solo_sync)
   reaper.gmem_attach(GMEM_NAME)
   for _, j in ipairs(running) do gmem_write_cmd(j, 25) end
   if #fresh > 0 then
@@ -1615,14 +1618,14 @@ function VL.excl_before_rec(targets)
   if not S.exclusive then return false end
   local job = EXCL.job
   if job and (job.phase == "switch" or (job.phase == "rec" and job.deferred and not job.seen)) then   -- 2e appui pendant l'attente : annule
-    excl_cancel_armed(); EXCL.job = nil
+    LPF.excl_cancel_armed(); EXCL.job = nil
     elog("info", "EXCLU : basculement annule")
     return true
   end
   local fresh, loops, recording = {}, {}, false
   for _, t in ipairs(targets or {}) do
     local L = S.loopers[t]; local st = L.state or 0
-    if excl_rec_state(st) or st == 3 then recording = true end
+    if LPF.excl_rec_state(st) or st == 3 then recording = true end
     if (L.length or 0) <= 0 then fresh[#fresh + 1] = t else loops[#loops + 1] = t end
   end
   if recording or #targets == 0 then EXCL.note = "NORMAL (fin de REC / overdub)"; return false end          -- fin de REC / overdub en cours : comportement normal
@@ -1637,7 +1640,7 @@ function VL.excl_before_rec(targets)
   for _, t in ipairs(targets) do tset[t] = true end
   for j = 1, NLOOP do
     local gj = S.group_of[j] or 0
-    if not tset[j] and not (g > 0 and gj == g) and (gj > 0 or super) and excl_alive(j) then
+    if not tset[j] and not (g > 0 and gj == g) and (gj > 0 or super) and LPF.excl_alive(j) then
       local st = S.loopers[j].state or 0
       if st >= 2 and st <= 6 then running[#running + 1] = j end
     end
@@ -1645,14 +1648,14 @@ function VL.excl_before_rec(targets)
   local function stop_now()
     for _, j in ipairs(running) do gmem_write_cmd(j, 3); S.loopers[j].playing = false end
   end
-  local solo_sync = (not super) and excl_solo_running() and sync_state(p) ~= 0   -- en SUPER : pas de looper seul privilegie, synchro independante
+  local solo_sync = (not super) and LPF.excl_solo_running() and sync_state(p) ~= 0   -- en SUPER : pas de looper seul privilegie, synchro independante
 
   local function start_free_job(deferred)
     if solo_sync then
       elog("info", "EXCLU : REC groupe %d en SYNC sur le maitre actif (looper solo en lecture)", g)
       EXCL.job = nil
     else
-      if not deferred then sync_release(p) end
+      if not deferred then LPF.sync_release(p) end
       EXCL.job = { group = g, members = fresh, p = p, phase = "rec", t0 = now(), seen = false, deferred = deferred, release_on_start = deferred }
       elog("info", "EXCLU : REC groupe %d, synchro desactivee ; verrouillage sur le looper %d a la fin du REC", g, fresh[1])
     end
@@ -1668,7 +1671,7 @@ function VL.excl_before_rec(targets)
   end
   if ss == 0 then
     -- un groupe joue mais la synchro n'est plus verrouillee : on la remet sur son premier looper, puis on arme (au bloc suivant)
-    if sync_lock_looper(running[1], p) then
+    if LPF.sync_lock_looper(running[1], p) then
       elog("warn", "EXCLU : synchro absente -> reverrouillee sur le looper %d, basculement dans un instant", running[1])
       EXCL.job = { phase = "arm_later", t0 = now(), g = g, p = p, running = running, fresh = fresh, loops = loops, solo_sync = false }
       EXCL.note = "ATTENTE (synchro reverrouillee)"
@@ -1680,7 +1683,7 @@ function VL.excl_before_rec(targets)
     if #fresh > 0 then start_free_job(false) end
     return false
   end
-  excl_arm_switch(g, p, running, fresh, loops, solo_sync)
+  LPF.excl_arm_switch(g, p, running, fresh, loops, solo_sync)
   EXCL.note = "ATTENTE du synchro point"
   return true
 end
@@ -1691,15 +1694,15 @@ function VL.excl_job_tick(t)
     local any_rec, all_done = false, true
     for _, i in ipairs(job.members) do
       local L = S.loopers[i]
-      if excl_rec_state(L.state or 0) then any_rec = true; all_done = false
+      if LPF.excl_rec_state(L.state or 0) then any_rec = true; all_done = false
       elseif (L.length or 0) <= 0 then all_done = false end
     end
     if not job.seen then
       if any_rec then
         job.seen = true
-        if job.release_on_start then sync_release(job.p) end      -- les loopers du groupe enregistrent librement
+        if job.release_on_start then LPF.sync_release(job.p) end      -- les loopers du groupe enregistrent librement
       elseif t - job.t0 > (job.deferred and 120 or 3.0) then
-        if job.deferred then excl_cancel_armed() end
+        if job.deferred then LPF.excl_cancel_armed() end
         EXCL.job = nil
       end
       return
@@ -1707,7 +1710,7 @@ function VL.excl_job_tick(t)
     if all_done then
       local f = job.members[1]
       local fp = S.loopers[f].part or job.p
-      if sync_lock_looper(f, fp) then
+      if LPF.sync_lock_looper(f, fp) then
         elog("info", "EXCLU : synchro verrouillee sur le looper %d (groupe %d)", f, job.group)
         job.phase, job.t1, job.f, job.p = "adopt", t, f, fp
       else
@@ -1719,26 +1722,26 @@ function VL.excl_job_tick(t)
   elseif job.phase == "arm_later" then
     if t - job.t0 >= 0.25 then
       EXCL.job = nil
-      excl_arm_switch(job.g, job.p, job.running, job.fresh, job.loops, job.solo_sync)
+      LPF.excl_arm_switch(job.g, job.p, job.running, job.fresh, job.loops, job.solo_sync)
     end
   elseif job.phase == "switch" then
     local all_dub = true
     for _, m in ipairs(job.members) do if (S.loopers[m].state or 0) ~= 3 then all_dub = false end end
     if all_dub then
       if not job.keep then                         -- plus de solo : la synchro suit le groupe qui joue (premier looper)
-        if sync_lock_looper(job.members[1], job.p) then
+        if LPF.sync_lock_looper(job.members[1], job.p) then
           elog("info", "EXCLU : synchro verrouillee sur le looper %d (groupe %d)", job.members[1], job.group)
         end
       end
       EXCL.job = nil
     elseif t - job.t0 > 120 then
-      excl_cancel_armed(); EXCL.job = nil
+      LPF.excl_cancel_armed(); EXCL.job = nil
     end
   elseif job.phase == "adopt" then
     if t - job.t1 > 4.0 then EXCL.job = nil return end
-    if t - job.t1 >= 0.08 and looper_ref(job.f) > 0 then      -- le maitre a cree sa reference : les autres l'adoptent
+    if t - job.t1 >= 0.08 and LPF.looper_ref(job.f) > 0 then      -- le maitre a cree sa reference : les autres l'adoptent
       for _, m in ipairs(job.members) do
-        if m ~= job.f and excl_alive(m) then gmem_write_cmd(m, 28, job.f) end
+        if m ~= job.f and LPF.excl_alive(m) then gmem_write_cmd(m, 28, job.f) end
       end
       EXCL.job = nil
     end
@@ -1850,7 +1853,7 @@ end
 local FIRE_GAP_S = 0.08
 local fire_queue, fire_last = {}, -1e9
 
-local function fire_lanes(a)
+function LPF.fire_lanes(a)
   local def = ACTIONS[a.action]
   if def and def.global then
     local all = {}
@@ -1871,7 +1874,7 @@ function VL.fire_pump(t)
   local i = 1
   while i <= #fire_queue do
     local a = fire_queue[i]
-    local lanes, free = fire_lanes(a), true
+    local lanes, free = LPF.fire_lanes(a), true
     for _, l in ipairs(lanes) do if used[l] then free = false end end
     for _, l in ipairs(lanes) do used[l] = true end     -- meme saute : les suivantes du meme looper ne passent pas devant
     if free then
@@ -1916,7 +1919,7 @@ VL.AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2, reset_pitc
                rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
 function VL.auto_twister(action, targets, args)
   local pg = VL.AUTO_TW[action]
-  if not pg or VL.mirror_mode then return end
+  if not pg then return end                      -- (le miroir interactif navigue aussi : son etat est synchronise)
   if action == "slicer" or action == "cloud" then
     local def = ACTIONS[action]
     if def and toggle_on(def.key, targets) then pg = 1 end            -- on coupe le mode -> Volume
@@ -1945,7 +1948,7 @@ end
 -- Routing (IN1-4 / FX1-4 / L1-8) + garde-fou feedback
 --------------------------------------------------------------------------
 -- Seuls les loopers peuvent former une boucle (L -> L) : les IN n'ont pas d'entree et les effets sont en insert.
-local function compute_feedback()
+function LPF.compute_feedback()
   local reach = new_matrix(NLOOP, NLOOP, false)
   local R = S.routing
   for a = 1, NLOOP do for b = 1, NLOOP do if R.l_l[a][b] then reach[a][b] = true end end end
@@ -1960,7 +1963,7 @@ local function compute_feedback()
 end
 
 function VL.routing_edges()
-  local fb, out, R = compute_feedback(), {}, S.routing
+  local fb, out, R = LPF.compute_feedback(), {}, S.routing
   local function add(kind, a, b, src, dst, open)
     local isfb = open and fb[kind .. ":" .. a .. ":" .. b] or false
     out[#out + 1] = { kind = kind, a = a, b = b, src = src, dst = dst, open = open, feedback = isfb,
@@ -2002,7 +2005,7 @@ function VL.toggle_fx(kind, id, slot) return VL.set_fx(kind, id, slot, not S.fx[
 -- on reste sur la page Effets, positionne sur un effet encore actif ; plus aucun effet actif -> page Volume.
 -- Slot vide : rien.
 function VL.fx_nav(kind, id, slot)
-  if VL.mirror_mode or not S.fx_present[kind][id][slot] then return end
+  if not S.fx_present[kind][id][slot] then return end
   local on_slot = S.fx[kind][id][slot] and slot or nil
   if not on_slot then
     for k = 1, NSLOT do if S.fx_present[kind][id][k] and S.fx[kind][id][k] then on_slot = k break end end
@@ -2028,7 +2031,7 @@ function VL.set_route(kind, a, b, value)
   if kind == "l_l" and a == b then log("debug", "L%d -> L%d desactive", a, b) return false end
   if m[a][b] == value then return false end
   m[a][b] = value
-  if value and S.cfg.feedback_policy == "block" and compute_feedback()[kind .. ":" .. a .. ":" .. b] then
+  if value and S.cfg.feedback_policy == "block" and LPF.compute_feedback()[kind .. ":" .. a .. ":" .. b] then
     m[a][b] = false
     log("warn", "route %s %d->%d refusee : creerait une boucle de feedback", kind, a, b)
     return false
@@ -2064,7 +2067,7 @@ local BANKS = {
               end },
 }
 
-local function init_presets()
+function LPF.init_presets()
   for name, bank in pairs(BANKS) do
     S.presets[name].active = 1
     S.presets[name].slots = { [1] = bank.get() }
@@ -2695,7 +2698,7 @@ local function fmtn(v) return (v == math.floor(v)) and tostring(math.floor(v)) o
 local MACRO_EXT = "NowUndo_Macros"
 VL.macros = { by_id = {}, layout = {}, rev = nil, last_poll = -1e9, last_rev = -1e9, flash = {}, on = {}, on_s = nil }
 
-local function macros_parse(txt)
+function LPF.macros_parse(txt)
   local by_id, layout = {}, {}
   for line in (txt or ""):gmatch("[^\r\n]+") do
     local f = {}
@@ -2725,11 +2728,11 @@ function VL.macros_poll(t)
   local rev = reaper.GetExtState(MACRO_EXT, "rev")
   if rev == M.rev then return end
   M.rev = rev
-  M.by_id, M.layout = macros_parse(reaper.GetExtState(MACRO_EXT, "set"))
+  M.by_id, M.layout = LPF.macros_parse(reaper.GetExtState(MACRO_EXT, "set"))
 end
 
 -- libelle d'un pad : le nom, sinon l'action elle-meme (jamais "Macro 3")
-local function macro_label(m)
+function LPF.macro_label(m)
   local n = m.name or ""
   if n == "" or n:match("^Macro %d+$") then return m.text or "" end
   return n
@@ -2818,10 +2821,10 @@ function VL.macro_fire(cell)
   if not m then return end
   VL.macros.flash[cell] = now() + 0.25
   local hb = tonumber(reaper.GetExtState("NowUndo_Scn", "alive")) or 0
-  if reaper.time_precise() - hb > 2 then log("warn", "macro '%s' : le script NowUndo_Scenario ne tourne pas", macro_label(m)) end
+  if reaper.time_precise() - hb > 2 then log("warn", "macro '%s' : le script NowUndo_Scenario ne tourne pas", LPF.macro_label(m)) end
   local cur = reaper.GetExtState("NowUndo_Scn", "mcr")
   reaper.SetExtState("NowUndo_Scn", "mcr", cur .. string.format("%d\t%s\t%.3f\n", m.id, table.concat(VL.targets(), ","), reaper.time_precise()), false)
-  log("info", "macro '%s' -> %s", macro_label(m), table.concat(VL.targets(), ","))
+  log("info", "macro '%s' -> %s", LPF.macro_label(m), table.concat(VL.targets(), ","))
 end
 
 function VL.macro_press(cell)
@@ -2843,7 +2846,7 @@ VL.register_layer({ id = "macros", name = "Action macros", cell = function(row, 
     release = fn(function() VL.macro_release(cell) end),  -- no-op si la macro n'est pas en mode GATE
     instant = true,   -- fire a l'appui (gate = on ; non-gate = declenchement)
     hex = function() local mm = VL.macro_at(cell); return mm and mm.color or 0x222222 end,
-    label = function() local mm = VL.macro_at(cell); return mm and macro_label(mm) or "" end,
+    label = function() local mm = VL.macro_at(cell); return mm and LPF.macro_label(mm) or "" end,
     state = function()
       if not VL.macro_at(cell) then return "off" end
       if (VL.macros.flash[cell] or 0) > now() then return "armed" end
@@ -2888,9 +2891,9 @@ local last_rel = {}      -- dernier relachement court par pad (detection du doub
 -- Maintien virtuel (bouton HOLD de la fenetre) ou clavier (Ctrl) : meme effet tant qu'ils sont actifs.
 -- Par defaut ils editent le groupe ACTIF ; un tap sur un pad GROUP n (meme vide) choisit le groupe edite (edit_group).
 local vhold, ctrl_hold, edit_group = false, false, nil
-local function check_edit_end() if not (vhold or ctrl_hold) then edit_group = nil end end   -- fin du maintien = fin de l'edition
-function VL.set_virtual_hold(on) vhold = on and true or false; check_edit_end() end
-function VL.set_ctrl_hold(on) ctrl_hold = on and true or false; check_edit_end() end
+function LPF.check_edit_end() if not (vhold or ctrl_hold) then edit_group = nil end end   -- fin du maintien = fin de l'edition
+function VL.set_virtual_hold(on) vhold = on and true or false; LPF.check_edit_end() end
+function VL.set_ctrl_hold(on) ctrl_hold = on and true or false; LPF.check_edit_end() end
 function VL.ctrl_held() return ctrl_hold end
 -- Tap sur GROUP n : avec HOLD / Ctrl = choisit le groupe a editer (re-tap = retour au groupe actif) ; sinon = selection
 function VL.group_pad_tap(g)
@@ -3160,12 +3163,12 @@ end
 -- Une piste porte le looper i si elle s'appelle "L<i>" (L1, L1 drums, Looper 1...) et contient un JSFX nowundo ;
 -- a defaut, on prend la i-eme piste (dans l'ordre du projet) qui porte un JSFX nowundo.
 --------------------------------------------------------------------------
-local function track_looper_index(name)
+function LPF.track_looper_index(name)
   local n = (name or ""):lower()
   return tonumber(n:match("^l(%d+)$") or n:match("^l(%d+)[^%d]") or n:match("^looper%s*(%d+)"))
 end
 
-local function find_nowundo_fx(tr)
+function LPF.find_nowundo_fx(tr)
   for fx = 0, reaper.TrackFX_GetFXCount(tr) - 1 do
     local _, nm = reaper.TrackFX_GetFXName(tr, fx, "")
     nm = (nm or ""):lower()
@@ -3179,10 +3182,10 @@ VL.hooks.find_looper_fx = function(i)
   local all, named_any = {}, false
   for t = 0, reaper.CountTracks(0) - 1 do
     local tr = reaper.GetTrack(0, t)
-    local fx = find_nowundo_fx(tr)
+    local fx = LPF.find_nowundo_fx(tr)
     if fx then
       local _, name = reaper.GetTrackName(tr)
-      local idx = track_looper_index(name)
+      local idx = LPF.track_looper_index(name)
       if idx then named_any = true end
       if idx == i then return tr, fx end
       all[#all + 1] = { tr, fx }
@@ -3203,7 +3206,7 @@ local function looper_window_is_open(tr, fx)
   return reaper.TrackFX_GetFloatingWindow(tr, fx) ~= nil or reaper.TrackFX_GetOpen(tr, fx)
 end
 
-local function looper_window_close(tr, fx)
+function LPF.looper_window_close(tr, fx)
   reaper.TrackFX_SetOpen(tr, fx, false)
   if reaper.TrackFX_GetFloatingWindow(tr, fx) then reaper.TrackFX_Show(tr, fx, 2) end
   if reaper.TrackFX_GetFloatingWindow(tr, fx) then            -- plugins qui resistent : astuce ouvrir + refermer
@@ -3220,7 +3223,7 @@ function VL.close_looper_windows(except)
     if i ~= except then
       local tr, fx = looper_window_target(i)
       if tr and looper_window_is_open(tr, fx) then
-        looper_window_close(tr, fx)
+        LPF.looper_window_close(tr, fx)
         closed = true
         log("info", "looper %d : fenetre fermee", i)
       end
@@ -3345,7 +3348,7 @@ do
   if dir then MODEL.file = dir .. "nowundo_vl_model.txt" end
 end
 
-local function model_matrix_ok(m, n, c)
+function LPF.model_matrix_ok(m, n, c)
   if type(m) ~= "table" then return false end
   for i = 1, n do
     local r = m[i]
@@ -3354,13 +3357,13 @@ local function model_matrix_ok(m, n, c)
   end
   return true
 end
-local function model_routing_ok(r)
-  return type(r) == "table" and model_matrix_ok(r.in_l, NIN, NLOOP) and model_matrix_ok(r.l_l, NLOOP, NLOOP)
+function LPF.model_routing_ok(r)
+  return type(r) == "table" and LPF.model_matrix_ok(r.in_l, NIN, NLOOP) and LPF.model_matrix_ok(r.l_l, NLOOP, NLOOP)
 end
-local function model_fx_ok(f)
-  return type(f) == "table" and model_matrix_ok(f.input, NIN, NSLOT) and model_matrix_ok(f.looper, NLOOP, NSLOT)
+function LPF.model_fx_ok(f)
+  return type(f) == "table" and LPF.model_matrix_ok(f.input, NIN, NSLOT) and LPF.model_matrix_ok(f.looper, NLOOP, NSLOT)
 end
-local function model_groups_ok(g)
+function LPF.model_groups_ok(g)
   if type(g) ~= "table" then return false end
   for i = 1, NLOOP do
     if type(g[i]) ~= "number" or g[i] < 0 or g[i] > NGROUP then return false end
@@ -3368,7 +3371,7 @@ local function model_groups_ok(g)
   return true
 end
 
-local function model_table()
+function LPF.model_table()
   return { _m = 1, routing = S.routing, fx = S.fx, group_of = S.group_of, presets = S.presets }
 end
 
@@ -3380,9 +3383,9 @@ function VL.model_load()
   if not chunk then return false end
   local ok, t = pcall(chunk)
   if not ok or type(t) ~= "table" or t._m ~= 1 then return false end
-  if model_routing_ok(t.routing) then S.routing = { in_l = t.routing.in_l, l_l = t.routing.l_l } end
-  if model_fx_ok(t.fx) then S.fx = { input = t.fx.input, looper = t.fx.looper } end
-  if model_groups_ok(t.group_of) then
+  if LPF.model_routing_ok(t.routing) then S.routing = { in_l = t.routing.in_l, l_l = t.routing.l_l } end
+  if LPF.model_fx_ok(t.fx) then S.fx = { input = t.fx.input, looper = t.fx.looper } end
+  if LPF.model_groups_ok(t.group_of) then
     for i = 1, NLOOP do S.group_of[i] = math.floor(t.group_of[i]) end
     S.sel_group = S.group_of[S.sel_looper] or 0
   end
@@ -3396,14 +3399,14 @@ function VL.model_load()
       end
       return true
     end
-    if slots_ok(pr, function(d) return type(d) == "table" and model_routing_ok(d.routing) and model_fx_ok(d.fx) end) then
+    if slots_ok(pr, function(d) return type(d) == "table" and LPF.model_routing_ok(d.routing) and LPF.model_fx_ok(d.fx) end) then
       S.presets.routing = { active = math.floor(pr.active), slots = pr.slots }
     end
-    if slots_ok(pg, model_groups_ok) then
+    if slots_ok(pg, LPF.model_groups_ok) then
       S.presets.group = { active = math.floor(pg.active), slots = pg.slots }
     end
   end
-  MODEL.last = ser(model_table())
+  MODEL.last = ser(LPF.model_table())
   log("info", "modele charge : %s", MODEL.file)
   return true
 end
@@ -3414,7 +3417,7 @@ function VL.model_autosave(t)
   t = t or now()
   if t - MODEL.t < 0.5 then return end
   MODEL.t = t
-  local txt = ser(model_table())
+  local txt = ser(LPF.model_table())
   if txt == MODEL.last then MODEL.pending = nil; return end
   if txt ~= MODEL.pending then MODEL.pending = txt; MODEL.pending_t = t; return end
   if t - MODEL.pending_t < 1.0 then return end
@@ -3580,7 +3583,7 @@ function VL.build_frame()
       put(1, i, hex, mode)
     end
   else
-    local fb = compute_feedback()
+    local fb = LPF.compute_feedback()
     for row = 1, 8 do for col = 1, 8 do
       local base = rgb[row .. "," .. col] or COL.default
       if page == 2 then
@@ -3727,7 +3730,7 @@ end
 
 -- Pedal Board : commandes de selection de looper (ExtState "NowUndo_Pedal/lp_cmd" = ts \t nom \t arg)
 local pedal_cmd_ts = nil
-local function pedal_poll_cmd()
+function LPF.pedal_poll_cmd()
   if not (reaper and reaper.GetExtState) then return end
   local raw = reaper.GetExtState("NowUndo_Pedal", "lp_cmd")
   local ts, name, arg = raw:match("^([^\t]*)\t([^\t]*)\t?([^\t]*)")
@@ -3994,7 +3997,7 @@ end
 
 function VL.render(t)
   t = t or now()
-  pedal_poll_cmd()
+  LPF.pedal_poll_cmd()
   VL.web_poll_cmd()
   VL.web_publish(t)
   -- Toujours publier groupes/routing pour Twister & dashboard (meme en hardware_test)
@@ -4075,7 +4078,7 @@ end
 -- Le script reste independant de NowUndo : aucun hook metier n'est branche.
 VL.hardware_test = true
 
-local function midi_device_name(is_output, index)
+function LPF.midi_device_name(is_output, index)
   local fn = is_output and reaper.GetMIDIOutputName or reaper.GetMIDIInputName
   if not fn then return "" end
   local ok, name = fn(index, "")
@@ -4084,21 +4087,21 @@ local function midi_device_name(is_output, index)
 end
 
 -- Ports actifs uniquement : REAPER reserve des index vides (peripheriques absents) qu'on ne liste pas.
-local function list_active_ports(is_output)
+function LPF.list_active_ports(is_output)
   local count_fn = is_output and reaper.GetNumMIDIOutputs or reaper.GetNumMIDIInputs
   local list = {}
   if not count_fn then return list end
   for i = 0, count_fn() - 1 do
-    local name = midi_device_name(is_output, i)
+    local name = LPF.midi_device_name(is_output, i)
     if name ~= "" then list[#list + 1] = { index = i, name = name } end
   end
   return list
 end
 
-local function find_launchpad_device(is_output)
+function LPF.find_launchpad_device(is_output)
   local count_fn = is_output and reaper.GetNumMIDIOutputs or reaper.GetNumMIDIInputs
   if not count_fn then return nil, "API MIDI indisponible" end
-  local list = list_active_ports(is_output)
+  local list = LPF.list_active_ports(is_output)
   local best, first, fallback, names = nil, nil, nil, {}
   for _, d in ipairs(list) do
     names[#names + 1] = string.format("%d: %s", d.index, d.name)
@@ -4116,8 +4119,8 @@ local function find_launchpad_device(is_output)
   return nil, table.concat(names, "\n")
 end
 
-local LP_OUT, LP_OUT_NAME = find_launchpad_device(true)
-local LP_IN, LP_IN_NAME = find_launchpad_device(false)
+local LP_OUT, LP_OUT_NAME = LPF.find_launchpad_device(true)
+local LP_IN, LP_IN_NAME = LPF.find_launchpad_device(false)
 local LP_LAST_SEQ = 0
 local LP_HELD = {}
 local LP_IN_ACTIVITY = 0
@@ -4129,8 +4132,8 @@ local LP_LAST_OUT_TEXT = "aucun envoi"
 local LP_DEVICES_REFRESH = 0
 local LP_INPUTS, LP_OUTPUTS = {}, {}
 
-local function lp_refresh_devices()
-  LP_INPUTS, LP_OUTPUTS = list_active_ports(false), list_active_ports(true)
+function LPF.lp_refresh_devices()
+  LP_INPUTS, LP_OUTPUTS = LPF.list_active_ports(false), LPF.list_active_ports(true)
   LP_DEVICES_REFRESH = now and now() or os.clock()
 end
 if reaper.MIDI_GetRecentInputEvent then
@@ -4183,18 +4186,18 @@ local CTRL_CURSOR = 0.35
 local HW_BLINK = { armed = { 1.0, 0.0 }, armed_other = { 0.8, 0.30 }, member_cursor = { 1.0, 0.30 } }   -- { phase haute, phase basse }
 
 local function hw_idle() return 0.5 * HW.idle_pos ^ 2 end
-local function hw_load()
+function LPF.hw_load()
   local a = tonumber(reaper.GetExtState(HW_EXT, "idle_pos"))
   local b = tonumber(reaper.GetExtState(HW_EXT, "sat"))
   if a then HW.idle_pos = math.max(0, math.min(1, a)) end
   if b then HW.sat = math.max(0, math.min(2, b)) end
 end
-local function hw_save()
+function LPF.hw_save()
   reaper.SetExtState(HW_EXT, "idle_pos", string.format("%.4f", HW.idle_pos), true)
   reaper.SetExtState(HW_EXT, "sat", string.format("%.4f", HW.sat), true)
 end
 -- luminosite materielle 0..1 d'un etat (la fenetre garde ses propres niveaux)
-local function hw_bright(led, ctrl)
+function LPF.hw_bright(led, ctrl)
   local st = led.state
   if st == "off" then return 0 end
   if st == "idle" then return hw_idle() end
@@ -4206,7 +4209,7 @@ local function hw_bright(led, ctrl)
   if st == "cursor" and ctrl then return math.max(CTRL_CURSOR, hw_idle()) end
   return 1.0
 end
-local function hw_saturate(r, g, b)
+function LPF.hw_saturate(r, g, b)
   if HW.sat == 1 then return r, g, b end
   local y = 0.299 * r + 0.587 * g + 0.114 * b
   local function f(c) return math.max(0, math.min(255, y + (c - y) * HW.sat)) end
@@ -4280,8 +4283,8 @@ local function lp_poll_input(t)
   if seq0 and seq0 > LP_LAST_SEQ then LP_LAST_SEQ = seq0 end
 end
 
-local function lp_choose_device(is_output)
-  lp_refresh_devices()
+function LPF.lp_choose_device(is_output)
+  LPF.lp_refresh_devices()
   local list = is_output and LP_OUTPUTS or LP_INPUTS
   local current = is_output and LP_OUT or LP_IN
   local menu = { is_output and "#SORTIE MIDI  (vers le Launchpad)" or "#ENTRÉE MIDI  (depuis le Launchpad)",
@@ -4299,7 +4302,7 @@ local function lp_choose_device(is_output)
     local idx = indexes[pick]
     if is_output then
       LP_OUT = idx
-      LP_OUT_NAME = midi_device_name(true, idx)
+      LP_OUT_NAME = LPF.midi_device_name(true, idx)
       lp_set_mode(true)
       -- Renvoyer les couleurs actuelles vers le nouveau port.
       for key, c in pairs(VL._hw_colors or {}) do
@@ -4308,7 +4311,7 @@ local function lp_choose_device(is_output)
       end
     else
       LP_IN = idx
-      LP_IN_NAME = midi_device_name(false, idx)
+      LP_IN_NAME = LPF.midi_device_name(false, idx)
       LP_LAST_SEQ = 0
       if reaper.MIDI_GetRecentInputEvent then LP_LAST_SEQ = reaper.MIDI_GetRecentInputEvent(0) or 0 end
       LP_HELD = {}
@@ -4316,14 +4319,14 @@ local function lp_choose_device(is_output)
   end
 end
 
-local function lp_status_text()
+function LPF.lp_status_text()
   local ins = LP_IN_NAME or ("introuvable (index a regler)")
   local outs = LP_OUT_NAME or ("introuvable (index a regler)")
   return "MIDI IN: " .. ins .. " | OUT: " .. outs
 end
 
 function VL.run_gfx_test()
-  lp_refresh_devices()
+  LPF.lp_refresh_devices()
   -- Taille de référence (design)
   local REF_CELL = 56
   local REF_OX   = 12
@@ -4337,7 +4340,7 @@ function VL.run_gfx_test()
   local sticky_on, sticky_pad, was_pressed = false, nil, false
 
   VL._test_pad_colors = pads
-  hw_load()
+  LPF.hw_load()
   local hw = {}
   VL._hw_colors = hw
   VL.attach_profile({ caps = { native_blink = false },
@@ -4350,12 +4353,12 @@ function VL.run_gfx_test()
       -- materiel : luminosite par etat (curseur IDLE) + saturation ; rangee du haut / colonne droite = blanc, l'etat se lit a l'intensite
       local hr, hg_, hb
       local ctrl = is_ctrl_pad(row, col)
-      local kh = hw_bright(led, ctrl)
+      local kh = LPF.hw_bright(led, ctrl)
       if ctrl and not CTRL_RGB then
         local v = 255 * kh
         hr, hg_, hb = v, v, v
       else
-        local sr, sg, sb = hw_saturate(r, g, b)
+        local sr, sg, sb = LPF.hw_saturate(r, g, b)
         hr, hg_, hb = sr * kh, sg * kh, sb * kh
       end
       hr, hg_, hb = math.floor(hr + 0.5), math.floor(hg_ + 0.5), math.floor(hb + 0.5)
@@ -4533,10 +4536,10 @@ local HOLD = {
       local mx, my = gfx.mouse_x, gfx.mouse_y
       if mx >= INBTN.x and mx <= INBTN.x + INBTN.w and my >= INBTN.y and my <= INBTN.y + INBTN.h then
         gfx.x, gfx.y = INBTN.x, INBTN.y
-        lp_choose_device(false)
+        LPF.lp_choose_device(false)
       elseif mx >= OUTBTN.x and mx <= OUTBTN.x + OUTBTN.w and my >= OUTBTN.y and my <= OUTBTN.y + OUTBTN.h then
         gfx.x, gfx.y = OUTBTN.x, OUTBTN.y
-        lp_choose_device(true)
+        LPF.lp_choose_device(true)
       elseif in_rect(SL_IDLE, mx, my) then drag_slider = "idle"
       elseif in_rect(SL_SAT, mx, my) then drag_slider = "sat"
       elseif mx >= LAYERBTN.x and mx <= LAYERBTN.x + LAYERBTN.w
@@ -4610,7 +4613,7 @@ local HOLD = {
         hw_dirty = true
       else
         drag_slider = nil
-        hw_save()
+        LPF.hw_save()
       end
     end
     if hw_dirty and (t - hw_last_push) > 0.08 then
@@ -4799,7 +4802,7 @@ end
 function VL.reset()
   S = new_state()
   VL.S = S
-  init_presets()
+  LPF.init_presets()
   VL.last = {}
   for k in pairs(down) do down[k] = nil end
   log("info", "Virtual Launchpad %s initialise", VL.VERSION)
