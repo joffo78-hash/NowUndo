@@ -1,7 +1,11 @@
 -- @description NowUndo Twister Control - Multi pages virtuelles
--- @version 3.2
+-- @version 3.3
 -- @about
---   Page 1 In/Out | 2 Pitch/Speed | 3 Vol/Feedback | 4 Slicer | 5 Cloud | 6 Effets (FX Router)
+--   Page 1 Vol/Feedback | 2 Pitch/Speed | 3 In/Out | 4 Slicer | 5 Cloud | 6 Effets (FX Router)
+--   (v3.3 : pages 1 et 3 permutees ; chaque page garde sa couleur : Vol/Feedback rouge, In/Out vert.
+--    En interne les numeros logiques restent 1 = In/Out, 3 = Vol/Feedback : seul le bouton qui les appelle change.)
+--   Page 5 Cloud v2 (NowUndo V3.21) : Density | Agitation | Spread | PSpread / Pos | Rate | Depth | LFO /
+--     Size | Diffuse | Mix | Freeze (push) / Width (= Stereo de la section Output)
 --   Page 6 : colonne = slot 1..4 de la source courante du FX Router, ligne = parametre 1..4 ; push = valeur par defaut.
 --   Selection via Launchpad fighter page (ExtState nowundo_vl/fighter_page)
 --   Mode A groupes : deltas relatifs pour pages 1-3
@@ -125,9 +129,13 @@ local function group_peers(i)
   return t
 end
 
+-- v3.3 : bouton/page Launchpad 1 = Vol/Feedback, 3 = In/Out (permutation symetrique). Les numeros LOGIQUES utilises dans
+-- tout le script (couleurs, contenus, maps aux) restent 1 = In/Out, 3 = Vol/Feedback.
+local PAGE_SLOT_SWAP = { [1] = 3, [3] = 1 }
 local function fighter_page()
   local p = tonumber(reaper.GetExtState(VL_SEC, "fighter_page")) or 1
-  return math.max(1, math.min(6, math.floor(p)))
+  p = math.max(1, math.min(6, math.floor(p)))
+  return PAGE_SLOT_SWAP[p] or p
 end
 
 local function sel_looper()
@@ -269,6 +277,7 @@ local PID = {
   cloud_density = 26, cloud_chaos = 27, cloud_spread = 28,
   slicer_pitch = 34, cloud_pitch = 35, cloud_mix = 36,
   cloud_pos = 38, cloud_lfo_rate = 40, cloud_lfo_depth = 41,
+  cloud_size = 62, cloud_freeze = 63, cloud_diffuse = 64, stereo_width = 21,   -- NowUndo V3.21 (Cloud v2)
   -- lecture seule / futurs (offsets feedback)
   trans_sens = 11, trans_hold = 12, grain_fade = 13,
   slicer_mode = 14, slicer_sub = 15, slice_decay = 16,
@@ -583,8 +592,14 @@ local function make_slicer_page()
 end
 
 local function make_cloud_page()
+  -- NowUndo V3.21 (Cloud v2). Lignes A(haut) .. D(bas), colonnes 1..4 :
+  --   A : Density | Agitation | Spread | PSpread
+  --   B : Pos (push = Link/Free) | Rate | Depth | LFO
+  --   C : Size (log) | Diffuse | Mix | Freeze (push = On/Off)
+  --   D : Width (= Stereo de la section Output) | - | - | -
+  -- Push : valeur par defaut, sauf Pos et Freeze (bascules).
   local cells = {}
-  local function cell(r, c, label, off, id, lo, hi, def)
+  local function cell(r, c, label, off, id, lo, hi, def, disp)
     cells[r .. "," .. c] = {
       label = label, pid = id,
       get = function() return tgt_get(off) end,
@@ -593,28 +608,55 @@ local function make_cloud_page()
       from_n = function(n) return n_to_lin(n, lo, hi) end,
       def = def, write_id = id,
       push = function() if id then tgt_set_param(id, def) end end,
+      disp = disp,
     }
   end
-  cell(0, 0, "Density", 26, PID.cloud_density, 0, 1, 0.5)
-  cell(0, 1, "Chaos", 27, PID.cloud_chaos, 0, 1, 0)
-  cell(0, 2, "Spread", 28, PID.cloud_spread, 0, 1, 0.1)
-  cell(0, 3, "PSpread", 35, PID.cloud_pitch, 0, 100, 0)
-  cell(1, 0, "Pos", 38, PID.cloud_pos, 0, 100, 50)
+  local function pct(v) return string.format("%.0f%%", v * 100) end
+  cell(0, 0, "Density", 26, PID.cloud_density, 0, 1, 0.5, pct)
+  cell(0, 1, "Agitation", 27, PID.cloud_chaos, 0, 1, 0, pct)
+  cell(0, 2, "Spread", 28, PID.cloud_spread, 0, 1, 0.1, pct)
+  cell(0, 3, "PSpread", 35, PID.cloud_pitch, 0, 100, 0, function(v) return string.format("%.0f%%", v) end)
+  cell(1, 0, "Pos", 38, PID.cloud_pos, 0, 100, 50, function(v) return string.format("%.0f%%", v) end)
   cells["1,0"].push = function()
     local cur = tgt_get(37)
     tgt_set_param(37, cur > 0.5 and 0 or 1)
   end
-  cell(1, 1, "Rate", 40, PID.cloud_lfo_rate, 0.1, 4, 1)
-  cell(1, 2, "Depth", 41, PID.cloud_lfo_depth, 0, 100, 0)
+  cell(1, 1, "Rate", 40, PID.cloud_lfo_rate, 0.1, 4, 1, function(v) return string.format("%.1fHz", v) end)
+  cell(1, 2, "Depth", 41, PID.cloud_lfo_depth, 0, 100, 0, function(v) return string.format("%.0f%%", v) end)
   cells["1,3"] = {
-    label = "LFO",
+    label = "LFO", pid = 39,
     get = function() return tgt_get(39) end,
-    set = function(_, v) tgt_set_param(39, clamp(v, 0, 2)) end,
+    set = function(_, v) tgt_set_param(39, clamp(math.floor(v + 0.5), 0, 2)) end,
     to_n = function(v) return clamp(v / 2, 0, 1) end,
     from_n = function(n) return n * 2 end,
     def = 0,
     push = function() tgt_set_param(39, 0) end,
+    disp = function(v) local k = math.floor(v + 0.5); return k == 0 and "Sine" or (k == 1 and "Saw" or "InvSaw") end,
   }
+  -- Size : 1 .. 1000 ms en echelle log (meme course que le bouton du looper)
+  cells["2,0"] = {
+    label = "Size", pid = PID.cloud_size,
+    get = function() return tgt_get(190) end,
+    set = function(_, v) tgt_set_param(PID.cloud_size, clamp(v, 1, 1000)) end,
+    to_n = function(v) return clamp(math.log(math.max(v, 1)) / math.log(1000), 0, 1) end,
+    from_n = function(n) return clamp(1000 ^ clamp(n, 0, 1), 1, 1000) end,
+    def = 80,
+    push = function() tgt_set_param(PID.cloud_size, 80) end,
+    disp = function(v) if v >= 100 then return string.format("%.0fms", v) end return string.format("%.1fms", v) end,
+  }
+  cell(2, 1, "Diffuse", 192, PID.cloud_diffuse, 0, 1, 0, pct)
+  cell(2, 2, "Mix", 36, PID.cloud_mix, 0, 1, 1, pct)
+  cells["2,3"] = {
+    label = "Freeze", pid = PID.cloud_freeze,
+    get = function() return tgt_get(191) end,
+    set = function() end,                                   -- le knob ne fait rien : seul le push bascule
+    to_n = function(v) return v > 0.5 and 1 or 0 end,       -- anneau plein = ON
+    from_n = function(n) return n end,
+    def = 0,
+    push = function() tgt_set_param(PID.cloud_freeze, tgt_get(191) > 0.5 and 0 or 1) end,
+    disp = function(v) return v > 0.5 and "ON" or "OFF" end,
+  }
+  cell(3, 0, "Width", 21, PID.stereo_width, 0, 1, 0, pct)
   return cells
 end
 
@@ -1040,7 +1082,7 @@ end
 -- Init / loop
 --------------------------------------------------------------------------
 local HB_EXT = "NowUndo_Twister"
-local SCRIPT_VERSION = "3.2-fx-page"   -- change a chaque version : la nouvelle instance remplace l'ancienne
+local SCRIPT_VERSION = "3.3-cloud2-swap13"   -- change a chaque version : la nouvelle instance remplace l'ancienne
 local ui_open = true
 
 function init()
@@ -1186,18 +1228,13 @@ local function read_knob_norm(page, idx, now_t)
     if not i or not looper_alive(i, now_t) then return 0 end
     return clamp(spec.to_n(spec.get()), 0, 1)
   elseif page == 5 then
-    local map = {
-      [0]={26,0,1},[1]={27,0,1},[2]={28,0,1},[3]={35,0,100},
-      [4]={38,0,100},[5]={40,0.1,4},[6]={41,0,100},[7]={39,0,2},
-    }
-    local sp = map[idx]
-    if not sp then return 0 end
+    -- v3.3 : meme definition que la fenetre (PAGES[5]) ; idx = ligne*4 + colonne
+    local spec = PAGES[5][math.floor(idx / 4) .. "," .. (idx % 4)]
+    if not spec then return 0 end
     local tg = page_targets()
     local i = tg[1]
     if not i or not looper_alive(i, now_t) then return 0 end
-    local b = gbase(i, active_part(i))
-    local v = reaper.gmem_read(b + sp[1]) or sp[2]
-    return clamp((v - sp[2]) / math.max(1e-9, sp[3] - sp[2]), 0, 1)
+    return clamp(spec.to_n(spec.get()), 0, 1)
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     return clamp(fx_get_param_norm(s, p) or 0, 0, 1)
@@ -1493,16 +1530,9 @@ local function midi_apply_knob(idx, norm, page)
     if spec.inactive and spec.inactive() then return end  -- knob desactive (mode / source)
     spec.set(nil, spec.from_n(norm))
   elseif page == 5 then
-    local map = {
-      [0]={26,0,1},[1]={27,0,1},[2]={28,0,1},[3]={35,0,100},
-      [4]={38,0,100},[5]={40,0.1,4},[6]={41,0,100},[7]={39,0,2},
-    }
-    local sp = map[idx]
-    if not sp then return end
-    local v = sp[2] + norm * (sp[3] - sp[2])
-    for _, i in ipairs(page_targets()) do
-      if looper_alive(i, now_t) then write_param(i, sp[1], v) end
-    end
+    local spec = PAGES[5][math.floor(idx / 4) .. "," .. (idx % 4)]
+    if not spec then return end
+    spec.set(nil, spec.from_n(norm))
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     fx_set_param(s, p, norm)
@@ -1549,10 +1579,10 @@ local function midi_apply_btn(idx, page)
     for _, peer in ipairs(group_peers(looper)) do
       if looper_alive(peer, now_t) then write_param(peer, pid, def) end
     end
-  elseif page == 4 then
-    local spec = PAGES[4][math.floor(idx / 4) .. "," .. (idx % 4)]
+  elseif page == 4 or page == 5 then
+    local spec = PAGES[page][math.floor(idx / 4) .. "," .. (idx % 4)]
     if spec and spec.inactive and spec.inactive() then return end
-    if spec and spec.push then spec.push() end
+    if spec and spec.push then spec.push() end   -- v3.3 : push actif aussi sur la page Cloud
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     fx_reset_param(s, p)
@@ -1865,7 +1895,7 @@ function main()
   gfx.setfont(1, "Arial", math.floor(11 * s), "b")
   gfx.set(col[1], col[2], col[3], 1)
   gfx.x, gfx.y = 6 * s, 4 * s
-  gfx.drawstr(string.format("TWISTER  P%d %s", page, PAGE_NAME[page] or ""))
+  gfx.drawstr(string.format("TWISTER  P%d %s", PAGE_SLOT_SWAP[page] or page, PAGE_NAME[page] or ""))   -- numero affiche = bouton Launchpad
   gfx.setfont(1, "Arial", math.floor(8 * s))
   gfx.set(0.65, 0.65, 0.7, 1)
   gfx.x, gfx.y = 6 * s, 16 * s

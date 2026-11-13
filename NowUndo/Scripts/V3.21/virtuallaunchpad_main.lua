@@ -2140,9 +2140,9 @@ end
 
 
 -- Twister pages (rangee 2 apres decalage statut)
-PAD_LABEL[1]["2,1"] = "Twister 1 In/Out"
+PAD_LABEL[1]["2,1"] = "Twister 1 Vol/Feedback"   -- pages 1 et 3 permutees (Twister v3.3)
 PAD_LABEL[1]["2,2"] = "Twister 2 Pitch/Speed"
-PAD_LABEL[1]["2,3"] = "Twister 3 Vol/Feedback"
+PAD_LABEL[1]["2,3"] = "Twister 3 In/Out"
 PAD_LABEL[1]["2,4"] = "Twister 4 Slicer"
 PAD_LABEL[1]["2,5"] = "Twister 5 Cloud"
 PAD_LABEL[1]["2,6"] = "Twister 6 Effects"

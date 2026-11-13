@@ -1947,6 +1947,9 @@ loop(3,
     gmem[gmem_base + 39] = cloud_lfo_shape;
     gmem[gmem_base + 40] = cloud_lfo_rate;
     gmem[gmem_base + 41] = cloud_lfo_depth;
+    gmem[gmem_base + 190] = cloud_size;      // V3.21 : Cloud v2 (lu par le Twister)
+    gmem[gmem_base + 191] = cloud_freeze;
+    gmem[gmem_base + 192] = cloud_diffuse;
     gmem[gmem_base + 42] = active_part;
     gmem[gmem_base + 163] = pending_part_switch;
     gmem[gmem_base + 164] = target_part;
