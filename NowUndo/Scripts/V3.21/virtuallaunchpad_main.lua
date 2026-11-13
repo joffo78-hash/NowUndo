@@ -2925,7 +2925,7 @@ local last_rel = {}      -- dernier relachement court par pad (detection du doub
 -- Maintien virtuel (bouton HOLD de la fenetre) ou clavier (Ctrl) : meme effet tant qu'ils sont actifs.
 -- Par defaut ils editent le groupe ACTIF ; un tap sur un pad GROUP n (meme vide) choisit le groupe edite (edit_group).
 local vhold, ctrl_hold, edit_group = false, false, nil
-function LPF.check_edit_end() if not (vhold or ctrl_hold) then edit_group = nil end end   -- fin du maintien = fin de l'edition
+function LPF.check_edit_end() if not (vhold or ctrl_hold) then edit_group = nil; VL._ctrl_sess = nil end end   -- fin du maintien = fin de l'edition (et du geste Ctrl)
 function VL.set_virtual_hold(on) vhold = on and true or false; LPF.check_edit_end() end
 function VL.set_ctrl_hold(on) ctrl_hold = on and true or false; LPF.check_edit_end() end
 function VL.ctrl_held() return ctrl_hold end
@@ -3090,13 +3090,19 @@ function VL.on_pad_pressed(row, col, t)
       if d then d.consumed = true end
     end
   end
-  -- Ctrl (souris) / HOLD SANS groupe actif : un clic sur un looper libre le met SEUL dans un groupe libre, qui devient le
-  -- groupe actif ; tant que Ctrl reste tenu, les clics suivants ajoutent / retirent des loopers de ce groupe.
-  -- (looper deja groupe : il est simplement selectionne, son groupe devient le groupe actif.)
-  if row == 0 and col >= 1 and col <= NLOOP and (ctrl_hold or vhold) and not held_group() then
-    local g = ((S.group_of[col] or 0) > 0) and 0 or VL.first_empty_group()
-    if g then
-      if g > 0 then VL.assign_group(col, g); log("info", "groupe %d cree avec L%d seul (Ctrl)", g, col) end
+  -- Ctrl (souris) / HOLD = geste de groupe, comme maintenir un looper sur le Launchpad. Le 1er looper clique depuis
+  -- l'appui sur Ctrl decide : libre -> NOUVEAU groupe (lui seul au depart) ; deja groupe -> on edite son groupe.
+  -- Les clics suivants (Ctrl toujours tenu) ajoutent / retirent des loopers de ce groupe. Ctrl relache = geste termine.
+  -- (Un pad GROUP maintenu, ou un groupe choisi par HOLD + GROUP, garde la priorite.)
+  if row == 0 and col >= 1 and col <= NLOOP and (ctrl_hold or vhold) and not edit_group and not VL._ctrl_sess then
+    local _, gkey = held_group()
+    if not gkey then
+      local g = S.group_of[col] or 0
+      if g == 0 then
+        g = VL.first_empty_group() or 0
+        if g > 0 then VL.assign_group(col, g); log("info", "Ctrl : groupe %d cree avec L%d", g, col) end
+      end
+      VL._ctrl_sess = { g = g }
       VL.select_looper(col)
       VL._held_loopers[col] = nil
       down[key] = { t = t, b = b, short_done = true, long_fired = true, consumed = true }
@@ -3106,6 +3112,7 @@ function VL.on_pad_pressed(row, col, t)
   end
   if row == 0 then                                    -- un GROUP n est maintenu : la rangee du haut edite ses membres
     local g, gkey = held_group()
+    if not gkey and not edit_group and VL._ctrl_sess and VL._ctrl_sess.g > 0 then g = VL._ctrl_sess.g end   -- geste Ctrl en cours
     if g then pnt = membership_pnt(col, g); if gkey then down[gkey].consumed = true end end
   end
   if pnt then                                         -- cellule de matrice / looper-membre : geste de peinture
