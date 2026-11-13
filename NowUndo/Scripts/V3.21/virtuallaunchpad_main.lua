@@ -3090,6 +3090,20 @@ function VL.on_pad_pressed(row, col, t)
       if d then d.consumed = true end
     end
   end
+  -- Ctrl (souris) / HOLD SANS groupe actif : un clic sur un looper libre le met SEUL dans un groupe libre, qui devient le
+  -- groupe actif ; tant que Ctrl reste tenu, les clics suivants ajoutent / retirent des loopers de ce groupe.
+  -- (looper deja groupe : il est simplement selectionne, son groupe devient le groupe actif.)
+  if row == 0 and col >= 1 and col <= NLOOP and (ctrl_hold or vhold) and not held_group() then
+    local g = ((S.group_of[col] or 0) > 0) and 0 or VL.first_empty_group()
+    if g then
+      if g > 0 then VL.assign_group(col, g); log("info", "groupe %d cree avec L%d seul (Ctrl)", g, col) end
+      VL.select_looper(col)
+      VL._held_loopers[col] = nil
+      down[key] = { t = t, b = b, short_done = true, long_fired = true, consumed = true }
+      VL.sync_out()
+      return
+    end
+  end
   if row == 0 then                                    -- un GROUP n est maintenu : la rangee du haut edite ses membres
     local g, gkey = held_group()
     if g then pnt = membership_pnt(col, g); if gkey then down[gkey].consumed = true end end
