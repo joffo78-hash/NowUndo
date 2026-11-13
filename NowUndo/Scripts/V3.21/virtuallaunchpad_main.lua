@@ -1910,10 +1910,11 @@ end
 -- NAVIGATION AUTO du Twister : une action du Launchpad amene le Twister sur la page utile.
 -- Valeur = BOUTON de page Twister (v3.3 : 1 Vol/Feedback, 2 Pitch/Speed, 3 In/Out, 4 Slicer, 5 Cloud, 6 Effets).
 -- Slicer / Cloud : seulement a l'ACTIVATION (couper le mode ne change pas de page).
-local AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,
-                  rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
-local function auto_twister(action, targets)
-  local pg = AUTO_TW[action]
+-- (champs de VL et non locales : le chunk principal est a la limite Lua de 200 variables locales)
+VL.AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,
+               rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
+function VL.auto_twister(action, targets)
+  local pg = VL.AUTO_TW[action]
   if not pg or VL.mirror_mode then return end
   local def = ACTIONS[action]
   if def and def.kind == "toggle" and (action == "slicer" or action == "cloud") and toggle_on(def.key, targets) then return end
@@ -1923,7 +1924,7 @@ end
 function VL.trigger(action, args, targets)    -- targets : cibles explicites (couches), sinon looper / groupe actif
   if pedal_capture_action(action, args) then return end
   targets = targets or VL.targets()
-  auto_twister(action, targets)
+  VL.auto_twister(action, targets)
   if S.launch then arm(action, args, targets) else exec(action, args, targets) end
 end
 
