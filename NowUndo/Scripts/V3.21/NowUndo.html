@@ -401,7 +401,13 @@ html, body {
     if (!str) return;
     var m = {};
     str.split(";").forEach(function (pair) { var kv = pair.split("="); if (kv[0]) m[kv[0]] = kv[1]; });
-    meta.page = parseInt(m.page) || 1;
+    var np = parseInt(m.page) || 1;
+    if (np !== meta.page) {   // la page change sans arret : deux scripts Launchpad publient chacun la leur
+      var tnow = Date.now();
+      pageFlips = pageFlips.filter(function (x) { return tnow - x < 3000; }); pageFlips.push(tnow);
+      if (pageFlips.length >= 5) dualUntil = tnow + 6000;
+    }
+    meta.page = np;
     meta.layer = m.layer || "fx";
     meta.holdGroup = parseInt(m.hold) || 0;
     if (m.layers) {
@@ -457,11 +463,14 @@ html, body {
   }
   setInterval(flushCmdQueue, 30);
   function queueCmd(cmd) { cmdPend.push([++cmdSeq, cmd, Date.now()]); cmdDirty = true; flushCmdQueue(); }
+  var pageFlips = [], dualUntil = 0;
   setInterval(function () {
     if (holdOn) return;
-    helpEl.style.color = cmdLegacy ? "#f39c12" : "";
-    helpEl.textContent = cmdLegacy ? "Launchpad ancienne version : remplacez virtuallaunchpad_main.lua puis relancez-le" : "";
-  }, 1000);
+    var dual = Date.now() < dualUntil;
+    helpEl.style.color = (cmdLegacy || dual) ? "#f39c12" : "";
+    helpEl.textContent = dual ? "DEUX scripts Launchpad tournent (la page alterne) : fermez virtual_launchpad_web.lua ou l'ancienne copie du Launchpad"
+      : cmdLegacy ? "Launchpad ancienne version : remplacez virtuallaunchpad_main.lua puis relancez-le" : "";
+  }, 500);
 
   function onPadDown(row, col) {
     var key = row + "," + col;
