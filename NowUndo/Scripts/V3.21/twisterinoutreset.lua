@@ -712,6 +712,9 @@ CU_KNOBS = {
   { "cl_diff",   "Cloud Diffuse",      "cloud",  64, 192, 0,     1,    0 },
   { "cl_lfo_r",  "Cloud LFO Rate",     "cloud",  40, 40,  0.1,   4,    1 },
   { "cl_lfo_d",  "Cloud LFO Depth",    "cloud",  41, 41,  0,     100,  0 },
+  -- Effets (FX Router) : fonctions speciales, executees a part (pas de parametre JSFX)
+  { "fx_type",   "Effet du slot (type)", "fx" },
+  { "fx_src",    "Source FX (Looper / IN1-8)", "fx" },
 }
 CU_BTNS = {
   { "rec",        "Rec / Overdub",      "play",   1 },
@@ -747,10 +750,12 @@ CU_BTNS = {
   { "cloud",      "Cloud on/off",       "cloud",  7 },
   { "cl_freeze",  "Cloud Freeze",       "cloud",  nil, nil, 63, "tog", 191 },
   { "cl_posmode", "Cloud Pos Link/Free","cloud",  nil, nil, 37, "tog", 37 },
+  { "fx_src_tog", "Source FX Entree/Looper", "fx" },
+  { "fx_src_next","Source FX suivante", "fx" },
   { "knob_def",   "Defaut du knob",     "" },
 }
 CU_FAM_NAME = { { "play", "Lecture / Sortie / Transport" }, { "pitch", "Pitch / Speed / Grain" },
-                { "inout", "In / Out / Rec" }, { "slicer", "Slicer" }, { "cloud", "Cloud" }, { "", "Autre" } }
+                { "inout", "In / Out / Rec" }, { "slicer", "Slicer" }, { "cloud", "Cloud" }, { "fx", "Effets" }, { "", "Autre" } }
 
 -- ===== v3.4 : moteur des pages 7 (Custom) et 8 (Display) — tout dans la table CU (pas de nouvelles locales) =====
 local CU = { K = {}, B = {}, raw = nil, cache = {}, t = -10, recolor = false }
@@ -758,7 +763,7 @@ for _, k in ipairs(CU_KNOBS) do CU.K[k[1]] = k end
 for _, b in ipairs(CU_BTNS) do CU.B[b[1]] = b end
 -- famille -> { r, g, b (fenetre), valeur couleur du vrai Twister (meme echelle que TW_PAGE_COLOR) }
 CU.FAM = { play = {0.90, 0.25, 0.25, 84}, pitch = {0.95, 0.40, 0.70, 108}, inout = {0.20, 0.75, 0.40, 50},
-           slicer = {0.95, 0.85, 0.20, 63}, cloud = {0.25, 0.55, 0.95, 126} }
+           slicer = {0.95, 0.85, 0.20, 63}, cloud = {0.25, 0.55, 0.95, 126}, fx = {1.00, 0.18, 0.63, 100} }
 CU.FRAC = { [0] = "Free", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16", "1/32", "1/64" }
 function CU.n_of(k, v)
   local lo, hi, c = k[6], k[7], k[9]
@@ -830,7 +835,19 @@ function CU.disp(k, s)
   return string.format("%.2f", v)
 end
 -- Regle de groupe : les push agissent sur le looper selectionne ET les membres de son groupe (chacun selon son etat)
+-- Commande vers le Launchpad (file NowUndo_VLcmd) : source FX
+function CU.vlq(name)
+  local q = reaper.GetExtState("NowUndo_VLcmd", "q")
+  reaper.SetExtState("NowUndo_VLcmd", "q", q .. string.format("%s\t%.3f\n", name, reaper.time_precise()), false)
+end
+-- Source FX publiee par le Launchpad : 0 = looper, 1..8 = entree
+function CU.src_k()
+  local n = tonumber(reaper.GetExtState(VL_SEC, "fx_source")) or 9
+  return (n >= 1 and n <= 8) and math.floor(n) or 0
+end
 function CU.fire(bid, kid)
+  if bid == "fx_src_tog" then CU.vlq("fxsrc_tog") return end
+  if bid == "fx_src_next" then CU.vlq("fxsrc_next") return end
   local now = reaper.time_precise()
   for _, s in ipairs(page_targets()) do
     if looper_alive(s, now) then CU.fire1(bid, kid, s) end
@@ -841,7 +858,7 @@ function CU.fire1(bid, kid, s)
   if not b then return end
   if bid == "knob_def" then
     local k = kid and CU.K[kid]
-    if k then
+    if k and (k[11] or k[4]) then
       if k[11] then CU.set_n(k, s, (k[11] == "in") and 0 or 1) else write_param(s, k[4], k[8]) end
     end
     return
@@ -869,7 +886,34 @@ function CU.cells()
   for idx = 0, 15 do
     local kid, bid = asg["k" .. idx], asg["b" .. idx]
     local k, b = kid and CU.K[kid], bid and CU.B[bid]
-    if k or b then
+    local sp = k and (kid == "fx_type" or kid == "fx_src")
+    if sp then
+      local fam = CU.FAM.fx
+      cells[math.floor(idx / 4) .. "," .. (idx % 4)] = {
+        label = k[2], col = { fam[1], fam[2], fam[3] }, twc = fam[4],
+        get = function()
+          if kid == "fx_src" then
+            if CU.src_pend and reaper.time_precise() - (CU.src_t or 0) > 0.5 then CU.src_pend = nil end
+            return (CU.src_pend or CU.src_k()) / 8
+          end
+          return CU.fx_pos and CU.fx_pos() or 0
+        end,
+        set = function(_, n)
+          if kid == "fx_src" then
+            local kk = math.floor(clamp(n, 0, 1) * 8 + 0.5)
+            if kk ~= (CU.src_pend or CU.src_k()) then CU.src_pend, CU.src_t = kk, reaper.time_precise(); CU.vlq("fxsrc_set_" .. kk) end
+          elseif CU.fx_move then CU.fx_move(clamp(n, 0, 1), true) end
+        end,
+        to_n = function(n) return n end, from_n = function(n) return n end,
+        push = function() CU.fire(bid or (kid == "fx_src" and "fx_src_tog" or "knob_def"), kid) end,
+        disp = function()
+          if kid == "fx_src" then local kk = CU.src_pend or CU.src_k(); return kk == 0 and "Looper" or ("IN" .. kk) end
+          return CU.fx_name and CU.fx_name() or ""
+        end,
+      }
+      k = nil
+    end
+    if (k or b) and not sp then
       local fam = CU.FAM[(k and k[3]) or (b and b[3]) or ""]
       cells[math.floor(idx / 4) .. "," .. (idx % 4)] = {
         label = k and k[2] or b[2], col = fam and { fam[1], fam[2], fam[3] } or nil, twc = fam and fam[4] or nil,
@@ -1242,6 +1286,19 @@ local function fx_select_move(delta, absolute)
   fx_sel.slot, fx_sel.pending, fx_sel.t = s, clamp(target, 0, #fx_lib), reaper.time_precise()
 end
 
+-- Page Custom 7 : knob "Effet du slot" (position dans la bibliotheque, nom affiche)
+CU.fx_move = fx_select_move
+function CU.fx_idx()
+  fx_ensure_lib()
+  local s = fx_slot_sel()
+  return (fx_sel.pending and fx_sel.slot == s) and fx_sel.pending or fx_current_index(s)
+end
+function CU.fx_pos() return #fx_lib > 0 and CU.fx_idx() / #fx_lib or 0 end
+function CU.fx_name()
+  local i = CU.fx_idx()
+  local e = i > 0 and fx_lib[i] or nil
+  return e and tostring(e.name or ""):sub(1, 18) or "(aucun)"
+end
 local function fx_poll()
   -- commandes envoyees par le script Learn
   local st = reaper.GetExtState(FX_EXT, "step")
@@ -2207,7 +2264,7 @@ function CU.web_extra_cmd(op, a)
     if now - hb < 2 then
       -- le Launchpad tourne : c'est lui qui bascule l'effet (son etat et ses LED restent justes)
       local q = reaper.GetExtState("NowUndo_VLcmd", "q")
-      reaper.SetExtState("NowUndo_VLcmd", "q", q .. string.format("%s_%d_%d_tog\t%.3f\n", st.is_looper and "fx" or "fxin", id, a, now), false)
+      reaper.SetExtState("NowUndo_VLcmd", "q", q .. string.format("%s_%d_%d_tog\t%.3f\n", st.is_looper and "fxg" or "fxin", id, a, now), false)
     else
       local sl = st.slots[a]
       if st.tr and sl and sl.cidx then
