@@ -2525,7 +2525,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       cl_timer < 1 ? cl_timer = 1;
     );
     // rendu
-    cl_out_l = 0; cl_out_r = 0; cl_act = 0; cl_ws = eff_start; cl_wl = max(16, eff_end - eff_start); gi = 0;
+    cl_out_l = 0; cl_out_r = 0; cl_act = 0; cl_W = 0; cl_ws = eff_start; cl_wl = max(16, eff_end - eff_start); gi = 0;
     loop(cl_max,
       g_base = cl_mem + gi * cl_stride;
       g_base[2] ? (
@@ -2545,7 +2545,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
             g_base[13] += cl_c * (cl_r - g_base[13]); g_base[14] += cl_c * (g_base[13] - g_base[14]); cl_r = g_base[14];
           );
           abs(g_base[4]) > 0.0001 ? ( cl_m = (cl_l + cl_r) * 0.5; cl_l = cl_m * g_base[6]; cl_r = cl_m * g_base[7]; );
-          cl_out_l += cl_l * cl_w; cl_out_r += cl_r * cl_w; cl_act += 1;
+          cl_out_l += cl_l * cl_w; cl_out_r += cl_r * cl_w; cl_act += 1; cl_W += cl_w;
           g_base[1] = cl_ph + 1;
         );
       );
@@ -2553,7 +2553,14 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     );
     // niveau constant : normalisation par la densite reglee (energie de N grains), jamais par l'instant -> pas de pompage,
     // et un grain isole garde son enveloppe (la 3.20 le rendait rectangulaire = clic)
-    cl_g = 0.8 / max(1, sqrt(cl_N * 0.375));   // 0.8 : ~2 dB de marge (en Poisson, des grains se cumulent ponctuellement)
+    // V3.21b : normalisation par le recouvrement REEL des fenetres (W = somme des enveloppes actives), seulement quand W > 1
+    // (un grain isole garde son enveloppe). Exposant selon la ressemblance des grains : 0.75 (proche de la moyenne d'amplitude) quand les
+    // grains relisent presque le meme endroit (sinon ils s'additionnent en phase et saturent : craquements sur source forte),
+    // 0.5 = puissance quand ils sont disperses / desaccordes (sinon le nuage s'eteint). Les fenetres etant lisses, W varie
+    // en douceur : pas de pompage.
+    cl_spr = min(cl_wl * 0.5, srate * 0.005 + (cloud_spread + cl_a * cl_a) * cl_wl * 0.5);
+    cl_dec = max(0, min(1, max((cl_spr / srate - 0.005) / 0.05, cl_a * 2 + (cloud_pitch_spread > 0.01 ? 0.5 : 0))));
+    cl_g = 0.9 / (max(1, cl_W) ^ (0.75 - 0.25 * cl_dec));   // 0.75 : compromis (le jitter de 5 ms decorrele deja les aigus)
     cl_out_l *= cl_g; cl_out_r *= cl_g;
     // diffusion / espace
     (cloud_diffuse > 0.001 || df_on) ? (
