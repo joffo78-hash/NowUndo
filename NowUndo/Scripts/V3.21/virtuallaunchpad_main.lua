@@ -1997,6 +1997,19 @@ function VL.set_fx(kind, id, slot, value)
   return true
 end
 function VL.toggle_fx(kind, id, slot) return VL.set_fx(kind, id, slot, not S.fx[kind][id][slot]) end
+-- NAVIGATION AUTO (geste utilisateur sur un pad d'effet) : effet active -> Twister page Effets sur CET effet
+-- (source + slot du FX Router) ; effet desactive -> page Volume. Slot vide : rien.
+function VL.fx_nav(kind, id, slot)
+  if VL.mirror_mode or not S.fx_present[kind][id][slot] then return end
+  if S.fx[kind][id][slot] then
+    S.fx_source = (kind == "input") and id or (NIN + id)
+    VL.publish_fx_source()
+    VL.set_fx_slot(slot)
+    VL.set_fighter_page(6)
+  else
+    VL.set_fighter_page(1)
+  end
+end
 
 function VL.set_fx_present(kind, id, slot, present)     -- feedback backend : un slot vide ne peut pas etre actif
   S.fx_present[kind][id][slot] = present and true or false
@@ -2409,6 +2422,7 @@ do
       local kind, id = fx_target()
       local value = not S.fx[kind][id][slot]
       for _, tg in ipairs(fx_targets()) do VL.set_fx(tg[1], tg[2], slot, value) end
+      VL.fx_nav(kind, id, slot)
     end
     local function fx_pad_state()
       local kind, id = fx_target()
@@ -2596,20 +2610,9 @@ VL.register_layer({ id = "fx", name = "Effects", cell = function(row, col)
     if col > NIN then return nil end
     kind, id, slot = "input", col, row
   end
-  local sh = fn(function()
-    VL.toggle_fx(kind, id, slot)
-    -- NAVIGATION AUTO : activer un effet amene le Twister sur la page Effets, sur CET effet (source + slot du FX Router)
-    if VL.mirror_mode then return end
-    if S.fx[kind][id][slot] then
-      S.fx_source = (kind == "input") and id or (NIN + id)
-      VL.publish_fx_source()
-      VL.set_fx_slot(slot)
-      VL.set_fighter_page(6)
-    else
-      VL.set_fighter_page(1)                                         -- effet desactive -> Volume
-    end
-  end)
-  sh.paint = { get = function() return S.fx[kind][id][slot] end, set = function(v) VL.set_fx(kind, id, slot, v) end }
+  local sh = fn(function() VL.toggle_fx(kind, id, slot); VL.fx_nav(kind, id, slot) end)
+  -- l'appui sur un pad de matrice passe par ce "geste de peinture" (pas par fn) : la navigation y est aussi
+  sh.paint = { get = function() return S.fx[kind][id][slot] end, set = function(v) VL.set_fx(kind, id, slot, v); VL.fx_nav(kind, id, slot) end }
   return { short = sh, hex = (row <= 4) and 0x99FF66 or 0xFFFF99,
            state = function()
              if not S.fx_present[kind][id][slot] then return "off" end        -- slot vide : eteint
@@ -3052,6 +3055,7 @@ function VL.on_pad_pressed(row, col, t)
       for _, tg in ipairs(targets) do
         if S.fx_present[tg[1]][tg[2]][slot] then VL.set_fx(tg[1], tg[2], slot, newval) end
       end
+      VL.fx_nav(kind, id, slot)
       VL.sync_out()
       return
     end
@@ -3096,6 +3100,7 @@ function VL.on_pad_released(row, col, t)
       for _, tg in ipairs(d.fx_targets or { { d.fx_kind, d.fx_id } }) do
         if S.fx_present[tg[1]][tg[2]][d.fx_slot] then VL.set_fx(tg[1], tg[2], d.fx_slot, false) end
       end
+      VL.fx_nav(d.fx_kind, d.fx_id, d.fx_slot)
     end
   elseif d.fx_mode_switch then
     -- Le changement de mode a deja ete effectue a l'appui ; rien au relachement.
