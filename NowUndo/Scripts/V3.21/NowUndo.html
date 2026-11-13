@@ -158,6 +158,33 @@ html, body {
 .tw-xbtn.on { color: #111; }
 .tw-xbtn.absent { opacity: .3; cursor: default; }
 .tw-xbtn small { display: block; font-size: 10px; font-weight: 600; letter-spacing: 0; margin-top: 2px; opacity: .85; }
+/* ── Vue Looper ── */
+#lv-sel { display: flex; gap: 4px; padding: 2px 0 8px; flex-shrink: 0; }
+#lv-sel button {
+  flex: 1; border: 2px solid transparent; border-radius: 8px; padding: 8px 0; font-size: 12px; font-weight: 800;
+  color: #fff; cursor: pointer; opacity: .55;
+}
+#lv-sel button.sel { opacity: 1; border-color: #fff; }
+#lv-sel button.dead { opacity: .18; }
+#lv-head { display: flex; align-items: baseline; gap: 10px; padding: 0 2px 6px; flex-shrink: 0; }
+#lv-title { font-size: 16px; font-weight: 800; }
+#lv-state { font-size: 13px; font-weight: 800; padding: 2px 8px; border-radius: 5px; background: #222; }
+#lv-io { margin-left: auto; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#lv-wave { width: 100%; height: 34vh; min-height: 150px; border-radius: 10px; background: #08080a; border: 1px solid #2a2a30; touch-action: none; display: block; flex-shrink: 0; }
+.lv-vu { display: grid; grid-template-columns: 30px 1fr; gap: 4px 8px; align-items: center; padding: 8px 2px 4px; flex-shrink: 0; font-size: 10px; color: var(--muted); }
+.lv-vu .bar { height: 6px; border-radius: 3px; background: #1a1a1f; overflow: hidden; }
+.lv-vu .bar div { height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, #2ecc71 0%, #2ecc71 62%, #f1c40f 80%, #e74c3c 100%); background-size: 100vw 100%; }
+.lv-grp { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 1px; padding: 8px 2px 4px; }
+.lv-btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.lv-btn {
+  border: 1px solid #333; border-radius: 8px; padding: 11px 2px; font-size: 11px; font-weight: 800;
+  background: #1b1b21; color: #aaa; cursor: pointer; letter-spacing: .3px;
+}
+.lv-btn:active { transform: scale(.96); }
+.lv-btn.on { color: #111; }
+.lv-sl { display: grid; grid-template-columns: 86px 1fr 46px; gap: 8px; align-items: center; padding: 6px 2px; font-size: 12px; font-weight: 700; }
+.lv-sl input { width: 100%; accent-color: #e74c3c; }
+.lv-sl span { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
 .tw-placeholder {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 14px; text-align: center; padding: 24px;
@@ -188,7 +215,8 @@ html, body {
   <nav id="tabs">
     <button class="tab active" data-view="launchpad">Launchpad</button>
     <button class="tab" data-view="twister">Twister</button>
-    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.7</span>
+    <button class="tab" data-view="loopers">Loopers</button>
+    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.8</span>
   </nav>
 
   <div id="views">
@@ -230,6 +258,21 @@ html, body {
       </div>
     </section>
 
+    <!-- LOOPERS -->
+    <section class="view" id="view-loopers">
+      <div id="lv-sel"></div>
+      <div id="lv-head"><span id="lv-title">L1</span><span id="lv-state">STOP</span><span id="lv-io"></span></div>
+      <canvas id="lv-wave"></canvas>
+      <div class="lv-vu"><span>IN</span><div class="bar"><div id="lv-vi"></div></div><span>OUT</span><div class="bar"><div id="lv-vo"></div></div></div>
+      <div class="lv-grp">TRANSPORT</div>
+      <div class="lv-btns" id="lv-tr"></div>
+      <div class="lv-grp">ENREGISTREMENT</div>
+      <div class="lv-btns" id="lv-rec"></div>
+      <div class="lv-grp">MODES</div>
+      <div class="lv-btns" id="lv-mod"></div>
+      <div class="lv-grp">SORTIE</div>
+      <div id="lv-sls"></div>
+    </section>
   </div>
 </div>
 <div id="layer-menu"></div>
@@ -721,7 +764,7 @@ html, body {
     updateTwDiag();
   }
   // Diagnostic : la page web (version ci-dessous) recoit-elle les knobs du script Twister ?
-  const WEB_VER = "web-tw 3.7";
+  const WEB_VER = "web-tw 3.8";
   let twKTick = "", twKTickAt = 0, twErr = "";
   function updateTwDiag() {
     const el = document.getElementById("tw-diag");
@@ -776,6 +819,186 @@ html, body {
   }
 
   // ═══════════════════════════════════════════
+  // VUES LOOPER (donnees : bridge NowUndo_Twister_Web.lua -> nowundo_tw/lv_fast, lv_wave)
+  // ═══════════════════════════════════════════
+  const LV_STATE = { 0: ["STOP", "#555"], 1: ["REC", "#e74c3c"], 2: ["PLAY", "#2ecc71"], 3: ["OVERDUB", "#f39c12"],
+                     4: ["REPLACE", "#bdc3c7"], 5: ["AUTO-REP", "#d6b07a"], 6: ["MULTIPLY", "#a55eea"], 7: ["WAIT", "#f39c12"], 8: ["SYNC", "#f39c12"] };
+  const LV_PART = { 1: "MAIN", 2: "CHORUS", 3: "BRIDGE" };
+  const ALPHA = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let lvSel = 0;
+  const lv = [];
+  for (let i = 0; i < 8; i++) lv.push({ alive: false, st: 0, pos: 0, inN: 0, outN: 1, vi: 0, vo: 0, fl: 0, dg: 1, ov: 1, sw: 0, len: 0, part: 1, wave: [] });
+  const lvHold = { io: 0, dg: 0, ov: 0, sw: 0 };
+  const lvSelEl = document.getElementById("lv-sel");
+  for (let i = 0; i < 8; i++) {
+    const b = document.createElement("button");
+    b.textContent = "L" + (i + 1); b.style.background = LOOPER_COL[i];
+    b.addEventListener("click", function () { lvSel = i; lvRender(true); });
+    lvSelEl.appendChild(b);
+  }
+  // [libelle, commande JSFX, etat allume(l)]
+  const LV_TR = [["PLAY/STOP", 3, l => l.st >= 2 && l.st <= 6], ["RESTART", 16], ["REVERSE", 4, l => l.fl & 1], ["PING-PONG", 5, l => l.fl & 2],
+                 ["ONE-SHOT", 18, l => l.fl & 32], ["UNDO", 14], ["REDO", 15], ["CLEAR", 2]];
+  const LV_REC = [["REC / DUB", 1, l => l.st === 1 || l.st === 3 || l.st === 8], ["REPLACE", 9, l => l.st === 4], ["AUTO-REP", 10, l => l.st === 5],
+                  ["MULTIPLY", 13, l => l.st === 6], ["RE-REC", 17], ["AUTO REC", 19, l => (l.fl & 64) || l.st === 7]];
+  const LV_MOD = [["SLICER", 6, l => l.fl & 4, "#F2D933"], ["CLOUD", 7, l => l.fl & 8, "#408CF2"], ["BEAT REPEAT", 33, l => l.fl & 16, "#52C78C"], ["FULL LOOP", 22]];
+  function lvButtons(el, defs, col) {
+    defs.forEach(function (d) {
+      const b = document.createElement("button");
+      b.className = "lv-btn"; b.textContent = d[0];
+      b.addEventListener("click", function () { lvQ.push("CMD," + lvSel + "," + d[1]); });
+      el.appendChild(b); d.el = b; d.col = d[3] || col;
+    });
+  }
+  lvButtons(document.getElementById("lv-tr"), LV_TR, "#e0e0e0");
+  lvButtons(document.getElementById("lv-rec"), LV_REC, "#e74c3c");
+  lvButtons(document.getElementById("lv-mod"), LV_MOD, "#e0e0e0");
+  // Degradation 0..1 (20) | Output 0..2 (22) | Stereo 0..1 (21)
+  const LV_SL = [["Degradation", "dg", 20, 1, v => Math.round(v * 100) + "%"], ["Output", "ov", 22, 2, v => Math.round(v * 100) + "%"],
+                 ["Stereo", "sw", 21, 1, v => Math.round(v * 100) + "%"]];
+  const lvSls = document.getElementById("lv-sls");
+  const lvPend = {};
+  LV_SL.forEach(function (d) {
+    const row = document.createElement("div"); row.className = "lv-sl";
+    row.innerHTML = "<label>" + d[0] + '</label><input type="range" min="0" max="' + d[3] + '" step="0.01"><span></span>';
+    lvSls.appendChild(row);
+    d.inp = row.querySelector("input"); d.val = row.querySelector("span");
+    d.inp.addEventListener("input", function () {
+      const v = parseFloat(d.inp.value); lv[lvSel][d[1]] = v; lvHold[d[1]] = Date.now();
+      d.val.textContent = d[4](v); lvPend["PAR," + lvSel + "," + d[2]] = v;
+    });
+  });
+  // Envoi groupe : web_cmd est un seul emplacement (ecrase a chaque SET), et cote JSFX la commande (+48)
+  // et le reglage (+180) sont aussi des emplacements uniques -> par envoi : 1 commande, 1 reglage, le dernier In/Out.
+  const lvQ = [];
+  setInterval(function () {
+    const out = [];
+    if (lvQ.length) out.push(lvQ.shift());
+    const k = Object.keys(lvPend)[0];
+    if (k !== undefined) { out.push(k + "," + lvPend[k].toFixed(3)); delete lvPend[k]; }
+    if (ioPend) { out.push(ioPend); ioPend = null; }
+    if (out.length) twCmd(out.join(";"));
+  }, 70);
+
+  // Forme d'onde + In / Out au doigt : poignee In, poignee Out, ou deplacement de toute la fenetre
+  const cv = document.getElementById("lv-wave");
+  const cx = cv.getContext("2d");
+  let ioDrag = null, ioPend = null;
+  function cvX(e) { const r = cv.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); }
+  cv.addEventListener("pointerdown", function (e) {
+    const l = lv[lvSel]; if (!l.alive || l.len <= 0) return;
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    const x = cvX(e), dIn = Math.abs(x - l.inN), dOut = Math.abs(x - l.outN);
+    let mode = (dIn < 0.05 && dIn <= dOut) ? "in" : (dOut < 0.05 ? "out" : ((x > l.inN && x < l.outN) ? "mid" : (dIn <= dOut ? "in" : "out")));
+    ioDrag = { mode: mode, x0: x, in0: l.inN, out0: l.outN };
+    if (mode !== "mid") lvMove(e);
+  });
+  function lvMove(e) {
+    if (!ioDrag) return;
+    const l = lv[lvSel], x = cvX(e);
+    let a = ioDrag.in0, b = ioDrag.out0;
+    if (ioDrag.mode === "in") a = Math.min(x, b - 0.005);
+    else if (ioDrag.mode === "out") b = Math.max(x, a + 0.005);
+    else { const w = b - a; a = Math.max(0, Math.min(1 - w, ioDrag.in0 + x - ioDrag.x0)); b = a + w; }
+    l.inN = Math.max(0, a); l.outN = Math.min(1, b); lvHold.io = Date.now();
+    ioPend = "IO," + lvSel + "," + l.inN.toFixed(4) + "," + l.outN.toFixed(4);
+    lvDraw();
+  }
+  cv.addEventListener("pointermove", lvMove);
+  cv.addEventListener("pointerup", function () { ioDrag = null; });
+  cv.addEventListener("pointercancel", function () { ioDrag = null; });
+  cv.addEventListener("dblclick", function () { lvQ.push("CMD," + lvSel + ",22"); });   // double clic = boucle complete
+
+  function lvDraw() {
+    const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx.clearRect(0, 0, W, H);
+    const l = lv[lvSel], col = LOOPER_COL[lvSel];
+    const st = LV_STATE[l.st] || LV_STATE[0];
+    const playing = l.st >= 2 && l.st <= 6;
+    const n = l.wave.length || 0, mid = H / 2;
+    if (n) {
+      const bw = W / n;
+      for (let k = 0; k < n; k++) {
+        const x = k * bw, inside = (k + 0.5) / n >= l.inN && (k + 0.5) / n <= l.outN;
+        const h = Math.max(1, l.wave[k] * H * 0.46);
+        cx.fillStyle = inside ? (playing ? "#2ecc71" : st[1]) : "#3a3a42";
+        if (!inside) cx.globalAlpha = 0.6;
+        cx.fillRect(x + bw * 0.15, mid - h, bw * 0.7, h * 2);
+        cx.globalAlpha = 1;
+      }
+    } else {
+      cx.fillStyle = "#555"; cx.font = "13px sans-serif"; cx.textAlign = "center";
+      cx.fillText(l.alive ? "boucle vide" : "looper absent", W / 2, mid);
+    }
+    if (l.len > 0) {
+      cx.fillStyle = "rgba(0,0,0,.45)";
+      cx.fillRect(0, 0, l.inN * W, H); cx.fillRect(l.outN * W, 0, W - l.outN * W, H);
+      [[l.inN, "#52f08a", "IN"], [l.outN, "#9dffbe", "OUT"]].forEach(function (h) {
+        const x = h[0] * W;
+        cx.fillStyle = h[1]; cx.fillRect(x - 1.5, 0, 3, H);
+        cx.beginPath(); cx.moveTo(x - 9, 0); cx.lineTo(x + 9, 0); cx.lineTo(x, 12); cx.closePath(); cx.fill();
+        cx.beginPath(); cx.moveTo(x - 9, H); cx.lineTo(x + 9, H); cx.lineTo(x, H - 12); cx.closePath(); cx.fill();
+      });
+      const px = Math.max(0, Math.min(100, l.pos)) / 100 * W;
+      cx.fillStyle = "#ff8fd6"; cx.fillRect(px - 1, 0, 2, H);
+    }
+    cx.strokeStyle = col; cx.lineWidth = 3; cx.strokeRect(1.5, 1.5, W - 3, H - 3);
+  }
+  function lvRender(force) {
+    const l = lv[lvSel], st = LV_STATE[l.st] || LV_STATE[0];
+    lvSelEl.querySelectorAll("button").forEach(function (b, i) {
+      b.classList.toggle("sel", i === lvSel); b.classList.toggle("dead", !lv[i].alive);
+    });
+    document.getElementById("lv-title").textContent = "L" + (lvSel + 1) + " · " + (LV_PART[l.part] || "MAIN");
+    const se = document.getElementById("lv-state");
+    se.textContent = l.alive ? st[0] : "ABSENT"; se.style.background = l.alive ? st[1] : "#222"; se.style.color = (l.st === 0 || !l.alive) ? "#ddd" : "#111";
+    document.getElementById("lv-io").textContent = l.len > 0 ? "In " + Math.round(l.inN * 100) + "%  ·  Out " + Math.round(l.outN * 100) + "%" : "";
+    const vu = function (v) { const db = 20 * Math.log10(Math.max(v, 1e-5)); return Math.max(0, Math.min(100, (db + 48) / 48 * 100)) + "%"; };
+    document.getElementById("lv-vi").style.width = vu(l.vi);
+    document.getElementById("lv-vo").style.width = vu(l.vo);
+    [LV_TR, LV_REC, LV_MOD].forEach(function (defs) {
+      defs.forEach(function (d) {
+        const on = d[2] ? !!d[2](l) : false;
+        d.el.classList.toggle("on", on);
+        d.el.style.background = on ? d.col : ""; d.el.style.borderColor = on ? d.col : "";
+      });
+    });
+    LV_SL.forEach(function (d) {
+      if (force || Date.now() - lvHold[d[1]] > 400) { d.inp.value = l[d[1]]; d.val.textContent = d[4](l[d[1]]); }
+    });
+    lvDraw();
+  }
+  function parseLvFast(str) {
+    if (!str) return;
+    const now = Date.now();
+    str.split(";").forEach(function (p) {
+      const b = p.split(","); const i = parseInt(b[0], 10); if (!(i >= 0 && i < 8)) return;
+      const l = lv[i];
+      l.alive = b[1] === "1"; l.st = parseInt(b[2], 10) || 0; l.pos = parseFloat(b[3]) || 0;
+      if (!(i === lvSel && (ioDrag || now - lvHold.io < 400))) { l.inN = parseFloat(b[4]) || 0; l.outN = parseFloat(b[5]); if (isNaN(l.outN)) l.outN = 1; }
+      l.vi = parseFloat(b[6]) || 0; l.vo = parseFloat(b[7]) || 0; l.fl = parseInt(b[8], 10) || 0;
+      if (!(i === lvSel && now - lvHold.dg < 400)) l.dg = parseFloat(b[9]) || 0;
+      if (!(i === lvSel && now - lvHold.ov < 400)) l.ov = parseFloat(b[10]) || 0;
+      if (!(i === lvSel && now - lvHold.sw < 400)) l.sw = parseFloat(b[11]) || 0;
+      l.len = parseFloat(b[12]) || 0; l.part = parseInt(b[13], 10) || 1;
+    });
+    if (document.getElementById("view-loopers").classList.contains("active")) lvRender(false);
+  }
+  function parseLvWave(str) {
+    if (!str) return;
+    str.split("|").forEach(function (w, i) {
+      if (i > 7) return;
+      const a = [];
+      for (let k = 0; k < w.length; k++) a.push(Math.max(0, ALPHA.indexOf(w[k])) / 61);
+      lv[i].wave = a;
+    });
+  }
+  window.addEventListener("resize", function () { lvDraw(); });
+  tabs.forEach(t => t.addEventListener("click", function () { if (t.dataset.view === "loopers") setTimeout(function () { lvRender(true); }, 0); }));
+
+  // ═══════════════════════════════════════════
   // WWR
   // ═══════════════════════════════════════════
   function wwr_onreply(results) {
@@ -796,6 +1019,8 @@ html, body {
       }
       if (key === "tw_state") parseTwState(val);
       else if (key === "tw_knobs") parseTwKnobs(val);
+      else if (key === "lv_fast") parseLvFast(val);
+      else if (key === "lv_wave") parseLvWave(val);
       else if (key === "tw_extra") { if (val !== twExtra) { twExtra = val; renderTwExtra(); } }
       else if (key === "tw_ktick") { if (val && val !== twKTick) { twKTick = val; twKTickAt = Date.now(); } }
       else if (key === "tw_err") { twErr = val || ""; }
@@ -828,6 +1053,7 @@ html, body {
     "GET/EXTSTATE/" + TW_SECTION + "/tw_state;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_page;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_knobs;" +
+    "GET/EXTSTATE/" + TW_SECTION + "/lv_fast;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_extra;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_ktick;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_err;" +
@@ -835,6 +1061,7 @@ html, body {
     POLL_MS
   );
   wwr_req_recur("GET/EXTSTATE/" + SECTION + "/web_labels", 300);
+  wwr_req_recur("GET/EXTSTATE/" + TW_SECTION + "/lv_wave", 500);
 })();
 </script>
 </body>

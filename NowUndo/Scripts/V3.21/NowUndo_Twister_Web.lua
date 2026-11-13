@@ -1,6 +1,7 @@
 --[[
   NowUndo_Twister_Web.lua
-  Bridge gmem nowundo_sync ↔ ExtState pour la page web Twister (In/Out).
+  Bridge gmem nowundo_sync ↔ ExtState pour la page web (NowUndo.html) : onglet Twister (In/Out)
+  et onglet Loopers (forme d'onde, In/Out, transport, modes, degradation / output / stereo, VU).
 
   À lancer en parallèle de Virtual_Launchpad_Web.lua
   (ou après, les deux cohabitent).
@@ -136,6 +137,53 @@ local function set_fighter_page(p)
   reaper.SetExtState("nowundo_vl", "rev", "twweb:" .. vl_edit_n .. ":" .. string.format("%.3f", reaper.time_precise()), false)
 end
 
+-- ===== VUES LOOPER (onglet Loopers de NowUndo.html) =====
+-- lv_fast (~15 Hz) : par looper "i,vivant,etat,pos%,in,out,vuIn,vuOut,flags,degradation,output,stereo,longueur,part"
+--   flags : 1 reverse | 2 ping-pong | 4 slicer | 8 cloud | 16 beat repeat | 32 one-shot | 64 auto rec
+-- lv_wave (~2 Hz, si change) : 8 formes d'onde de 100 points, 1 caractere par point (0..61), separees par "|"
+local LV = { t = 0, wt = 0, wsig = "", ALPHA = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" }
+local function lv_base(i)
+  local base0 = 1000 + i * 600
+  local ap = reaper.gmem_read(base0 + 42) or 1
+  if ap < 1 or ap > 3 then ap = 1 end
+  return base0 + (math.floor(ap + 0.5) - 1) * 200, math.floor(ap + 0.5)
+end
+local function lv_publish(t)
+  if t - LV.t < 0.066 then return end
+  LV.t = t
+  local parts = {}
+  for i = 0, 7 do
+    local base0 = 1000 + i * 600
+    local alive = (reaper.gmem_read(base0) or 0) > 0 and (t - (reaper.gmem_read(130 + i) or 0)) <= 3.0
+    local b, ap = lv_base(i)
+    local function g(o) return reaper.gmem_read(b + o) or 0 end
+    local len = g(46)
+    local in_n, out_n = 0, 1
+    if len > 0 then in_n = clamp(g(44) / len, 0, 1); out_n = clamp((g(44) + g(45)) / len, 0, 1) end
+    local pm = math.floor(g(8) + 0.5)
+    local fl = (g(17) > 0.5 and 1 or 0) + (g(18) > 0.5 and 2 or 0) + (pm == 1 and 4 or 0) + (g(24) > 0.5 and 8 or 0)
+             + (g(189) > 0.5 and 16 or 0) + (pm == 2 and 32 or 0) + (g(43) > 0.5 and 64 or 0)
+    parts[#parts + 1] = string.format("%d,%d,%d,%.2f,%.4f,%.4f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.0f,%d",
+      i, alive and 1 or 0, math.floor(g(2) + 0.5), g(47), in_n, out_n, g(172), g(173), fl, g(20), g(22), g(21), len, ap)
+  end
+  reaper.SetExtState(SECTION, "lv_fast", table.concat(parts, ";"), false)
+  if t - LV.wt >= 0.5 then
+    LV.wt = t
+    local w = {}
+    for i = 0, 7 do
+      local b = lv_base(i)
+      local c = {}
+      for k = 0, 99 do
+        local v = math.floor(clamp(reaper.gmem_read(b + 50 + k) or 0, 0, 1) * 61 + 0.5)
+        c[#c + 1] = LV.ALPHA:sub(v + 1, v + 1)
+      end
+      w[#w + 1] = table.concat(c)
+    end
+    local sig = table.concat(w, "|")
+    if sig ~= LV.wsig then LV.wsig = sig; reaper.SetExtState(SECTION, "lv_wave", sig, false) end
+  end
+end
+
 local function process_cmd(cmd)
   cmd = (cmd or ""):match("^%s*(.-)%s*$")
   if cmd == "" then return end
@@ -149,6 +197,20 @@ local function process_cmd(cmd)
     if i and in_n and out_n then set_io(i, in_n, out_n) end
   elseif op == "RESET" then
     reset_all()
+  elseif op == "CMD" then                       -- CMD,i,commande[,argument] : commande looper (vue Loopers)
+    local i, c, arg = tonumber(a), tonumber(b), tonumber(c)
+    if i and c and i >= 0 and i <= 7 then
+      local gb = lv_base(i)
+      if arg then reaper.gmem_write(gb + 49, arg) end
+      reaper.gmem_write(gb + 48, c)
+    end
+  elseif op == "PAR" then                       -- PAR,i,id,valeur : reglage (degradation 20, stereo 21, output 22)
+    local i, id, v = tonumber(a), tonumber(b), tonumber(c)
+    if i and id and v and i >= 0 and i <= 7 then
+      local gb = lv_base(i)
+      reaper.gmem_write(gb + 181, v)
+      reaper.gmem_write(gb + 180, id)
+    end
   elseif op == "PAGE" then
     local p = tonumber(a)
     if p then
@@ -195,6 +257,7 @@ local function loop()
   tick_pending()
   poll_commands()
   publish(false)
+  lv_publish(reaper.time_precise())
   reaper.defer(loop)
 end
 
