@@ -2103,6 +2103,7 @@ loop_start != prev_loop_start || loop_width != prev_loop_width ? sync_hard_resyn
 
 @sample
 in0 = spl0; in1 = spl1; wet_s0 = 0; wet_s1 = 0;
+(cloud_on && !cl_on_prev) ? cl_snap = 1; cl_on_prev = cloud_on;   // V3.21 : activation du Cloud -> calage de Pos sur la tete
 qs_i += 1;
 pos_step = 0;
 peak_in_vu = max(peak_in_vu * vu_rel, max(abs(in0), abs(in1)));
@@ -2507,6 +2508,8 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
   // ===================== V3.21 : CLOUD v2 =====================
   cloud_x = cloud_on ? min(1, cloud_x + 1.0 / (srate * 0.015)) : max(0, cloud_x - 1.0 / (srate * 0.015));   // entree / sortie en fondu
   (cloud_x > 0.0001 && play_mode != 1 && (!is_one_shot_mode || one_shot_playing)) ? (
+    // V3.21 : a l'activation du Cloud, Pos (mode Free) se cale sur la tete de lecture
+    (cl_snap && eff_len > 16) ? ( cloud_pos_pct = max(0, min(100, (pos - eff_start) / eff_len * 100)); slider37 = cloud_pos_pct; cl_snap = 0; );
     cl_a = max(0, min(1, cloud_chaos));
     cl_N = 0.5 * (16 ^ max(0, min(1, cloud_density)));                // 0.5 .. 8 grains simultanes
     cloud_lfo_rate > 0.001 && cloud_lfo_depth > 0.001 ? ( cloud_lfo_phase += cloud_lfo_rate / srate; cloud_lfo_phase >= 1.0 ? cloud_lfo_phase -= 1.0; );
