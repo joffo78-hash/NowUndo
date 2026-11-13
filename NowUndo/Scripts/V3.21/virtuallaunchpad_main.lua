@@ -4059,6 +4059,17 @@ end
 
 function VL.render(t)
   t = t or now()
+  -- NowUndo V3.23 : latence aller-retour pour les loopers (gmem 955 auto en samples, 956 decalage ms, 957 2 = coupee)
+  -- Reglage : script NowUndo_Latency.lua (ExtState NowUndo_Latency : on, offset_ms)
+  if t - (VL._lat_t or 0) > 1 and reaper and reaper.gmem_write then
+    VL._lat_t = t
+    local li, lo = 0, 0
+    if reaper.GetInputOutputLatency then li, lo = reaper.GetInputOutputLatency() end
+    reaper.gmem_attach(GMEM_NAME)
+    reaper.gmem_write(955, (tonumber(li) or 0) + (tonumber(lo) or 0))
+    reaper.gmem_write(956, tonumber(reaper.GetExtState("NowUndo_Latency", "offset_ms")) or 0)
+    reaper.gmem_write(957, reaper.GetExtState("NowUndo_Latency", "on") == "0" and 2 or 1)
+  end
   LPF.pedal_poll_cmd()
   VL.web_poll_cmd()
   VL.web_publish(t)
