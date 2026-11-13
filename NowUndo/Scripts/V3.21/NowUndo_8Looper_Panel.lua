@@ -532,7 +532,9 @@ local function load_step(now_t)
           if read(jb,46)>0 and st>=2 and st<=6 then running=true; break end
         end
       end
-      local mode=(has_ref and running) and LOAD_MODE or 0       -- 0 = natif (pas de boucle qui tourne en synchro)
+      -- 0 = natif : aucune reference (pas de maitre / Host). La reference suffit : l'horloge du maitre tourne meme a l'arret.
+      local mode=has_ref and LOAD_MODE or 0
+      J.had_ref=has_ref
       local Nf,refm,stretch=J.N,0,false
       if mode==1 then Nf=Nad; refm=1 elseif mode==3 then Nf=Nad; refm=1; stretch=true end
       if cap>0 and Nf>cap then Nf=cap; load_msg("Fichier tronque a la capacite du looper") end
@@ -552,8 +554,9 @@ local function load_step(now_t)
       reaper.SetMediaItemInfo_Value(item,"D_POSITION",0); reaper.SetMediaItemInfo_Value(item,"D_LENGTH",J.D)
       J.acc=reaper.CreateTakeAudioAccessor(take)
       J.t0=reaper.GetAudioAccessorStartTime(J.acc)
-      J.sr_req=J.stretch and (J.Nf/J.D) or J.sr
+      J.sr_req=J.sr                                            -- lecture toujours a la frequence du projet
       J.buf=reaper.new_array(LD_CHUNK*2)
+      if J.stretch then J.r=J.N/J.Nf; J.bufs=reaper.new_array((LD_CHUNK*4+16)*2) end
     end)
     pcall(reaper.PreventUIRefresh,-1)
     if not ok or not J.acc or not J.buf then load_cleanup(J); load_msg("Lecture du fichier impossible"); LOAD=nil; return end
@@ -566,15 +569,36 @@ local function load_step(now_t)
       while J.k<J.Nf and reaper.time_precise()<t_end do
         local k=J.k; local n=math.min(LD_CHUNK,J.Nf-k)
         local nr=0
-        if k<J.nread then
+        if J.stretch then
+          -- ETIRER : sortie k..k+n-1 <- entree x = sortie * N/Nf (Hermite 4 points), lue par fenetre a la frequence du projet
+          local r=J.r
+          n=math.max(1,math.min(n,math.floor((LD_CHUNK*4)/math.max(r,0.0001))))
+          local i0=math.max(0,math.floor(k*r)-1)
+          local cnt=math.floor((k+n-1)*r)+3-i0
+          reaper.GetAudioAccessorSamples(J.acc,J.sr,2,J.t0+i0/J.sr,cnt,J.bufs)
+          local B=J.bufs
+          local function g(i,c) local j=i-i0; if j<0 or j>=cnt then return 0 end return B[2*j+c] end
+          for f=0,n-1 do
+            local x=(k+f)*r; local i=math.floor(x); local t=x-i
+            for c=1,2 do
+              local y0,y1,y2,y3=g(i-1,c),g(i,c),g(i+1,c),g(i+2,c)
+              local c1=0.5*(y2-y0); local c2=y0-2.5*y1+2*y2-0.5*y3; local c3=0.5*(y3-y0)+1.5*(y1-y2)
+              local v=((c3*t+c2)*t+c1)*t+y1
+              reaper.gmem_write((c==1 and Lb or Rb)+k+f,v)
+            end
+          end
+          nr=n
+        elseif k<J.nread then
           nr=math.min(n,J.nread-k)
           reaper.GetAudioAccessorSamples(J.acc,J.sr_req,2,J.t0+k/J.sr_req,nr,J.buf)
         end
-        local buf=J.buf
-        for f=0,nr-1 do
-          reaper.gmem_write(Lb+k+f,buf[2*f+1]); reaper.gmem_write(Rb+k+f,buf[2*f+2])
+        if not J.stretch then
+          local buf=J.buf
+          for f=0,nr-1 do
+            reaper.gmem_write(Lb+k+f,buf[2*f+1]); reaper.gmem_write(Rb+k+f,buf[2*f+2])
+          end
+          for f=nr,n-1 do reaper.gmem_write(Lb+k+f,0); reaper.gmem_write(Rb+k+f,0) end
         end
-        for f=nr,n-1 do reaper.gmem_write(Lb+k+f,0); reaper.gmem_write(Rb+k+f,0) end
         J.k=k+n
       end
     end)
@@ -593,10 +617,19 @@ local function load_step(now_t)
   elseif J.phase=="wait" then
     if read(LD_BASE,10)==J.qid then
       local how=(J.mode==1) and " (adapte)" or (J.mode==3 and " (etire)" or (J.mode==2 and " (independant)" or ""))
-      load_msg(string.format("Looper %d : %s charge, %.2f s%s",J.i+1,J.name,J.Nf/J.sr,how)); LOAD=nil
+      load_msg(string.format("Looper %d : %s charge, %.2f s%s",J.i+1,J.name,J.Nf/J.sr,how))
+      -- Premier fichier (aucune reference : il devient le maitre) -> il fixe le tempo du projet REAPER
+      if not J.had_ref then J.phase="tempo"; J.t2=now_t else LOAD=nil end
     elseif now_t-J.t1>30 then
       load_msg("Looper "..(J.i+1).." : chargement non termine"); LOAD=nil
     end
+  elseif J.phase=="tempo" then
+    -- tempo musical estime par le looper (nombre de temps le plus plausible pour cette longueur), publie a +155
+    local bpm=read(J.gb,155)
+    if bpm>20 and bpm<400 then
+      reaper.SetCurrentBPM(0,bpm,true)
+      load_msg(string.format("Looper %d : %s charge, tempo du projet = %.2f BPM",J.i+1,J.name,bpm)); LOAD=nil
+    elseif now_t-J.t2>1.5 then LOAD=nil end
   end
 end
 

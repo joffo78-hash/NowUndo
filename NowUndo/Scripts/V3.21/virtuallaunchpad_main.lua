@@ -4168,8 +4168,40 @@ function VL.web_poll_cmd()
   if VL.sync_out then VL.sync_out() end
 end
 
+-- B2 : au Play de REAPER (pas en enregistrement), le curseur saute d'au plus une demi-mesure pour que la grille du projet
+-- tombe en phase avec l'horloge du looper maitre (qui tourne en permanence, transport arrete ou non).
+-- Desactivable : ExtState NowUndo_Clock / align = "0".
+function VL.align_reaper()
+  reaper.gmem_attach(GMEM_NAME)
+  local o
+  for p = 0, 2 do
+    if (reaper.gmem_read(p * 10) or 0) == 1 and (reaper.gmem_read(p * 10 + 2) or 0) > 0 then o = p * 10 break end
+  end
+  if not o then return end                                   -- pas de looper maitre (ou synchro Host) : rien a faire
+  local ph = reaper.gmem_read(o + 3) or 0
+  local sr = 48000
+  if reaper.GetAudioDeviceInfo then local _, v = reaper.GetAudioDeviceInfo("SRATE", ""); sr = tonumber(v) or sr end
+  local X = reaper.GetPlayPosition2()
+  local _, meas = reaper.TimeMap2_timeToBeats(0, X)
+  meas = math.floor(tonumber(meas) or 0)
+  local B = reaper.TimeMap2_beatsToTime(0, 0, meas)
+  local M = reaper.TimeMap2_beatsToTime(0, 0, meas + 1) - B
+  if not M or M <= 0 then return end
+  local P = B + ((ph / sr) % M)
+  if P - X > M / 2 then P = P - M elseif X - P > M / 2 then P = P + M end
+  if P < 0 then P = P + M end
+  reaper.SetEditCurPos2(0, P, false, true)
+  log("info", "Play REAPER cale sur l'horloge des loopers (%.3f s -> %.3f s)", X, P)
+end
+
 function VL.render(t)
   t = t or now()
+  if not VL.mirror_mode and reaper and reaper.GetPlayState then
+    local ps = reaper.GetPlayState() or 0
+    local playing = (ps & 1) == 1 and (ps & 4) == 0
+    if playing and VL._ps_play == false and reaper.GetExtState("NowUndo_Clock", "align") ~= "0" then pcall(VL.align_reaper) end
+    VL._ps_play = playing
+  end
   -- NowUndo V3.23 : latence aller-retour pour les loopers (gmem 955 auto en samples, 956 decalage ms, 957 2 = coupee)
   -- Reglage : script NowUndo_Latency.lua (ExtState NowUndo_Latency : on, offset_ms)
   if t - (VL._lat_t or 0) > 1 and reaper and reaper.gmem_write then
