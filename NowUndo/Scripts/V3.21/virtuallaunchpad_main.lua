@@ -3884,7 +3884,8 @@ end
 function VL.remote_show_qr()
   local ip = VL.remote_guess_lan_ip()
   local port = VL.remote_web_port()
-  local remote_url = string.format("http://%s:%d/NowUndo.html", ip, port)
+  -- ?v=<horodatage> : adresse unique a chaque QR -> le telephone recharge la page au lieu de garder une ancienne copie en cache
+  local remote_url = string.format("http://%s:%d/NowUndo.html?v=%d", ip, port, math.floor(os.time()))
   local enc = remote_url:gsub("([^%w%-_.~])", function(c)
     return string.format("%%%02X", string.byte(c))
   end)
