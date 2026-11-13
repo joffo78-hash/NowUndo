@@ -2129,6 +2129,7 @@ function CU.web_tick()
   -- 2) publication de la page active (~15 Hz, seulement si quelque chose a change)
   if now - CU.web_t < 0.066 then return end
   CU.web_t = now
+  reaper.SetExtState("nowundo_tw", "tw_ktick", SCRIPT_VERSION .. "@" .. string.format("%.2f", now), false)   -- diagnostic web
   local page = fighter_page()
   local col = PAGE_COL[page] or PAGE_COL[1]
   local cells = {}
@@ -2208,7 +2209,8 @@ function main()
     midi_feedback_sync(page, false)
   end
   aux_feedback()
-  pcall(CU.web_tick)   -- v3.5 : page web Twister (sans risque pour le moteur si une page a un souci)
+  local web_ok, web_err = pcall(CU.web_tick)   -- v3.5 : page web Twister (sans risque pour le moteur si une page a un souci)
+  if not web_ok then reaper.SetExtState("nowundo_tw", "tw_err", tostring(web_err), false) end
 
   -- Fenetre : le moteur continue meme si elle est fermee
   if reaper.GetExtState(HB_EXT, "ui_req") == "1" then

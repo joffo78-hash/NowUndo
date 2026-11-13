@@ -214,6 +214,7 @@ html, body {
         <button class="pg" data-page="7">7 Custom</button>
         <button class="pg" data-page="8">8 Display</button>
         <button class="btn reset-btn" id="tw-reset">RESET</button>
+        <span id="tw-diag" style="font-size:10px;color:#777;width:100%"></span>
       </div>
       <div id="tw-page">
         <div class="tw-faders" id="tw-faders"></div>
@@ -689,7 +690,27 @@ html, body {
     twKnobsEl.style.display = isIO ? "none" : "";
     twPlaceholder.style.display = "none";
     if (!isIO) renderKnobs();
+    updateTwDiag();
   }
+  // Diagnostic : la page web (version ci-dessous) recoit-elle les knobs du script Twister ?
+  const WEB_VER = "web-tw 3.5";
+  let twKTick = "", twKTickAt = 0, twErr = "";
+  function updateTwDiag() {
+    const el = document.getElementById("tw-diag");
+    const age = twKTickAt ? (Date.now() - twKTickAt) / 1000 : -1;
+    let msg = WEB_VER + "  |  script Twister : ";
+    if (!twKTick) msg += "AUCUNE donnee (Twister 3.5+ non lance, ou ancienne version encore active)";
+    else msg += twKTick.split("@")[0] + (age > 3 ? "  (SILENCIEUX depuis " + age.toFixed(0) + " s)" : "  OK");
+    if (twErr) msg += "  |  ERREUR : " + twErr;
+    el.textContent = msg;
+    el.style.color = (!twKTick || age > 3 || twErr) ? "#f39c6b" : "#6c9";
+    if (twPage !== TW_IO_PAGE && (!twKTick || age > 3)) {
+      twPlaceholder.style.display = "";
+      twPlaceholder.textContent = "Pas de donnees du script Twister : lancez (ou relancez) le script Twister 3.5. " +
+        "Si une ancienne version tourne encore : Actions > 'ReaScript: Close all running reascripts', puis relancez.";
+    } else if (twPage !== TW_IO_PAGE) { twPlaceholder.style.display = "none"; }
+  }
+  setInterval(updateTwDiag, 1000);
   document.querySelectorAll("#tw-bar .pg").forEach(function (btn) {
     btn.addEventListener("click", function () {
       showTwPage(+btn.dataset.page);
@@ -759,6 +780,8 @@ html, body {
       }
       if (key === "tw_state") parseTwState(val);
       else if (key === "tw_knobs") parseTwKnobs(val);
+      else if (key === "tw_ktick") { if (val && val !== twKTick) { twKTick = val; twKTickAt = Date.now(); } }
+      else if (key === "tw_err") { twErr = val || ""; }
       else if (key === "tw_page") {
         var tp = parseInt(val, 10);
         if (tp >= 1 && tp <= 8 && tp !== twPage) showTwPage(tp);
@@ -788,6 +811,8 @@ html, body {
     "GET/EXTSTATE/" + TW_SECTION + "/tw_state;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_page;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_knobs;" +
+    "GET/EXTSTATE/" + TW_SECTION + "/tw_ktick;" +
+    "GET/EXTSTATE/" + TW_SECTION + "/tw_err;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_tick",
     POLL_MS
   );
