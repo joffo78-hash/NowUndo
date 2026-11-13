@@ -1,6 +1,11 @@
 -- @description NowUndo MIDI Learn — Launchpad + Twister
--- @version 2.4
+-- @version 2.5
 -- @about
+--   v2.5 : groupe "Looper" : Rec Density, Rec Density Length, Fade, Mix, Degradation, Stereo, Feedback, Output Volume
+--          (CC absolu ; note / push = valeur par defaut ; Pickup possible) + Full Loop.
+--          Navigation auto du Twister : Slicer -> page Slicer, Cloud -> page Cloud, Pitch/Speed -> page Pitch/Speed,
+--          Rec / Re-Rec / Clear All -> page Volume, Quantise In/Out -> page In/Out (comme le Launchpad).
+--          Pages Twister : bouton 1 = Vol/Fdbk, 3 = In/Out (Twister v3.3).
 --   v2.2 : page Twister 6 "Effets" (FX Router) + parametre learn "Selection FX" (+ / - / encodeur / knob absolu).
 --   Mapping MIDI pour actions NowUndo + navigation + 16 knobs / 16 boutons Twister.
 --
@@ -78,10 +83,13 @@ TARGETS[#TARGETS + 1] = U("hold:nogroup", "Inhibe groupe (maintenir)", "Selectio
 for p = 1, 4 do
   TARGETS[#TARGETS + 1] = U("page:" .. p, "Launchpad Page " .. p, "Pages", { page = p })
 end
+-- Noms LOGIQUES des pages (contenu) : utilises par les learns aux "aux:P" (P = contenu, inchange)
 local FIGHTER_NAMES = { "In/Out", "Pitch/Speed", "Vol/Fdbk", "Slicer", "Cloud", "Effets" }
+-- v2.5 : nom de la page appelee par chaque BOUTON (Twister v3.3 : pages 1 et 3 permutees)
+local SLOT_NAMES = { "Vol/Fdbk", "Pitch/Speed", "In/Out", "Slicer", "Cloud", "Effets" }
 local NFIGHTER = #FIGHTER_NAMES
 for n = 1, NFIGHTER do
-  TARGETS[#TARGETS + 1] = U("fighter:" .. n, "Twister page " .. n .. " (" .. FIGHTER_NAMES[n] .. ")", "Pages", { fighter = n })
+  TARGETS[#TARGETS + 1] = U("fighter:" .. n, "Twister page " .. n .. " (" .. SLOT_NAMES[n] .. ")", "Pages", { fighter = n })
 end
 for i = 1, 8 do
   TARGETS[#TARGETS + 1] = U("status:" .. i, "Status L" .. i .. " (smart)", "Status", { status = i })
@@ -114,7 +122,7 @@ local acts = {
   A("act:speed_p", "Speed +1 oct", "Tune", "speed_step", 12),
   A("act:pitch_m", "Pitch -12 st", "Tune", "pitch_step", -12),
   A("act:pitch_p", "Pitch +12 st", "Tune", "pitch_step", 12),
-  A("act:full_loop", "Full Loop", "Tune", "full_loop"),
+  A("act:full_loop", "Full Loop", "Looper", "full_loop"),
   A("act:quant", "Quantise In/Out", "Tune", "quantise_inout"),
   A("act:reset", "Reset params", "Tune", "reset"),
   A("act:launch_go", "Launch GO", "Launch", "launch_go"),
@@ -128,6 +136,23 @@ local acts = {
   A("act:rec_dub", "Rec -> Overdub (mode, sortie du 1er rec)", "Transport", "rec_dub_toggle"),
 }
 for _, a in ipairs(acts) do TARGETS[#TARGETS + 1] = a end
+
+-- v2.5 : reglages continus du looper. CC absolu 0..127 -> plage ; note / push = valeur par defaut.
+-- wr = identifiant d'ecriture JSFX (+180/+181), off = offset de lecture (gmem part active), curve = exposant de la course
+local function P(id, name, wr, off, lo, hi, def, curve, step)
+  return { id = id, name = name, cat = "Looper", kind = "param", wr = wr, off = off,
+           lo = lo, hi = hi, def = def, curve = curve or 1, step = step }
+end
+for _, p in ipairs({
+  P("par:density",  "Rec Density (%)",                29, 29, 0, 100, 100),
+  P("par:dens_len", "Rec Density Length (1/1..1/64)", 30, 30, 0, 6,   2, 1, 1),
+  P("par:fade",     "Fade (ms)",                      7,  7,  0, 500, 10, 2),   -- course quadratique : finesse en bas
+  P("par:mix",      "Mix (dry / wet)",                5,  5,  0, 1,   1),
+  P("par:degrad",   "Degradation",                    20, 20, 0, 1,   1),
+  P("par:stereo",   "Stereo (largeur)",               21, 21, 0, 1,   0),
+  P("par:fdbk",     "Feedback",                       19, 19, 0, 2,   1),
+  P("par:out_vol",  "Output Volume",                  22, 22, 0, 2,   1),
+}) do TARGETS[#TARGETS + 1] = p end
 
 -- Restart INDIVIDUEL par looper : agit toujours sur le looper nomme, sans tenir compte de la selection / du groupe
 for i = 1, 8 do
@@ -733,11 +758,77 @@ local function tw_apply_btn(idx, down)
   end
 end
 
+-- v2.5 : reglages continus "param"
+local function param_value(t, n)
+  n = math.max(0, math.min(1, n)) ^ (t.curve or 1)
+  local v = t.lo + n * (t.hi - t.lo)
+  if t.step then v = math.floor(v / t.step + 0.5) * t.step end
+  return v
+end
+local function param_norm(t, v)
+  local n = math.max(0, math.min(1, (v - t.lo) / (t.hi - t.lo)))
+  return n ^ (1 / (t.curve or 1))
+end
+local function param_write(t, v)
+  for _, i in ipairs(targets()) do if alive(i) then write_param(i, t.wr, v) end end
+end
+-- Soft takeover (Pickup coche) : la valeur entrante est ignoree tant qu'elle n'a pas rejoint / croise la valeur actuelle
+local pk_par = {}
+local function param_pickup_ok(t, n)
+  local s = sel_looper()
+  if not alive(s) then return true end
+  reaper.gmem_attach(GMEM)
+  local cur = param_norm(t, reaper.gmem_read(gbase(s, active_part(s)) + t.off) or t.def)
+  local now = reaper.time_precise()
+  local st = pk_par[t.id]
+  if not st then st = { eng = false }; pk_par[t.id] = st end
+  if st.eng and st.t_set and (now - st.t_set) > 0.3 and math.abs(cur - (st.last or cur)) > 0.03 then
+    st.eng = false; st.prev = nil                    -- modifie ailleurs (UI, Twister...) : on re-attrape
+  end
+  if not st.eng then
+    local d = n - cur
+    if math.abs(d) <= 0.02 or (st.prev and st.prev * d < 0) then st.eng = true end
+    st.prev = d
+    if not st.eng then return false end
+  end
+  st.last, st.t_set = n, now
+  return true
+end
+
+-- v2.5 : NAVIGATION AUTO du Twister (meme regle que le Launchpad). Valeur = BOUTON de page (1 Vol, 2 Pitch, 3 In/Out...)
+local AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,
+                  rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
+local function auto_twister(action, looper)
+  local pg = AUTO_TW[action]
+  if not pg then return end
+  if action == "slicer" or action == "cloud" then      -- seulement a l'ACTIVATION (pas en coupant le mode)
+    local s = looper or sel_looper()
+    if alive(s) then
+      reaper.gmem_attach(GMEM)
+      local b = gbase(s, active_part(s))
+      local on = (action == "slicer") and ((reaper.gmem_read(b + 8) or 0) == 1) or ((reaper.gmem_read(b + 24) or 0) > 0.5)
+      if on then return end
+    end
+  end
+  fire_ui({ fighter = pg })
+end
+
 local function execute_target(tgt, m, velocity, is_on, is_off)
+  if tgt.kind == "param" then
+    if m.status == 0xB0 then
+      local n = velocity / 127
+      if pickup[tgt.id] and not param_pickup_ok(tgt, n) then return end
+      param_write(tgt, param_value(tgt, n))
+    elseif is_on then
+      param_write(tgt, tgt.def)                      -- note / push : valeur par defaut
+    end
+    return
+  end
   -- Twister : applique ET renvoye par le script Twister. Ici on ne fait rien
   -- (avant : "Return" renvoyait 127 a chaque tick de knob => l'anneau sautait a fond).
   if tgt.kind == "tw_knob" or tgt.kind == "tw_btn" then return end
   if tgt.kind == "action" then
+    if is_on then auto_twister(tgt.action, tgt.looper) end   -- v2.5 : AVANT l'action (l'etat lu est celui d'avant)
     if m.gate then
       if is_on or is_off then fire_action(tgt.action, tgt.args, tgt.looper) end
     else
@@ -1296,7 +1387,7 @@ local function draw()
     gfx.rect(gx, y + S(6), S(16), S(16), 1)
     if gate_on then gfx.set(1, 1, 1); gfx.x, gfx.y = gx + S(3), y + S(5); gfx.drawstr("✓") end
 
-    if t.kind == "tw_knob" or t.kind == "aux_knob" then
+    if t.kind == "tw_knob" or t.kind == "aux_knob" or t.kind == "param" then
       local px = COLS[7].x + S(18)
       local pk_on = pickup[t.id]
       gfx.set(pk_on and 0.25 or 0.25, pk_on and 0.6 or 0.25, pk_on and 0.9 or 0.28)
@@ -1326,7 +1417,7 @@ local function draw()
         maps[t.id] = maps[t.id] or { status = 0, ch = 0, d1 = 0 }
         maps[t.id].gate = not maps[t.id].gate
         save_maps()
-      elseif col == "pick" and (t.kind == "tw_knob" or t.kind == "aux_knob") then
+      elseif col == "pick" and (t.kind == "tw_knob" or t.kind == "aux_knob" or t.kind == "param") then
         if pickup[t.id] then pickup[t.id] = nil else pickup[t.id] = true end
         save_maps()
         notify((pickup[t.id] and "Soft takeover ON : " or "Soft takeover OFF : ") .. t.name)

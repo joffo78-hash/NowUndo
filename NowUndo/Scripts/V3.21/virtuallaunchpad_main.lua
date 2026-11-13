@@ -1907,9 +1907,23 @@ local function pedal_capture_action(action, args)
   return true
 end
 
+-- NAVIGATION AUTO du Twister : une action du Launchpad amene le Twister sur la page utile.
+-- Valeur = BOUTON de page Twister (v3.3 : 1 Vol/Feedback, 2 Pitch/Speed, 3 In/Out, 4 Slicer, 5 Cloud, 6 Effets).
+-- Slicer / Cloud : seulement a l'ACTIVATION (couper le mode ne change pas de page).
+local AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,
+                  rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
+local function auto_twister(action, targets)
+  local pg = AUTO_TW[action]
+  if not pg or VL.mirror_mode then return end
+  local def = ACTIONS[action]
+  if def and def.kind == "toggle" and (action == "slicer" or action == "cloud") and toggle_on(def.key, targets) then return end
+  VL.set_fighter_page(pg)
+end
+
 function VL.trigger(action, args, targets)    -- targets : cibles explicites (couches), sinon looper / groupe actif
   if pedal_capture_action(action, args) then return end
   targets = targets or VL.targets()
+  auto_twister(action, targets)
   if S.launch then arm(action, args, targets) else exec(action, args, targets) end
 end
 
@@ -2568,7 +2582,16 @@ VL.register_layer({ id = "fx", name = "Effects", cell = function(row, col)
     if col > NIN then return nil end
     kind, id, slot = "input", col, row
   end
-  local sh = fn(function() VL.toggle_fx(kind, id, slot) end)
+  local sh = fn(function()
+    VL.toggle_fx(kind, id, slot)
+    -- NAVIGATION AUTO : activer un effet amene le Twister sur la page Effets, sur CET effet (source + slot du FX Router)
+    if S.fx[kind][id][slot] and not VL.mirror_mode then
+      S.fx_source = (kind == "input") and id or (NIN + id)
+      VL.publish_fx_source()
+      VL.set_fx_slot(slot)
+      VL.set_fighter_page(6)
+    end
+  end)
   sh.paint = { get = function() return S.fx[kind][id][slot] end, set = function(v) VL.set_fx(kind, id, slot, v) end }
   return { short = sh, hex = (row <= 4) and 0x99FF66 or 0xFFFF99,
            state = function()

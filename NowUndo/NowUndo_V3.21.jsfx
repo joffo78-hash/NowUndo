@@ -1849,6 +1849,7 @@ loop(3,
     wr_id == 27 ? ( cloud_chaos = max(0, min(1, wr_v)); slider26 = cloud_chaos; ) :
     wr_id == 28 ? ( cloud_spread = max(0, min(1, wr_v)); slider27 = cloud_spread; ) :
     wr_id == 29 ? ( dens_occ = max(0, min(100, wr_v)); slider28 = dens_occ; ) :
+    wr_id == 30 ? ( dens_len = max(0, min(6, floor(wr_v + 0.5))); slider29 = dens_len; ) :   // V3.21 : Rec Density Length (MIDI Learn)
     wr_id == 34 ? ( slicer_pitch_spread = max(0, min(100, wr_v)); slider33 = slicer_pitch_spread; ) :
     wr_id == 35 ? ( cloud_pitch_spread = max(0, min(100, wr_v)); slider34 = cloud_pitch_spread; ) :
     wr_id == 36 ? ( cloud_mix = max(0, min(1, wr_v)); slider35 = cloud_mix; ) :
