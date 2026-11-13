@@ -216,7 +216,7 @@ html, body {
     <button class="tab active" data-view="launchpad">Launchpad</button>
     <button class="tab" data-view="twister">Twister</button>
     <button class="tab" data-view="loopers">Loopers</button>
-    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.8</span>
+    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.9</span>
   </nav>
 
   <div id="views">
@@ -409,15 +409,25 @@ html, body {
       : "";
   }
 
-  var cmdQueue = [], cmdSending = false;
+  // Commandes Launchpad numerotees : web_cmd est une seule case (ecrasee a chaque envoi). On renvoie toutes les
+  // commandes non acquittees (web_ack) -> un appui n'est plus perdu si le Launchpad lit moins vite qu'on n'ecrit.
+  var CMD_SID = Math.random().toString(36).slice(2, 8), cmdSeq = 0, cmdPend = [], cmdSentAt = 0, cmdDirty = false;
   function flushCmdQueue() {
-    if (cmdSending || !cmdQueue.length) return;
-    cmdSending = true;
-    var batch = cmdQueue.splice(0, 8).join(";");
+    if (!cmdPend.length) return;
+    var now = Date.now();
+    if (!cmdDirty && now - cmdSentAt < 150) return;
+    cmdDirty = false; cmdSentAt = now;
+    var batch = "@" + CMD_SID + ";" + cmdPend.slice(0, 40).map(function (c) { return "#" + c[0] + ":" + c[1]; }).join(";");
     wwr_req("SET/EXTSTATE/" + SECTION + "/web_cmd/" + encodeURIComponent(batch));
-    setTimeout(function () { cmdSending = false; flushCmdQueue(); }, 25);
   }
-  function queueCmd(cmd) { cmdQueue.push(cmd); flushCmdQueue(); }
+  function onCmdAck(val) {
+    var m = (val || "").match(new RegExp("(?:^|,)" + CMD_SID + ":(\\d+)"));
+    if (!m) return;
+    var n = parseInt(m[1], 10);
+    while (cmdPend.length && cmdPend[0][0] <= n) cmdPend.shift();
+  }
+  setInterval(flushCmdQueue, 30);
+  function queueCmd(cmd) { cmdPend.push([++cmdSeq, cmd]); cmdDirty = true; flushCmdQueue(); }
 
   function onPadDown(row, col) {
     var key = row + "," + col;
@@ -765,7 +775,7 @@ html, body {
     updateTwDiag();
   }
   // Diagnostic : la page web (version ci-dessous) recoit-elle les knobs du script Twister ?
-  const WEB_VER = "web-tw 3.8";
+  const WEB_VER = "web-tw 3.9";
   let twKTick = "", twKTickAt = 0, twErr = "";
   function updateTwDiag() {
     const el = document.getElementById("tw-diag");
@@ -974,8 +984,8 @@ html, body {
   let lvLast = 0;
   setInterval(function () {
     const el = document.getElementById("lv-diag");
-    if (Date.now() - lvLast < 2000) { el.style.color = "#2ecc71"; el.textContent = "web v3.8 · bridge OK (" + lv.filter(l => l.alive).length + " looper(s) détecté(s))"; }
-    else { el.style.color = "#f39c12"; el.textContent = "web v3.8 · aucune donnée looper : remplacez et relancez NowUndo_Twister_Web.lua (version Loopers)"; }
+    if (Date.now() - lvLast < 2000) { el.style.color = "#2ecc71"; el.textContent = "web v3.9 · bridge OK (" + lv.filter(l => l.alive).length + " looper(s) détecté(s))"; }
+    else { el.style.color = "#f39c12"; el.textContent = "web v3.9 · aucune donnée looper : remplacez et relancez NowUndo_Twister_Web.lua (version Loopers)"; }
   }, 1000);
   function parseLvFast(str) {
     if (!str) return;
@@ -1020,6 +1030,7 @@ html, body {
         else if (key === "web_labels") parseLabels(val);
         else if (key === "web_status") statusEl.textContent = val || "—";
         else if (key === "web_meta") parseMeta(val);
+        else if (key === "web_ack") onCmdAck(val);
         else if (key === "web_tick") {
           lastTick = Date.now();
           if (!backendOk) { backendOk = true; connEl.className = "ok"; }
@@ -1058,6 +1069,7 @@ html, body {
     "GET/EXTSTATE/" + SECTION + "/web_status;" +
     "GET/EXTSTATE/" + SECTION + "/web_meta;" +
     "GET/EXTSTATE/" + SECTION + "/web_tick;" +
+    "GET/EXTSTATE/" + SECTION + "/web_ack;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_state;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_page;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_knobs;" +

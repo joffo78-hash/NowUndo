@@ -3774,6 +3774,7 @@ local WEB = {
   last_pub = 0,
   last_lbl = 0,
   last_cmd = "",
+  acks = {},      -- web v3.9 : dernier numero traite par page web (sid)
 }
 local WEB_STATE_CODE = {
   off = "o", idle = "i", on = "n", warn = "w",
@@ -3977,13 +3978,27 @@ end
 function VL.web_poll_cmd()
   if not (reaper and reaper.GetExtState) then return end
   local raw = reaper.GetExtState(WEB.section, "web_cmd")
-  if not raw or raw == "" or raw == WEB.last_cmd then return end
-  WEB.last_cmd = raw
+  if not raw or raw == "" then return end
+  -- web v3.9 : "@sid;#n:cmd;#n:cmd..." = commandes numerotees, renvoyees par la page tant qu'elles ne sont
+  -- pas acquittees (web_ack) -> plus de commande perdue quand la page ecrit plus vite qu'on ne lit.
+  local sid = raw:match("^@([%w]+);")
+  if not sid then
+    if raw == WEB.last_cmd then return end   -- ancien format
+    WEB.last_cmd = raw
+  end
   reaper.SetExtState(WEB.section, "web_cmd", "", false)
 
   local t = now()
-  for cmd in raw:gmatch("[^;]+") do
-    local op, a, b = cmd:match("^(%w+),?([^,]*),?(.*)$")
+  local acked = sid and (WEB.acks[sid] or 0) or 0
+  for item in raw:gmatch("[^;]+") do
+    local cmd = item
+    if sid then
+      local n, c = item:match("^#(%d+):(.*)$")
+      n = tonumber(n)
+      if n and n > acked then acked = n; cmd = c else cmd = nil end
+    end
+    local op, a, b
+    if cmd then op, a, b = cmd:match("^(%w+),?([^,]*),?(.*)$") end
     if not op then
       -- ignore
     elseif op == "P" then
@@ -4003,6 +4018,13 @@ function VL.web_poll_cmd()
     elseif op == "PAGE" and tonumber(a) then
       if VL.set_page then VL.set_page(tonumber(a)) end
     end
+  end
+  if sid then
+    WEB.acks[sid] = acked
+    local parts = {}
+    for k, v in pairs(WEB.acks) do parts[#parts + 1] = k .. ":" .. v end
+    if #parts > 8 then WEB.acks = { [sid] = acked }; parts = { sid .. ":" .. acked } end
+    reaper.SetExtState(WEB.section, "web_ack", table.concat(parts, ","), false)
   end
 end
 
