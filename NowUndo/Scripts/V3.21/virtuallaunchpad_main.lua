@@ -1044,7 +1044,7 @@ function VL.set_page(p)
   end
 end
 function VL.set_fighter_page(n)
-  S.fighter_page = clamp(n, 1, 6)
+  S.fighter_page = clamp(n, 1, 8)
   VL.hooks.fighter_page(S.fighter_page)
   if reaper and reaper.SetExtState then
     reaper.SetExtState("nowundo_vl", "fighter_page", tostring(S.fighter_page), false)
@@ -2178,7 +2178,7 @@ function VL.status_pad_tap(i)
   if VL.sync_out then VL.sync_out() end
 end
 
-for n = 1, 6 do bind(1, 2, n, fn(function() VL.set_fighter_page(n) end, function() return S.fighter_page == n and "on" or "idle" end)) end
+for n = 1, 8 do bind(1, 2, n, fn(function() VL.set_fighter_page(n) end, function() return S.fighter_page == n and "on" or "idle" end)) end   -- 7 Custom, 8 Display (ex Prev / Next looper)
 
 -- Rangee statut (row 1) : appui intelligent play/stop / sortie de mode
 for i = 1, NLOOP do
@@ -2193,10 +2193,11 @@ PAD_LABEL[1]["2,3"] = "Twister 3 In/Out"
 PAD_LABEL[1]["2,4"] = "Twister 4 Slicer"
 PAD_LABEL[1]["2,5"] = "Twister 5 Cloud"
 PAD_LABEL[1]["2,6"] = "Twister 6 Effects"
+PAD_LABEL[1]["2,7"] = "Twister 7 Custom"
+PAD_LABEL[1]["2,8"] = "Twister 8 Display"
 PAD_RGB[1]["2,6"] = PAD_RGB[1]["2,5"] or 0x666666
 
-bind(1, 2, 7, fn(function() if pedal_capture_action("prev_looper") then return end VL.step_looper(-1) end))
-bind(1, 2, 8, fn(function() if pedal_capture_action("next_looper") then return end VL.step_looper(1) end))
+-- (pads 2,7 / 2,8 : ex Previous / Next looper -> pages Twister 7 et 8 ; Prev / Next restent dans le MIDI Learn et le pedalier)
 for n = 1, NPRESET do
   for r, bank in ipairs({ "routing", "group" }) do
     bind(1, 2 + r, n,   -- routing=row3, group=row4

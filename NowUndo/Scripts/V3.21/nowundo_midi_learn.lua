@@ -1,7 +1,11 @@
 -- @description NowUndo MIDI Learn — Launchpad + Twister
--- @version 2.5
+-- @version 2.6
 -- @about
---   v2.5 : groupe "Looper" : Rec Density, Rec Density Length, Fade, Mix, Degradation, Stereo, Feedback, Output Volume
+--   v2.6 : pages Twister 7 (Custom) et 8 (Display). Groupe "Custom P7" : 16 knobs + 16 push dont la fonction se choisit
+--          dans un MENU (colonne Learn -> Menu), parmi les reglages / actions du looper ; s'appliquent au looper selectionne.
+--          Assignations : ExtState "custom" (sauvees avec le modele).
+--   v2.5 : groupe "Looper" : Rec Density, Rec Density Length, Fade, Mix, Degradation, Stereo, Feedback, Output Volume,
+--          Dry/Wet du Slicer, du Cloud et du Beat Repeat (v2.6)
 --          (CC absolu ; note / push = valeur par defaut ; Pickup possible) + Full Loop.
 --          Navigation auto du Twister : Slicer -> page Slicer, Cloud -> page Cloud, Pitch/Speed -> page Pitch/Speed,
 --          Rec / Re-Rec / Clear All -> page Volume, Quantise In/Out -> page In/Out (comme le Launchpad).
@@ -85,9 +89,9 @@ for p = 1, 4 do
   TARGETS[#TARGETS + 1] = U("page:" .. p, "Launchpad Page " .. p, "Pages", { page = p })
 end
 -- Noms LOGIQUES des pages (contenu) : utilises par les learns aux "aux:P" (P = contenu, inchange)
-local FIGHTER_NAMES = { "In/Out", "Pitch/Speed", "Vol/Fdbk", "Slicer", "Cloud", "Effets" }
+local FIGHTER_NAMES = { "In/Out", "Pitch/Speed", "Vol/Fdbk", "Slicer", "Cloud", "Effets", "Custom", "Display" }
 -- v2.5 : nom de la page appelee par chaque BOUTON (Twister v3.3 : pages 1 et 3 permutees)
-local SLOT_NAMES = { "Vol/Fdbk", "Pitch/Speed", "In/Out", "Slicer", "Cloud", "Effets" }
+local SLOT_NAMES = { "Vol/Fdbk", "Pitch/Speed", "In/Out", "Slicer", "Cloud", "Effets", "Custom", "Display" }
 local NFIGHTER = #FIGHTER_NAMES
 for n = 1, NFIGHTER do
   TARGETS[#TARGETS + 1] = U("fighter:" .. n, "Twister page " .. n .. " (" .. SLOT_NAMES[n] .. ")", "Pages", { fighter = n })
@@ -153,6 +157,9 @@ for _, p in ipairs({
   P("par:stereo",   "Stereo (largeur)",               21, 21, 0, 1,   0),
   P("par:fdbk",     "Feedback",                       19, 19, 0, 2,   1),
   P("par:out_vol",  "Output Volume",                  22, 22, 0, 2,   1),
+  P("par:sl_mix",   "Slicer Dry/Wet",                 61, 193, 0, 1,  1),
+  P("par:cl_mix",   "Cloud Dry/Wet",                  36, 36, 0, 1,   1),
+  P("par:br_mix",   "Beat Repeat Dry/Wet",            60, 194, 0, 1,  1),
 }) do TARGETS[#TARGETS + 1] = p end
 
 -- Restart INDIVIDUEL par looper : agit toujours sur le looper nomme, sans tenir compte de la selection / du groupe
@@ -203,9 +210,9 @@ for idx = 0, 15 do
   }
 end
 
--- LEARN AUX : 16 knobs + 16 push pour CHAQUE page Twister (1..6)
+-- LEARN AUX : 16 knobs + 16 push pour CHAQUE page Twister (1..7 ; la page 8 Display n'a rien a piloter)
 -- Un controleur appris ici pilote la page en permanence (page active ou non).
-for p = 1, NFIGHTER do
+for p = 1, NFIGHTER - 1 do
   for idx = 0, 15 do
     local row, col = math.floor(idx / 4) + 1, (idx % 4) + 1
     TARGETS[#TARGETS + 1] = {
@@ -219,6 +226,149 @@ for p = 1, NFIGHTER do
       cat = "Aux P" .. p, kind = "aux_btn", page = p, idx = idx,
     }
   end
+end
+
+-- ===== CATALOGUE page Twister 7 "Custom" (IDENTIQUE dans nowundo_midi_learn.lua et twisterinoutreset.lua) =====
+-- Familles (couleur) : play = rouge (lecture / sortie / transport), pitch = rose, inout = vert (fenetre / rec),
+--                      slicer = jaune, cloud = bleu.
+-- Knobs : { id, libelle, famille, wr (id ecriture JSFX), off (offset lecture gmem), lo, hi, defaut, courbe ("log" | exposant), pas, io }
+--   io = "in" | "out" | "width" : fenetre de boucle (edition +160..162), valeurs en fraction de la boucle.
+-- Push : { id, libelle, famille, cmd (+48), arg (+49), wr, valeur ("tog" = bascule lue a l'offset tog_off), tog_off }
+CU_KNOBS = {
+  { "speed",     "Speed",              "pitch",  3,  3,   0.01,  100,  1,    "log" },
+  { "pitch",     "Pitch",              "pitch",  4,  4,   -48,   48,   0 },
+  { "grain",     "Grain (ms)",         "pitch",  6,  6,   20,    200,  80 },
+  { "grain_fade","Grain Fade %",       "pitch",  13, 13,  5,     50,   25 },
+  { "mix",       "Mix",                "play",   5,  5,   0,     1,    1 },
+  { "out_vol",   "Output Volume",      "play",   22, 22,  0,     2,    1 },
+  { "feedback",  "Feedback",           "play",   19, 19,  0,     2,    1 },
+  { "degrad",    "Degradation",        "play",   20, 20,  0,     1,    1 },
+  { "stereo",    "Stereo",             "play",   21, 21,  0,     1,    0 },
+  { "pos",       "Position (%)",       "play",   10, 47,  0,     100,  0 },
+  { "auto_thr",  "Auto Seuil",         "play",   11, 11,  0.01,  0.8,  0.15, "log" },
+  { "in",        "In",                 "inout",  0,  0,   0,     1,    0,    nil, nil, "in" },
+  { "out",       "Out",                "inout",  0,  0,   0,     1,    1,    nil, nil, "out" },
+  { "width",     "Width",              "inout",  0,  0,   0,     1,    1,    nil, nil, "width" },
+  { "fade",      "Fade (ms)",          "inout",  7,  7,   0,     500,  10,   2 },
+  { "rec_dens",  "Rec Density %",      "inout",  29, 29,  0,     100,  100 },
+  { "dens_len",  "Rec Density Length", "inout",  30, 30,  0,     6,    2,    nil, 1 },
+  { "sl_decay",  "Slice Decay",        "slicer", 16, 16,  4,     2000, 150,  "log" },
+  { "sl_attack", "Slice Attack",       "slicer", 55, 174, 0,     100,  0,    nil, 1 },
+  { "sl_steps",  "Slicer Steps",       "slicer", 47, 167, 1,     32,   8,    nil, 1 },
+  { "sl_rate",   "Slicer Rate",        "slicer", 15, 15,  0,     5,    3,    nil, 1 },
+  { "sl_grid",   "Grid Sub",           "slicer", 33, 33,  0,     9,    3,    nil, 1 },
+  { "sl_max",    "Max Slices",         "slicer", 48, 168, 0,     32,   16,   nil, 1 },
+  { "sl_pitch",  "Slicer Pitch Spread","slicer", 34, 34,  0,     100,  0 },
+  { "sl_detect", "Detect Thresh",      "slicer", 50, 165, 0.001, 0.8,  0.01, "log" },
+  { "cl_dens",   "Cloud Density",      "cloud",  26, 26,  0,     1,    0.5 },
+  { "cl_agit",   "Cloud Agitation",    "cloud",  27, 27,  0,     1,    0 },
+  { "cl_spread", "Cloud Spread",       "cloud",  28, 28,  0,     1,    0.1 },
+  { "cl_size",   "Cloud Size",         "cloud",  62, 190, 1,     1000, 80,   "log" },
+  { "cl_pitch",  "Cloud Pitch Spread", "cloud",  35, 35,  0,     100,  0 },
+  { "cl_mix",    "Cloud Dry/Wet",      "cloud",  36, 36,  0,     1,    1 },
+  { "sl_mix",    "Slicer Dry/Wet",     "slicer", 61, 193, 0,     1,    1 },
+  { "br_mix",    "Beat Repeat Dry/Wet","inout",  60, 194, 0,     1,    1 },
+  { "cl_pos",    "Cloud Pos",          "cloud",  38, 38,  0,     100,  50 },
+  { "cl_diff",   "Cloud Diffuse",      "cloud",  64, 192, 0,     1,    0 },
+  { "cl_lfo_r",  "Cloud LFO Rate",     "cloud",  40, 40,  0.1,   4,    1 },
+  { "cl_lfo_d",  "Cloud LFO Depth",    "cloud",  41, 41,  0,     100,  0 },
+}
+CU_BTNS = {
+  { "rec",        "Rec / Overdub",      "play",   1 },
+  { "stop_play",  "Stop / Play",        "play",   3 },
+  { "replace",    "Replace",            "play",   9 },
+  { "auto_rep",   "Auto-Replace",       "play",   10 },
+  { "multiply",   "Multiply",           "play",   13 },
+  { "rerec",      "Re-Rec",             "play",   17 },
+  { "restart",    "Restart",            "play",   16 },
+  { "clear",      "Clear (part)",       "play",   2 },
+  { "clear_full", "Clear Full",         "play",   11 },
+  { "undo",       "Undo",               "play",   14 },
+  { "redo",       "Redo",               "play",   15 },
+  { "auto",       "Auto Rec",           "play",   19 },
+  { "reverse",    "Reverse",            "play",   4 },
+  { "pingpong",   "Ping-Pong",          "play",   5 },
+  { "one_shot",   "One-Shot",           "play",   18 },
+  { "reset",      "Reset params",       "play",   24 },
+  { "link",       "Link P/S",           "pitch",  8 },
+  { "speed_m",    "Speed -1 oct",       "pitch",  20, -12 },
+  { "speed_p",    "Speed +1 oct",       "pitch",  20, 12 },
+  { "pitch_m12",  "Pitch -12",          "pitch",  21, -12 },
+  { "pitch_p12",  "Pitch +12",          "pitch",  21, 12 },
+  { "pitch_m1",   "Pitch -1",           "pitch",  21, -1 },
+  { "pitch_p1",   "Pitch +1",           "pitch",  21, 1 },
+  { "full_loop",  "Full Loop",          "inout",  22 },
+  { "quant",      "Quantise In/Out",    "inout",  23 },
+  { "beat_rep",   "Beat Repeat",        "inout",  33 },
+  { "slicer",     "Slicer on/off",      "slicer", 6 },
+  { "sl_regen",   "Slicer Regen",       "slicer", nil, nil, 56, 1 },
+  { "sl_src",     "Slicer Trans/Grid",  "slicer", nil, nil, 32, "tog", 32 },
+  { "sl_link",    "Slicer Link",        "slicer", nil, nil, 58, "tog", 177 },
+  { "cloud",      "Cloud on/off",       "cloud",  7 },
+  { "cl_freeze",  "Cloud Freeze",       "cloud",  nil, nil, 63, "tog", 191 },
+  { "cl_posmode", "Cloud Pos Link/Free","cloud",  nil, nil, 37, "tog", 37 },
+  { "knob_def",   "Defaut du knob",     "" },
+}
+CU_FAM_NAME = { { "play", "Lecture / Sortie / Transport" }, { "pitch", "Pitch / Speed / Grain" },
+                { "inout", "In / Out / Rec" }, { "slicer", "Slicer" }, { "cloud", "Cloud" }, { "", "Autre" } }
+
+-- v2.6 : page Twister 7 "Custom" : pas de learn, un MENU par knob / push (assignation lue par le script Twister)
+for idx = 0, 15 do
+  local row, col = math.floor(idx / 4) + 1, (idx % 4) + 1
+  TARGETS[#TARGETS + 1] = { id = "cu:knob:" .. idx, name = string.format("P7 Custom - Knob %d (r%d c%d)", idx + 1, row, col),
+                            cat = "Custom P7", kind = "cu_knob", idx = idx }
+  TARGETS[#TARGETS + 1] = { id = "cu:btn:" .. idx, name = string.format("P7 Custom - Push %d (r%d c%d)", idx + 1, row, col),
+                            cat = "Custom P7", kind = "cu_btn", idx = idx }
+end
+local CUL = { raw = nil, a = {},
+  RGB = { play = {0.95, 0.40, 0.38}, pitch = {0.95, 0.55, 0.82}, inout = {0.32, 0.88, 0.52},
+          slicer = {0.98, 0.83, 0.22}, cloud = {0.35, 0.70, 1.00} } }
+function CUL.is(t) return t.kind == "cu_knob" or t.kind == "cu_btn" end
+function CUL.parse()
+  local raw = reaper.GetExtState(EXT, "custom") or ""
+  if raw ~= CUL.raw then
+    CUL.raw, CUL.a = raw, {}
+    for key, id in raw:gmatch("([kb]%d+)=([%w_]+)") do CUL.a[key] = id end
+  end
+  return CUL.a
+end
+function CUL.key(t) return (t.kind == "cu_knob" and "k" or "b") .. t.idx end
+function CUL.get(t) return CUL.parse()[CUL.key(t)] end
+function CUL.list(t) return t.kind == "cu_knob" and CU_KNOBS or CU_BTNS end
+function CUL.find(t, id) for _, e in ipairs(CUL.list(t)) do if e[1] == id then return e end end end
+function CUL.set(t, id)
+  local a = CUL.parse()
+  a[CUL.key(t)] = id
+  local parts = {}
+  for i = 0, 15 do for _, pfx in ipairs({ "k", "b" }) do if a[pfx .. i] then parts[#parts + 1] = pfx .. i .. "=" .. a[pfx .. i] end end end
+  local raw = table.concat(parts, ";")
+  reaper.SetExtState(EXT, "custom", raw, true)
+  CUL.raw = raw
+end
+function CUL.text(t)
+  local e = CUL.find(t, CUL.get(t) or "")
+  if not e then return "— (aucune)", { 0.45, 0.45, 0.5 } end
+  return e[2], CUL.RGB[e[3]] or { 0.8, 0.8, 0.85 }
+end
+function CUL.menu(t)
+  local cur = CUL.get(t)
+  local items, ids = { (cur and "" or "!") .. "(aucune)" }, { "" }
+  for _, f in ipairs(CU_FAM_NAME) do
+    local sub = {}
+    for _, e in ipairs(CUL.list(t)) do if e[3] == f[1] then sub[#sub + 1] = e end end
+    for j, e in ipairs(sub) do
+      local lab = ((j == #sub) and "<" or "") .. ((cur == e[1]) and "!" or "") .. e[2]
+      if j == 1 then lab = ">" .. f[2] .. "|" .. lab end
+      items[#items + 1] = lab; ids[#ids + 1] = e[1]
+    end
+  end
+  gfx.x, gfx.y = gfx.mouse_x, gfx.mouse_y
+  local pick = gfx.showmenu(table.concat(items, "|"))
+  if pick and pick >= 1 and ids[pick] then
+    CUL.set(t, ids[pick] ~= "" and ids[pick] or nil)
+    return true                                    -- (notify est definie plus bas : l'appelant affiche le message)
+  end
+  return false
 end
 
 local BY_ID = {}
@@ -1045,7 +1195,7 @@ end
 -- Fichier : nowundo_midi_learn_model.txt, dans le dossier du script. Charge par defaut au demarrage.
 -- Boutons / touches : T sauver | L recharger | E exporter | I importer | M demarrer sur modele on/off
 --------------------------------------------------------------------------
-local TPL_KEYS = { "maps", "maps_aux", "maps_dev", "pickup", "midi_out", "midi_out_name" }
+local TPL_KEYS = { "maps", "maps_aux", "maps_dev", "pickup", "midi_out", "midi_out_name", "custom" }
 local model_blob = nil          -- contenu du modele tel que sauve/charge (pour detecter les modifications)
 local model_dirty_t, model_dirty = -10, false
 
@@ -1370,6 +1520,11 @@ local function draw()
     gfx.x = COLS[3].x
     local midi_txt = fmt_midi(m)
     if m and m.dev and m.dev ~= "" then midi_txt = midi_txt .. "  @" .. m.dev end
+    if CUL.is(t) then                                 -- v2.6 : Custom P7 = fonction choisie (couleur de sa famille)
+      local c
+      midi_txt, c = CUL.text(t)
+      gfx.set(c[1], c[2], c[3])
+    end
     while #midi_txt > 12 and gfx.measurestr(midi_txt) > COLS[3].w - S(6) do
       midi_txt = midi_txt:sub(1, #midi_txt - 2)
     end
@@ -1381,7 +1536,7 @@ local function draw()
     gfx.rect(lx, y + S(4), lw, ROW_H - S(8), 1)
     gfx.set(1, 1, 1)
     gfx.x, gfx.y = lx + S(12), y + S(5)
-    gfx.drawstr(learning and "..." or "Learn")
+    gfx.drawstr(learning and "..." or (CUL.is(t) and "Menu" or "Learn"))
 
     local rx = COLS[5].x + S(18)
     local ret_on = m and m.ret
@@ -1403,7 +1558,7 @@ local function draw()
       if pk_on then gfx.set(1, 1, 1); gfx.x, gfx.y = px + S(3), y + S(5); gfx.drawstr("✓") end
     end
 
-    if m then
+    if m or (CUL.is(t) and CUL.get(t)) then
       local cx = COLS[8].x + S(6)
       gfx.set(0.35, 0.2, 0.2)
       gfx.rect(cx, y + S(4), S(44), ROW_H - S(8), 1)
@@ -1414,7 +1569,11 @@ local function draw()
 
     if clicked and hover then
       local col = hit_col(mx, COLS)
-      if col == "learn" then
+      if CUL.is(t) then                               -- v2.6 : Custom P7 : menu / effacer, pas de learn
+        if col == "learn" or col == "midi" then
+          if CUL.menu(t) then notify(t.name .. "  ->  " .. (CUL.text(t))) end
+        elseif col == "clear" and CUL.get(t) then CUL.set(t, nil); notify("Cleared " .. t.name) end
+      elseif col == "learn" then
         if learn_id == t.id then learn_id = nil; notify("Learn cancelled")
         else learn_id = t.id; learn_armed_t = reaper.time_precise(); notify("Learning " .. t.name) end
       elseif col == "ret" then

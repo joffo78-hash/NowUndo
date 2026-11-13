@@ -1,5 +1,5 @@
 -- @description NowUndo Twister Control - Multi pages virtuelles
--- @version 3.3
+-- @version 3.4
 -- @about
 --   Page 1 Vol/Feedback | 2 Pitch/Speed | 3 In/Out | 4 Slicer | 5 Cloud | 6 Effets (FX Router)
 --   (v3.3 : pages 1 et 3 permutees ; chaque page garde sa couleur : Vol/Feedback rouge, In/Out vert.
@@ -7,6 +7,10 @@
 --   Page 5 Cloud v2 (NowUndo V3.21) : Density | Agitation | Spread | PSpread / Pos | Rate | Depth | LFO /
 --     Size | Diffuse | Mix | Freeze (push) / Width (= Stereo de la section Output)
 --   Page 6 : colonne = slot 1..4 de la source courante du FX Router, ligne = parametre 1..4 ; push = valeur par defaut.
+--   Page 7 Custom (v3.4) : 16 knobs + 16 push assignes dans le MIDI Learn (menus) ; agissent sur le looper selectionne ;
+--     couleur de chaque encodeur = famille de sa fonction (jaune slicer, rose pitch, vert in/out, bleu cloud, rouge lecture).
+--   Page 8 Display (v3.4) : rangees 1-2 = position de lecture des loopers 1..8 (anneau), rangees 3-4 = VU de sortie ;
+--     couleurs RGB eteintes sur le vrai Twister.
 --   Selection via Launchpad fighter page (ExtState nowundo_vl/fighter_page)
 --   Mode A groupes : deltas relatifs pour pages 1-3
 --   Pages 4-5 : looper (ou membres du groupe) selectionne
@@ -32,6 +36,8 @@ local PAGE_COL = {
   [4] = {0.95, 0.85, 0.20},  -- jaune
   [5] = {0.25, 0.55, 0.95},  -- bleu
   [6] = {0.20, 0.85, 0.90},  -- cyan (header page 6)
+  [7] = {0.85, 0.85, 0.88},  -- Custom (chaque knob a la couleur de sa fonction)
+  [8] = {0.55, 0.57, 0.62},  -- Display
 }
 -- Page 6 : couleur par colonne (slot 1..4) — teintes adoucies
 local PAGE6_COL = {
@@ -42,7 +48,7 @@ local PAGE6_COL = {
 }
 local PAGE_NAME = {
   [1] = "In/Out", [2] = "Pitch/Speed", [3] = "Vol/Feedback",
-  [4] = "Slicer", [5] = "Cloud", [6] = "Effets",
+  [4] = "Slicer", [5] = "Cloud", [6] = "Effets", [7] = "Custom", [8] = "Display",
 }
 
 --------------------------------------------------------------------------
@@ -134,7 +140,7 @@ end
 local PAGE_SLOT_SWAP = { [1] = 3, [3] = 1 }
 local function fighter_page()
   local p = tonumber(reaper.GetExtState(VL_SEC, "fighter_page")) or 1
-  p = math.max(1, math.min(6, math.floor(p)))
+  p = math.max(1, math.min(8, math.floor(p)))
   return PAGE_SLOT_SWAP[p] or p
 end
 
@@ -660,6 +666,217 @@ local function make_cloud_page()
   return cells
 end
 
+-- ===== CATALOGUE page Twister 7 "Custom" (IDENTIQUE dans nowundo_midi_learn.lua et twisterinoutreset.lua) =====
+-- Familles (couleur) : play = rouge (lecture / sortie / transport), pitch = rose, inout = vert (fenetre / rec),
+--                      slicer = jaune, cloud = bleu.
+-- Knobs : { id, libelle, famille, wr (id ecriture JSFX), off (offset lecture gmem), lo, hi, defaut, courbe ("log" | exposant), pas, io }
+--   io = "in" | "out" | "width" : fenetre de boucle (edition +160..162), valeurs en fraction de la boucle.
+-- Push : { id, libelle, famille, cmd (+48), arg (+49), wr, valeur ("tog" = bascule lue a l'offset tog_off), tog_off }
+CU_KNOBS = {
+  { "speed",     "Speed",              "pitch",  3,  3,   0.01,  100,  1,    "log" },
+  { "pitch",     "Pitch",              "pitch",  4,  4,   -48,   48,   0 },
+  { "grain",     "Grain (ms)",         "pitch",  6,  6,   20,    200,  80 },
+  { "grain_fade","Grain Fade %",       "pitch",  13, 13,  5,     50,   25 },
+  { "mix",       "Mix",                "play",   5,  5,   0,     1,    1 },
+  { "out_vol",   "Output Volume",      "play",   22, 22,  0,     2,    1 },
+  { "feedback",  "Feedback",           "play",   19, 19,  0,     2,    1 },
+  { "degrad",    "Degradation",        "play",   20, 20,  0,     1,    1 },
+  { "stereo",    "Stereo",             "play",   21, 21,  0,     1,    0 },
+  { "pos",       "Position (%)",       "play",   10, 47,  0,     100,  0 },
+  { "auto_thr",  "Auto Seuil",         "play",   11, 11,  0.01,  0.8,  0.15, "log" },
+  { "in",        "In",                 "inout",  0,  0,   0,     1,    0,    nil, nil, "in" },
+  { "out",       "Out",                "inout",  0,  0,   0,     1,    1,    nil, nil, "out" },
+  { "width",     "Width",              "inout",  0,  0,   0,     1,    1,    nil, nil, "width" },
+  { "fade",      "Fade (ms)",          "inout",  7,  7,   0,     500,  10,   2 },
+  { "rec_dens",  "Rec Density %",      "inout",  29, 29,  0,     100,  100 },
+  { "dens_len",  "Rec Density Length", "inout",  30, 30,  0,     6,    2,    nil, 1 },
+  { "sl_decay",  "Slice Decay",        "slicer", 16, 16,  4,     2000, 150,  "log" },
+  { "sl_attack", "Slice Attack",       "slicer", 55, 174, 0,     100,  0,    nil, 1 },
+  { "sl_steps",  "Slicer Steps",       "slicer", 47, 167, 1,     32,   8,    nil, 1 },
+  { "sl_rate",   "Slicer Rate",        "slicer", 15, 15,  0,     5,    3,    nil, 1 },
+  { "sl_grid",   "Grid Sub",           "slicer", 33, 33,  0,     9,    3,    nil, 1 },
+  { "sl_max",    "Max Slices",         "slicer", 48, 168, 0,     32,   16,   nil, 1 },
+  { "sl_pitch",  "Slicer Pitch Spread","slicer", 34, 34,  0,     100,  0 },
+  { "sl_detect", "Detect Thresh",      "slicer", 50, 165, 0.001, 0.8,  0.01, "log" },
+  { "cl_dens",   "Cloud Density",      "cloud",  26, 26,  0,     1,    0.5 },
+  { "cl_agit",   "Cloud Agitation",    "cloud",  27, 27,  0,     1,    0 },
+  { "cl_spread", "Cloud Spread",       "cloud",  28, 28,  0,     1,    0.1 },
+  { "cl_size",   "Cloud Size",         "cloud",  62, 190, 1,     1000, 80,   "log" },
+  { "cl_pitch",  "Cloud Pitch Spread", "cloud",  35, 35,  0,     100,  0 },
+  { "cl_mix",    "Cloud Dry/Wet",      "cloud",  36, 36,  0,     1,    1 },
+  { "sl_mix",    "Slicer Dry/Wet",     "slicer", 61, 193, 0,     1,    1 },
+  { "br_mix",    "Beat Repeat Dry/Wet","inout",  60, 194, 0,     1,    1 },
+  { "cl_pos",    "Cloud Pos",          "cloud",  38, 38,  0,     100,  50 },
+  { "cl_diff",   "Cloud Diffuse",      "cloud",  64, 192, 0,     1,    0 },
+  { "cl_lfo_r",  "Cloud LFO Rate",     "cloud",  40, 40,  0.1,   4,    1 },
+  { "cl_lfo_d",  "Cloud LFO Depth",    "cloud",  41, 41,  0,     100,  0 },
+}
+CU_BTNS = {
+  { "rec",        "Rec / Overdub",      "play",   1 },
+  { "stop_play",  "Stop / Play",        "play",   3 },
+  { "replace",    "Replace",            "play",   9 },
+  { "auto_rep",   "Auto-Replace",       "play",   10 },
+  { "multiply",   "Multiply",           "play",   13 },
+  { "rerec",      "Re-Rec",             "play",   17 },
+  { "restart",    "Restart",            "play",   16 },
+  { "clear",      "Clear (part)",       "play",   2 },
+  { "clear_full", "Clear Full",         "play",   11 },
+  { "undo",       "Undo",               "play",   14 },
+  { "redo",       "Redo",               "play",   15 },
+  { "auto",       "Auto Rec",           "play",   19 },
+  { "reverse",    "Reverse",            "play",   4 },
+  { "pingpong",   "Ping-Pong",          "play",   5 },
+  { "one_shot",   "One-Shot",           "play",   18 },
+  { "reset",      "Reset params",       "play",   24 },
+  { "link",       "Link P/S",           "pitch",  8 },
+  { "speed_m",    "Speed -1 oct",       "pitch",  20, -12 },
+  { "speed_p",    "Speed +1 oct",       "pitch",  20, 12 },
+  { "pitch_m12",  "Pitch -12",          "pitch",  21, -12 },
+  { "pitch_p12",  "Pitch +12",          "pitch",  21, 12 },
+  { "pitch_m1",   "Pitch -1",           "pitch",  21, -1 },
+  { "pitch_p1",   "Pitch +1",           "pitch",  21, 1 },
+  { "full_loop",  "Full Loop",          "inout",  22 },
+  { "quant",      "Quantise In/Out",    "inout",  23 },
+  { "beat_rep",   "Beat Repeat",        "inout",  33 },
+  { "slicer",     "Slicer on/off",      "slicer", 6 },
+  { "sl_regen",   "Slicer Regen",       "slicer", nil, nil, 56, 1 },
+  { "sl_src",     "Slicer Trans/Grid",  "slicer", nil, nil, 32, "tog", 32 },
+  { "sl_link",    "Slicer Link",        "slicer", nil, nil, 58, "tog", 177 },
+  { "cloud",      "Cloud on/off",       "cloud",  7 },
+  { "cl_freeze",  "Cloud Freeze",       "cloud",  nil, nil, 63, "tog", 191 },
+  { "cl_posmode", "Cloud Pos Link/Free","cloud",  nil, nil, 37, "tog", 37 },
+  { "knob_def",   "Defaut du knob",     "" },
+}
+CU_FAM_NAME = { { "play", "Lecture / Sortie / Transport" }, { "pitch", "Pitch / Speed / Grain" },
+                { "inout", "In / Out / Rec" }, { "slicer", "Slicer" }, { "cloud", "Cloud" }, { "", "Autre" } }
+
+-- ===== v3.4 : moteur des pages 7 (Custom) et 8 (Display) — tout dans la table CU (pas de nouvelles locales) =====
+local CU = { K = {}, B = {}, raw = nil, cache = {}, t = -10, recolor = false }
+for _, k in ipairs(CU_KNOBS) do CU.K[k[1]] = k end
+for _, b in ipairs(CU_BTNS) do CU.B[b[1]] = b end
+-- famille -> { r, g, b (fenetre), valeur couleur du vrai Twister (meme echelle que TW_PAGE_COLOR) }
+CU.FAM = { play = {0.90, 0.25, 0.25, 84}, pitch = {0.95, 0.40, 0.70, 108}, inout = {0.20, 0.75, 0.40, 50},
+           slicer = {0.95, 0.85, 0.20, 63}, cloud = {0.25, 0.55, 0.95, 126} }
+function CU.n_of(k, v)
+  local lo, hi, c = k[6], k[7], k[9]
+  if c == "log" then return clamp(math.log(math.max(v, lo) / lo) / math.log(hi / lo), 0, 1) end
+  local n = clamp((v - lo) / (hi - lo), 0, 1)
+  if type(c) == "number" then n = n ^ (1 / c) end
+  return n
+end
+function CU.v_of(k, n)
+  n = clamp(n, 0, 1)
+  local lo, hi, c, st = k[6], k[7], k[9], k[10]
+  local v
+  if c == "log" then v = lo * (hi / lo) ^ n
+  elseif type(c) == "number" then v = lo + (n ^ c) * (hi - lo)
+  else v = lo + n * (hi - lo) end
+  if st then v = math.floor(v / st + 0.5) * st end
+  return clamp(v, lo, hi)
+end
+-- valeur normalisee 0..1 du knob k sur le looper s
+function CU.get_n(k, s)
+  if k[11] then
+    local len = read_fb(s, 46)
+    if len <= 0 then return 0 end
+    local i0, w0 = read_fb(s, 44), read_fb(s, 45)
+    if k[11] == "in" then return clamp(i0 / len, 0, 1) end
+    if k[11] == "out" then return clamp((i0 + w0) / len, 0, 1) end
+    return clamp(w0 / len, 0, 1)
+  end
+  return CU.n_of(k, read_fb(s, k[5]))
+end
+function CU.set_n(k, s, n)
+  if not looper_alive(s, reaper.time_precise()) then return end
+  if k[11] then
+    local len = read_fb(s, 46)
+    if len <= 0 then return end
+    local i0, w0 = read_fb(s, 44), read_fb(s, 45)
+    if k[11] == "in" then write_edit(s, 1, math.max(0, math.min(i0 + w0, n * len)), nil)      -- In (Out fixe)
+    elseif k[11] == "out" then write_edit(s, 2, nil, math.max(i0, math.min(len, n * len)))   -- Out
+    else write_edit(s, 3, nil, math.max(0, math.min(len - i0, n * len))) end                  -- Width
+    return
+  end
+  write_param(s, k[4], CU.v_of(k, n))
+end
+function CU.disp(k, s)
+  if k[11] then return string.format("%.0f%%", CU.get_n(k, s) * 100) end
+  local v = read_fb(s, k[5])
+  if k[1] == "speed" then return string.format("%.2fx", v) end
+  if k[1] == "pitch" then return string.format("%+.1fst", v) end
+  if k[10] then return string.format("%.0f", v) end
+  if k[7] - k[6] >= 10 then return string.format("%.0f", v) end
+  return string.format("%.2f", v)
+end
+function CU.fire(bid, kid)
+  local b = CU.B[bid]
+  local s = sel_looper()
+  if not b or not looper_alive(s, reaper.time_precise()) then return end
+  if bid == "knob_def" then
+    local k = kid and CU.K[kid]
+    if k then
+      if k[11] then CU.set_n(k, s, (k[11] == "in") and 0 or 1) else write_param(s, k[4], k[8]) end
+    end
+    return
+  end
+  if b[4] then
+    local base = gbase(s, active_part(s))
+    if b[5] ~= nil then reaper.gmem_write(base + 49, b[5]) end
+    reaper.gmem_write(base + 48, b[4])
+  elseif b[6] then
+    if b[7] == "tog" then write_param(s, b[6], read_fb(s, b[8]) > 0.5 and 0 or 1)
+    else write_param(s, b[6], b[7]) end
+  end
+end
+-- Page 7 : cellules construites a partir des assignations du MIDI Learn (ExtState NowUndo_MIDILearn / custom)
+function CU.cells()
+  local now = reaper.time_precise()
+  if now - CU.t < 0.25 then return CU.cache end
+  CU.t = now
+  local raw = reaper.GetExtState("NowUndo_MIDILearn", "custom") or ""
+  if raw == CU.raw then return CU.cache end
+  CU.raw, CU.recolor = raw, true
+  local asg = {}
+  for key, id in raw:gmatch("([kb]%d+)=([%w_]+)") do asg[key] = id end
+  local cells = {}
+  for idx = 0, 15 do
+    local kid, bid = asg["k" .. idx], asg["b" .. idx]
+    local k, b = kid and CU.K[kid], bid and CU.B[bid]
+    if k or b then
+      local fam = CU.FAM[(k and k[3]) or (b and b[3]) or ""]
+      cells[math.floor(idx / 4) .. "," .. (idx % 4)] = {
+        label = k and k[2] or b[2], col = fam and { fam[1], fam[2], fam[3] } or nil, twc = fam and fam[4] or nil,
+        get = function() return k and CU.get_n(k, sel_looper()) or 0 end,
+        set = function(_, n) if k then CU.set_n(k, sel_looper(), n) end end,
+        to_n = function(n) return n end, from_n = function(n) return n end,
+        push = b and function() CU.fire(bid, kid) end or nil,
+        disp = function() if k then return CU.disp(k, sel_looper()) end return b and "push" or "" end,
+      }
+    end
+  end
+  CU.cache = cells
+  return cells
+end
+-- Page 8 : affichage (lecture seule). Rangees 1-2 : position de lecture L1..L8 ; rangees 3-4 : VU de sortie L1..L8.
+CU.P8 = {}
+for i = 1, 8 do
+  local r, c = math.floor((i - 1) / 4), (i - 1) % 4
+  CU.P8[r .. "," .. c] = {
+    label = "L" .. i .. " Pos", looper = i,
+    get = function(li) return read_fb(li, 47) end, set = function() end,
+    to_n = function(v) return clamp(v / 100, 0, 1) end, from_n = function(n) return n end,
+    disp = function(v) return string.format("%.0f%%", v) end,
+  }
+  CU.P8[(r + 2) .. "," .. c] = {
+    label = "L" .. i .. " Out", looper = i,
+    get = function(li) return read_fb(li, 173) end, set = function() end,
+    to_n = function(v) return clamp((20 * math.log(math.max(v, 0.00001), 10) + 48) / 48, 0, 1) end,
+    from_n = function(n) return n end,
+    disp = function(v) if v < 0.0001 then return "-inf" end return string.format("%.0fdB", 20 * math.log(v, 10)) end,
+  }
+end
+function CU.page_cells(page) if page == 7 then return CU.cells() end return CU.P8 end
+
 local PAGES = {
   [2] = make_scalar_page_pitch_speed(),
   [3] = make_scalar_page_vol_fb(),
@@ -1082,7 +1299,7 @@ end
 -- Init / loop
 --------------------------------------------------------------------------
 local HB_EXT = "NowUndo_Twister"
-local SCRIPT_VERSION = "3.3-cloud2-swap13"   -- change a chaque version : la nouvelle instance remplace l'ancienne
+local SCRIPT_VERSION = "3.4-custom-display"   -- change a chaque version : la nouvelle instance remplace l'ancienne
 local ui_open = true
 
 function init()
@@ -1238,6 +1455,12 @@ local function read_knob_norm(page, idx, now_t)
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     return clamp(fx_get_param_norm(s, p) or 0, 0, 1)
+  elseif page == 7 or page == 8 then
+    local spec = CU.page_cells(page)[math.floor(idx / 4) .. "," .. (idx % 4)]
+    if not spec then return 0 end
+    local li = spec.looper or sel_looper()
+    if not looper_alive(li, now_t) then return 0 end
+    return clamp(spec.to_n(spec.get(li)), 0, 1)
   end
   return 0
 end
@@ -1336,6 +1559,26 @@ end
 local function twister_send_colors(page)
   if not TW_COLORS then return end
   if resolve_midi_out() < 0 or not reaper.SendMIDIMessageToHardware then return end
+  -- v3.4 : luminosite RGB par encodeur (canal 3 du Twister : 17 = eteint ... 47 = plein)
+  local function bright(enc, on)
+    local v = on and 47 or 17
+    log_sent(0xB0, 2, enc, v)
+    pcall(reaper.SendMIDIMessageToHardware, midi_out_idx, string.char(0xB2, enc, v))
+  end
+  if page == 7 or page == 8 then
+    local cells = (page == 7) and CU.cells() or {}
+    for enc = 0, 15 do
+      local spec = cells[math.floor(enc / 4) .. "," .. (enc % 4)]
+      local val = spec and spec.twc
+      if val then
+        log_sent(0xB0, TW_COLOR_CH, enc, val)
+        pcall(reaper.SendMIDIMessageToHardware, midi_out_idx, string.char(0xB0 + TW_COLOR_CH, enc, val))
+      end
+      bright(enc, val ~= nil)                        -- page 8 / encodeur non assigne : couleur eteinte
+    end
+    return
+  end
+  for enc = 0, 15 do bright(enc, true) end            -- autres pages : couleur rallumee
   if page == 6 then
     for enc = 0, 15 do
       local val = TW_PAGE6_COL[enc % 4] or TW_PAGE_COLOR[6]
@@ -1536,7 +1779,10 @@ local function midi_apply_knob(idx, norm, page)
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     fx_set_param(s, p, norm)
-  end
+  elseif page == 7 then
+    local spec = CU.cells()[math.floor(idx / 4) .. "," .. (idx % 4)]
+    if spec then spec.set(nil, norm) end
+  end                                                  -- page 8 : affichage seul
 end
 
 local function midi_apply_btn(idx, page)
@@ -1586,6 +1832,9 @@ local function midi_apply_btn(idx, page)
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     fx_reset_param(s, p)
+  elseif page == 7 then
+    local spec = CU.cells()[math.floor(idx / 4) .. "," .. (idx % 4)]
+    if spec and spec.push then spec.push() end
   end
 end
 
@@ -1655,7 +1904,7 @@ local function aux_reload(force)
   aux_t = t
   local raw = reaper.GetExtState(LEARN_EXT, "maps_aux") or ""
   local extra = {}
-  for p = 1, 6 do
+  for p = 1, 8 do
     extra[#extra + 1] = reaper.GetExtState(LEARN_EXT, "aux_out_" .. p)
     extra[#extra + 1] = reaper.GetExtState(LEARN_EXT, "aux_out_name_" .. p)
     extra[#extra + 1] = reaper.GetExtState(LEARN_EXT, "aux_excl_" .. p)
@@ -1680,7 +1929,7 @@ local function aux_reload(force)
       end
     end
   end
-  for p = 1, 6 do
+  for p = 1, 8 do
     aux_out[p] = out_by_name(reaper.GetExtState(LEARN_EXT, "aux_out_name_" .. p),
       tonumber(reaper.GetExtState(LEARN_EXT, "aux_out_" .. p)) or -1)
     aux_excl[p] = reaper.GetExtState(LEARN_EXT, "aux_excl_" .. p) == "1"
@@ -1860,8 +2109,10 @@ function main()
   end
 
   local page = fighter_page()
-  if page ~= last_fighter_page then
+  if page == 7 then CU.cells() end
+  if page ~= last_fighter_page or (page == 7 and CU.recolor) then
     last_fighter_page = page
+    CU.recolor = false
     for i = 0, 15 do midi_fb_last[i] = -1 end  -- forcer renvoi complet
     midi_feedback_page(page)
     twister_send_colors(page)
@@ -1905,7 +2156,13 @@ function main()
   if mouse_click and gfx.mouse_y < 26 * s then
     pick_midi_out()
   end
-  if page >= 4 and page <= 5 then
+  if page == 7 then
+    gfx.setfont(1, "Arial", math.floor(9 * s))
+    gfx.set(0.7, 0.7, 0.7, 1)
+    gfx.x = 6 * s
+    gfx.y = 16 * s
+    gfx.drawstr("→ L" .. sel_looper() .. "   (assignations : MIDI Learn > Custom P7)")
+  elseif page >= 4 and page <= 5 then
     gfx.setfont(1, "Arial", math.floor(9 * s))
     gfx.set(0.7, 0.7, 0.7, 1)
     gfx.x = 6 * s
@@ -2053,7 +2310,7 @@ function main()
     ------------------------------------------------------------------
     -- PAGES 2-5 : grille declarative
     ------------------------------------------------------------------
-    local cells = (page == 6) and fx_cells() or PAGES[page] or {}
+    local cells = (page == 6) and fx_cells() or ((page >= 7) and CU.page_cells(page)) or PAGES[page] or {}
     local fx6 = (page == 6) and fx_struct() or nil
     for row = 0, ROWS - 1 do
       for coln = 0, COLS - 1 do
@@ -2062,7 +2319,7 @@ function main()
         local cx = start_x + coln * cell_w + cell_w * 0.5
         local cy = start_y + row * cell_h + 22 * s
         -- couleur par colonne sur la page 6, sinon couleur de page
-        local kcol = (page == 6) and (PAGE6_COL[coln] or col) or col
+        local kcol = (page == 6) and (PAGE6_COL[coln] or col) or ((page == 7 and spec and spec.col) or col)
         if not spec then
           -- empty cell
           gfx.set(0.12, 0.12, 0.14, 0.5)

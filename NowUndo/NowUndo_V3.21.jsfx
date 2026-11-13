@@ -1951,6 +1951,8 @@ loop(3,
     gmem[gmem_base + 190] = cloud_size;      // V3.21 : Cloud v2 (lu par le Twister)
     gmem[gmem_base + 191] = cloud_freeze;
     gmem[gmem_base + 192] = cloud_diffuse;
+    gmem[gmem_base + 193] = slx_mix;         // V3.21 : Slicer Dry/Wet (lu par le Twister / MIDI Learn)
+    gmem[gmem_base + 194] = br_mix;          // V3.21 : Beat Repeat Dry/Wet
     gmem[gmem_base + 42] = active_part;
     gmem[gmem_base + 163] = pending_part_switch;
     gmem[gmem_base + 164] = target_part;
