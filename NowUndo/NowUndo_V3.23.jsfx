@@ -844,7 +844,7 @@ function try_finish_rec(target, from_auto) local(ms_off, locked, mid, is_self, i
   ) : (
       // V3.22 : boucle libre -> la fin est ramenee a l'instant de l'appui, et la lecture repart deja avancee d'autant
       k = rec_stop_lag; rec_stop_lag = 0;
-      (k > 0 && !rev_on && !pingpong_on && pos - k > max(srate * 0.1, k * 2)) ? pos -= k : k = 0;
+      (k > 0 && !rev_on && !pingpong_on && pos - k > max(srate * 0.1, k * 2)) ? ( pos -= k; ) : ( k = 0; );
       finish_rec(target);
       k > 0 ? (
         k = floor(k); pos = k; master_pos = k;
@@ -929,7 +929,7 @@ function tape_write_span(w_from, w_to, w_mode) local(k, k_end, seg_a, seg_b, wgt
 // l'heure de l'appui (gmem[950], cible gmem[951]) et le JSFX mesure le retard. Au depart, on recopie depuis
 // l'historique d'entree (ih_*, deja tenu en permanence) les D derniers samples : la boucle commence a l'appui.
 function rec_preroll(D) local(k, j, p, s0, s1, q0, q1) (
-  D = floor(min(D, srate * 0.1, ih_size - 2));
+  D = floor(min(min(D, srate * 0.1), ih_size - 2));
   D > 0 ? (
     s0 = in0; s1 = in1; q0 = prev_in0; q1 = prev_in1;
     j = (ih_n - D - 1) & ih_mask; in0 = ih_l[j]; in1 = ih_r[j];
@@ -2685,7 +2685,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       // confirmation a la fermeture evitent que le gate "tousse". Ouverture en 3 ms, fermeture en 25 ms, et l'ecriture
       // continue pendant la fermeture -> la couche se raccorde en fondu, sans marche dans le buffer.
       ar_in += (curr_peak > ar_in ? ar_att : ar_rel) * (curr_peak - ar_in);
-      ar_k = pos + wr_off; ar_k < eff_start ? ar_k += eff_len : ar_k >= eff_end ? ar_k -= eff_len;
+      ar_k = pos + wr_off; ar_k < eff_start ? ( ar_k += eff_len; ) : ( ar_k >= eff_end ? ( ar_k -= eff_len; ); );
       ar_k = floor(max(0, min(length - 1, ar_k)));
       ar_x = max(abs(left_buf[ar_k]), abs(right_buf[ar_k]));
       ar_lp += (ar_x > ar_lp ? ar_att : ar_rel) * (ar_x - ar_lp);
