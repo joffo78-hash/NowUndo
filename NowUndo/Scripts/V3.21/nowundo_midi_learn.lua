@@ -151,6 +151,7 @@ end
 for _, p in ipairs({
   P("par:density",  "Rec Density (%)",                29, 29, 0, 100, 100),
   P("par:dens_len", "Rec Density Length (1/1..1/64)", 30, 30, 0, 6,   2, 1, 1),
+  P("par:io_frac",  "In/Out Fraction (Free..1/64)",   59, 25, 0, 9,   0, 1, 1),
   P("par:fade",     "Fade (ms)",                      7,  7,  0, 500, 10, 2),   -- course quadratique : finesse en bas
   P("par:mix",      "Mix (dry / wet)",                5,  5,  0, 1,   1),
   P("par:degrad",   "Degradation",                    20, 20, 0, 1,   1),
@@ -250,8 +251,9 @@ CU_KNOBS = {
   { "out",       "Out",                "inout",  0,  0,   0,     1,    1,    nil, nil, "out" },
   { "width",     "Width",              "inout",  0,  0,   0,     1,    1,    nil, nil, "width" },
   { "fade",      "Fade (ms)",          "inout",  7,  7,   0,     500,  10,   2 },
-  { "rec_dens",  "Rec Density %",      "inout",  29, 29,  0,     100,  100 },
-  { "dens_len",  "Rec Density Length", "inout",  30, 30,  0,     6,    2,    nil, 1 },
+  { "rec_dens",  "Rec Density %",      "pitch",  29, 29,  0,     100,  100 },
+  { "dens_len",  "Rec Density Length", "pitch",  30, 30,  0,     6,    2,    nil, 1 },
+  { "io_frac",   "In/Out Fraction",    "inout",  59, 25,  0,     9,    0,    nil, 1 },
   { "sl_decay",  "Slice Decay",        "slicer", 16, 16,  4,     2000, 150,  "log" },
   { "sl_attack", "Slice Attack",       "slicer", 55, 174, 0,     100,  0,    nil, 1 },
   { "sl_steps",  "Slicer Steps",       "slicer", 47, 167, 1,     32,   8,    nil, 1 },

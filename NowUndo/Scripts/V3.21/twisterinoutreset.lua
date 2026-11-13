@@ -688,8 +688,9 @@ CU_KNOBS = {
   { "out",       "Out",                "inout",  0,  0,   0,     1,    1,    nil, nil, "out" },
   { "width",     "Width",              "inout",  0,  0,   0,     1,    1,    nil, nil, "width" },
   { "fade",      "Fade (ms)",          "inout",  7,  7,   0,     500,  10,   2 },
-  { "rec_dens",  "Rec Density %",      "inout",  29, 29,  0,     100,  100 },
-  { "dens_len",  "Rec Density Length", "inout",  30, 30,  0,     6,    2,    nil, 1 },
+  { "rec_dens",  "Rec Density %",      "pitch",  29, 29,  0,     100,  100 },
+  { "dens_len",  "Rec Density Length", "pitch",  30, 30,  0,     6,    2,    nil, 1 },
+  { "io_frac",   "In/Out Fraction",    "inout",  59, 25,  0,     9,    0,    nil, 1 },
   { "sl_decay",  "Slice Decay",        "slicer", 16, 16,  4,     2000, 150,  "log" },
   { "sl_attack", "Slice Attack",       "slicer", 55, 174, 0,     100,  0,    nil, 1 },
   { "sl_steps",  "Slicer Steps",       "slicer", 47, 167, 1,     32,   8,    nil, 1 },
@@ -757,6 +758,7 @@ for _, b in ipairs(CU_BTNS) do CU.B[b[1]] = b end
 -- famille -> { r, g, b (fenetre), valeur couleur du vrai Twister (meme echelle que TW_PAGE_COLOR) }
 CU.FAM = { play = {0.90, 0.25, 0.25, 84}, pitch = {0.95, 0.40, 0.70, 108}, inout = {0.20, 0.75, 0.40, 50},
            slicer = {0.95, 0.85, 0.20, 63}, cloud = {0.25, 0.55, 0.95, 126} }
+CU.FRAC = { [0] = "Free", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16", "1/32", "1/64" }
 function CU.n_of(k, v)
   local lo, hi, c = k[6], k[7], k[9]
   if c == "log" then return clamp(math.log(math.max(v, lo) / lo) / math.log(hi / lo), 0, 1) end
@@ -804,6 +806,8 @@ function CU.disp(k, s)
   local v = read_fb(s, k[5])
   if k[1] == "speed" then return string.format("%.2fx", v) end
   if k[1] == "pitch" then return string.format("%+.1fst", v) end
+  if k[1] == "io_frac" then return CU.FRAC[math.floor(v + 0.5)] or "?" end
+  if k[1] == "dens_len" then return "1/" .. math.floor(2 ^ math.floor(v + 0.5) + 0.5) end
   if k[10] then return string.format("%.0f", v) end
   if k[7] - k[6] >= 10 then return string.format("%.0f", v) end
   return string.format("%.2f", v)
