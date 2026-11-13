@@ -1,6 +1,10 @@
 -- @description NowUndo MIDI Learn — Launchpad + Twister
--- @version 2.6
+-- @version 2.7
 -- @about
+--   v2.7 : TOUCHES CLAVIER. Le meme bouton Learn accepte une note / CC MIDI OU une touche du clavier (avec Ctrl / Maj /
+--          Alt) : la touche devient un raccourci de la fonction. Necessite l'extension js_ReaScriptAPI (ReaPack) :
+--          lecture du clavier dans tout REAPER, et blocage des touches apprises (touche I : bloquer / laisser passer)
+--          pour qu'elles ne declenchent plus le raccourci REAPER d'origine. Pas pour les knobs / push du Twister.
 --   v2.6 : pages Twister 7 (Custom) et 8 (Display). Groupe "Custom P7" : 16 knobs + 16 push dont la fonction se choisit
 --          dans un MENU (colonne Learn -> Menu), parmi les reglages / actions du looper ; s'appliquent au looper selectionne.
 --          Assignations : ExtState "custom" (sauvees avec le modele).
@@ -485,9 +489,27 @@ end
 --------------------------------------------------------------------------
 -- MIDI helpers
 --------------------------------------------------------------------------
+-- v2.7 : clavier. status KEYST, d1 = code touche Windows (VK) + modificateurs * 256 (1 Maj, 2 Ctrl, 4 Alt)
+local KB = { ST = 256, prev = nil, down = {}, icpt = {}, warned = false, sig = nil }
+KB.NAMES = { [8] = "Retour", [9] = "Tab", [13] = "Entree", [19] = "Pause", [20] = "VerrMaj", [27] = "Echap", [32] = "Espace",
+  [33] = "PgPrec", [34] = "PgSuiv", [35] = "Fin", [36] = "Debut", [37] = "Gauche", [38] = "Haut", [39] = "Droite", [40] = "Bas",
+  [45] = "Inser", [46] = "Suppr", [106] = "Pav*", [107] = "Pav+", [109] = "Pav-", [110] = "Pav.", [111] = "Pav/",
+  [186] = ";", [187] = "=", [188] = ",", [189] = "-", [190] = ".", [191] = "/", [192] = "`", [219] = "[", [220] = "\\", [221] = "]", [222] = "'" }
+function KB.name(code)
+  local vk, md = code % 256, math.floor(code / 256)
+  local n = KB.NAMES[vk]
+  if not n then
+    if (vk >= 48 and vk <= 57) or (vk >= 65 and vk <= 90) then n = string.char(vk)
+    elseif vk >= 96 and vk <= 105 then n = "Pav" .. (vk - 96)
+    elseif vk >= 112 and vk <= 135 then n = "F" .. (vk - 111)
+    else n = "#" .. vk end
+  end
+  return ((md & 2) ~= 0 and "Ctrl+" or "") .. ((md & 4) ~= 0 and "Alt+" or "") .. ((md & 1) ~= 0 and "Maj+" or "") .. n
+end
 local function fmt_midi(m)
   if not m or not m.status then return "—" end
   local st = m.status
+  if st == KB.ST then return "Touche " .. KB.name(m.d1 or 0) end
   if st == 0x90 or st == 0x80 then
     return string.format("Note ch%d n%d", m.ch + 1, m.d1)
   elseif st == 0xB0 then
@@ -1108,10 +1130,14 @@ local function steal_assignment(new_id, ev, dn)
   return removed
 end
 
-local function handle_event(msg, dev)
-  local dn = dev_name(dev)
-  if dn ~= "" and is_ignored_dev(dn) then return end
-  local ev = parse_midi_msg(msg)
+local function handle_event(msg, dev, kev)
+  local dn, ev
+  if kev then dn, ev = "clavier", kev                -- v2.7 : evenement clavier (voir process_keys)
+  else
+    dn = dev_name(dev)
+    if dn ~= "" and is_ignored_dev(dn) then return end
+    ev = parse_midi_msg(msg)
+  end
   if not ev then return end
   local now = reaper.time_precise()
 
@@ -1126,7 +1152,12 @@ local function handle_event(msg, dev)
       return
     end
     learn_block = nil
-    local is_off = ev.note_off or (ev.status == 0x90 and ev.d2 == 0)
+    local is_off = ev.note_off or ((ev.status == 0x90 or ev.status == KB.ST) and ev.d2 == 0)
+    local lt = BY_ID[learn_id]
+    if ev.status == KB.ST and lt and (lt.kind == "tw_knob" or lt.kind == "tw_btn" or lt.kind == "aux_knob" or lt.kind == "aux_btn") then
+      if not is_off then notify("Clavier : pas pour les knobs / push du Twister (ils sont lus par le script Twister)") end
+      return
+    end
     if (now - learn_armed_t) > 0.05 and not is_off then
       local done_id = learn_id
       local removed = steal_assignment(done_id, ev, dn)
@@ -1157,7 +1188,7 @@ local function handle_event(msg, dev)
       local tgt = BY_ID[id]
       if tgt then
         local is_on, is_off = false, false
-        if ev.status == 0x90 then
+        if ev.status == 0x90 or ev.status == KB.ST then
           if ev.note_off or ev.d2 == 0 then is_off = true else is_on = true end
         elseif ev.status == 0xB0 then
           if m.gate or (tgt.kind == "ui" and tgt.ui.inhibit) then
@@ -1418,7 +1449,7 @@ local function draw()
   else
     gfx.set(0.55, 0.55, 0.6)
     gfx.x, gfx.y = S(10), S(32)
-    gfx.drawstr("1-6 page aux  0 tout  |  K pickup en bloc  R return en bloc  N auto-suivant  A sortie aux  X exclusif  |  F filtre  S sauver  O OUT  |  Esc")
+    gfx.drawstr("1-6 page aux  0 tout  |  K pickup en bloc  R return en bloc  N auto-suivant  A sortie aux  X exclusif  I bloque touches  |  F filtre  S sauver  O OUT  |  Esc")
   end
 
   local y0 = HEADER_H
@@ -1720,6 +1751,7 @@ local function handle_ui()
     return
   end
 
+  if learn_id and char > 0 and char ~= 27 then char = 0 end   -- v2.7 : pendant un learn, la touche sert a apprendre
   if char == 27 then
     learn_id = nil
   elseif char == string.byte("+") or char == string.byte("=") then
@@ -1771,6 +1803,10 @@ local function handle_ui()
     for _, id in ipairs(rows) do maps[id].ret = any_off end
     save_maps()
     notify(string.format("Return %s sur %d knobs", any_off and "ON" or "OFF", #rows))
+  elseif char == string.byte("i") or char == string.byte("I") then
+    local on = reaper.GetExtState(EXT, "kbd_intercept") == "0"
+    reaper.SetExtState(EXT, "kbd_intercept", on and "1" or "0", true)
+    notify(on and "Touches apprises BLOQUEES pour REAPER (raccourcis d'origine inactifs)" or "Touches apprises LAISSEES PASSER a REAPER")
   elseif char == string.byte("n") or char == string.byte("N") then
     auto_next = not auto_next
     notify(auto_next and "Auto-suivant ON (learn aux enchaine)" or "Auto-suivant OFF")
@@ -1802,9 +1838,65 @@ local function handle_ui()
 end
 
 -- Le moteur MIDI tourne en permanence ; la fenetre est facultative.
+-- v2.7 : lecture du clavier (js_ReaScriptAPI). Front montant = appui, front descendant = relachement (Gate).
+function KB.mods(st)
+  local function dn(vk) return st:byte(vk) ~= 0 end
+  return (dn(16) and 1 or 0) + (dn(17) and 2 or 0) + (dn(18) and 4 or 0)
+end
+local function process_keys()
+  if not reaper.JS_VKeys_GetState then
+    if learn_id and not KB.warned then
+      KB.warned = true
+      notify("Touches clavier : installez l'extension js_ReaScriptAPI (ReaPack), puis relancez ce script")
+    end
+    return
+  end
+  local st = reaper.JS_VKeys_GetState(0)
+  if not st or #st < 254 then return end
+  local prev = KB.prev or st
+  KB.prev = st
+  for vk = 8, 254 do
+    if not (vk == 16 or vk == 17 or vk == 18 or (vk >= 91 and vk <= 93) or (vk >= 160 and vk <= 165)) then
+      local now_dn, was_dn = st:byte(vk) ~= 0, prev:byte(vk) ~= 0
+      if now_dn and not was_dn then
+        local code = vk + KB.mods(st) * 256
+        KB.down[vk] = code
+        handle_event(nil, nil, { status = KB.ST, ch = 0, d1 = code, d2 = 127 })
+      elseif was_dn and not now_dn then
+        local code = KB.down[vk] or vk
+        KB.down[vk] = nil
+        handle_event(nil, nil, { status = KB.ST, ch = 0, d1 = code, d2 = 0 })
+      end
+    end
+  end
+end
+-- Blocage des touches apprises SANS modificateur : elles ne declenchent plus le raccourci REAPER d'origine
+-- (ExtState kbd_intercept, touche I dans la fenetre). Libere a la sortie du script.
+function KB.sync_intercept()
+  if not reaper.JS_VKeys_Intercept then return end
+  local want = {}
+  if reaper.GetExtState(EXT, "kbd_intercept") ~= "0" then
+    for id, m in pairs(maps) do
+      if m.status == KB.ST and (m.d1 or 0) < 256 and not is_aux_id(id) then want[m.d1] = true end
+    end
+  end
+  for vk in pairs(KB.icpt) do if not want[vk] then reaper.JS_VKeys_Intercept(vk, -1); KB.icpt[vk] = nil end end
+  for vk in pairs(want) do if not KB.icpt[vk] then reaper.JS_VKeys_Intercept(vk, 1); KB.icpt[vk] = true end end
+end
+function KB.release_all()
+  if not reaper.JS_VKeys_Intercept then return end
+  for vk in pairs(KB.icpt) do reaper.JS_VKeys_Intercept(vk, -1) end
+  KB.icpt = {}
+end
+
 local function main()
   reaper.SetExtState(EXT, "hb", tostring(reaper.time_precise()), false)
   process_midi()
+  process_keys()
+  do                                                   -- v2.7 : blocage des touches apprises (si les maps changent)
+    local sig = (reaper.GetExtState(EXT, "maps") or "") .. "#" .. reaper.GetExtState(EXT, "kbd_intercept")
+    if sig ~= KB.sig then KB.sig = sig; KB.sync_intercept() end
+  end
 
   if reaper.GetExtState(EXT, "ui_req") == "1" then
     reaper.SetExtState(EXT, "ui_req", "", false)
@@ -1824,6 +1916,7 @@ do
   end
 end
 reaper.atexit(function()
+  KB.release_all()                                     -- v2.7 : rend toutes les touches a REAPER
   reaper.SetExtState(EXT, "hb", "0", false)
   reaper.SetExtState(VL_SEC, "group_inhibit_ml", "0", false)   -- jamais d'inhibition bloquee
 end)
