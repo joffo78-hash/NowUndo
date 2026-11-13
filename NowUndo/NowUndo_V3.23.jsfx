@@ -1458,13 +1458,26 @@ function ui_log_knob(id, cx, cy, r, val, mn, mx, label, fmt, def) local(log_mn, 
 //   gmem[LD_BASE+8] N final | +9 mode reference (1 = esclave du maitre actif) | +10 id termine
 //   gmem[LD_BASE+16 ...] canal L | gmem[LD_BASE+16+LD_MAXN ...] canal R
 // cmd 32 = requete de longueur ; cmd 31 = copie dans la boucle (par blocs) puis fin comme un REC, looper laisse a l'ARRET.
+// V3.23 : longueur d'un FICHIER charge (mode Adapter / Etirer) = valeur musicale la PLUS PROCHE de sa duree :
+// 1/8, 1/4, 1/2 de la boucle de reference, ou un nombre entier de boucles (le REC, lui, arrondit au-dessus : calc_sync_len).
+function ld_fit_len(n, ml) local(best, bd, c, d, m) (
+  m = max(1, floor(n / ml + 0.5));
+  best = m * ml; bd = abs(log(n / best));
+  c = ml * 0.125;
+  loop(3,
+    d = abs(log(n / c));
+    d < bd ? ( bd = d; best = c; );
+    c *= 2;
+  );
+  best;
+);
 function ld_query() local(ms_off, locked, mid, is_self, ml, n) (
   ms_off = (active_part - 1) * 10; locked = gmem[ms_off]; mid = gmem[ms_off + 1];
   is_self = (locked == 1 && (mid == instance_id || mid == instance_alias));
   ml = (locked == 2) ? host_measure_len() : ((locked == 1 && !is_self && gmem[ms_off + 2] > 0) ? gmem[ms_off + 2] : 0);
   n = floor(gmem[LD_BASE + 1]);
   gmem[LD_BASE + 4] = ml > 0 ? 1 : 0;
-  gmem[LD_BASE + 5] = ml > 0 ? floor(calc_sync_len(n, ml) + 0.5) : n;
+  gmem[LD_BASE + 5] = (ml > 0 && n > 0) ? floor(ld_fit_len(n, ml) + 0.5) : n;
   gmem[LD_BASE + 6] = ml;
   gmem[LD_BASE + 7] = min(single_buf_len, LD_MAXN);
   gmem[LD_BASE + 3] = gmem[LD_BASE + 2];
