@@ -7,7 +7,8 @@
 --   Page 5 Cloud v2 (NowUndo V3.21) : Density | Agitation | Spread | PSpread / Pos | Rate | Depth | LFO /
 --     Size | Diffuse | Mix | Freeze (push) / Width (= Stereo de la section Output)
 --   Page 6 : colonne = slot 1..4 de la source courante du FX Router, ligne = parametre 1..4 ; push = valeur par defaut.
---   Page 7 Custom (v3.4) : 16 knobs + 16 push assignes dans le MIDI Learn (menus) ; agissent sur le looper selectionne ;
+--   Page 7 Custom (v3.4) : 16 knobs + 16 push assignes dans le MIDI Learn (menus) ; agissent sur le looper selectionne
+--     et les membres de son groupe (knobs : meme delta, chacun garde son ecart ; push : chacun selon son etat) ;
 --     couleur de chaque encodeur = famille de sa fonction (jaune slicer, rose pitch, vert in/out, bleu cloud, rouge lecture).
 --   Page 8 Display (v3.4) : rangees 1-2 = position de lecture des loopers 1..8 (anneau), rangees 3-4 = VU de sortie ;
 --     couleurs RGB eteintes sur le vrai Twister.
@@ -801,6 +802,22 @@ function CU.set_n(k, s, n)
   end
   write_param(s, k[4], CU.v_of(k, n))
 end
+-- Regle de groupe (knobs) : le looper selectionne prend la valeur, les membres de son groupe suivent du MEME DELTA
+-- (course normalisee du knob) en gardant leur ecart, comme les pages Pitch / Vol. Instantane pris au debut du geste.
+function CU.set_group(k, idx, n)
+  local now, s = reaper.time_precise(), sel_looper()
+  local g = CU.gs
+  if not g or g.idx ~= idx or g.s ~= s or (now - g.t) > 0.6 then
+    g = { idx = idx, s = s, n0 = CU.get_n(k, s), peers = {} }
+    for _, li in ipairs(page_targets()) do
+      if li ~= s and looper_alive(li, now) then g.peers[li] = CU.get_n(k, li) end
+    end
+    CU.gs = g
+  end
+  g.t = now
+  CU.set_n(k, s, n)
+  for li, b0 in pairs(g.peers) do CU.set_n(k, li, clamp(b0 + (n - g.n0), 0, 1)) end
+end
 function CU.disp(k, s)
   if k[11] then return string.format("%.0f%%", CU.get_n(k, s) * 100) end
   local v = read_fb(s, k[5])
@@ -812,10 +829,16 @@ function CU.disp(k, s)
   if k[7] - k[6] >= 10 then return string.format("%.0f", v) end
   return string.format("%.2f", v)
 end
+-- Regle de groupe : les push agissent sur le looper selectionne ET les membres de son groupe (chacun selon son etat)
 function CU.fire(bid, kid)
+  local now = reaper.time_precise()
+  for _, s in ipairs(page_targets()) do
+    if looper_alive(s, now) then CU.fire1(bid, kid, s) end
+  end
+end
+function CU.fire1(bid, kid, s)
   local b = CU.B[bid]
-  local s = sel_looper()
-  if not b or not looper_alive(s, reaper.time_precise()) then return end
+  if not b then return end
   if bid == "knob_def" then
     local k = kid and CU.K[kid]
     if k then
@@ -851,7 +874,7 @@ function CU.cells()
       cells[math.floor(idx / 4) .. "," .. (idx % 4)] = {
         label = k and k[2] or b[2], col = fam and { fam[1], fam[2], fam[3] } or nil, twc = fam and fam[4] or nil,
         get = function() return k and CU.get_n(k, sel_looper()) or 0 end,
-        set = function(_, n) if k then CU.set_n(k, sel_looper(), n) end end,
+        set = function(_, n) if k then CU.set_group(k, idx, n) end end,
         to_n = function(n) return n end, from_n = function(n) return n end,
         push = function() CU.fire(bid or "knob_def", kid) end,   -- push non assigne = valeur par defaut du knob
         disp = function() if k then return CU.disp(k, sel_looper()) end return b and "push" or "" end,
@@ -2165,7 +2188,7 @@ function main()
     gfx.set(0.7, 0.7, 0.7, 1)
     gfx.x = 6 * s
     gfx.y = 16 * s
-    gfx.drawstr("→ L" .. sel_looper() .. "   (assignations : MIDI Learn > Custom P7)")
+    gfx.drawstr("→ L" .. table.concat(page_targets(), ",L") .. "   (assignations : MIDI Learn > Custom P7)")
   elseif page >= 4 and page <= 5 then
     gfx.setfont(1, "Arial", math.floor(9 * s))
     gfx.set(0.7, 0.7, 0.7, 1)

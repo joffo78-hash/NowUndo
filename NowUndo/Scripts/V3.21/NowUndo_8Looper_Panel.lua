@@ -1,6 +1,7 @@
 -- @description NowUndo 8 Looper Panel - compact dashboard
 -- @version 1.4
--- v1.4 : cartes Slicer affichees seulement si le Slicer est actif, cartes Cloud seulement si le Cloud est actif.
+-- v1.4 : cartes Slicer affichees seulement si le Slicer est actif, cartes Cloud seulement si le Cloud est actif ;
+--        Densite REC / Duree densite en rose (comme le pitch).
 -- @author OpenAI
 -- Base: DashBoard_slices_test.lua / NowUndo V3.7
 
@@ -111,9 +112,9 @@ local PARAMS = {
 -- Code couleur : playback = rose, slicer = jaune, region in/out = vert,
 -- cloud = bleu, output = rouge.
 local COLOR_OF = {}
-for _,id in ipairs{1,2,4,6,7,12,16,17,42,43,44,54} do COLOR_OF[id]="pink" end
+for _,id in ipairs{1,2,4,6,7,12,16,17,28,29,42,43,44,54} do COLOR_OF[id]="pink" end   -- v1.4 : densite REC (28, 29) en rose
 for _,id in ipairs{3,18,19,20,21,52,53} do COLOR_OF[id]="red" end
-for _,id in ipairs{5,24,28,29,30} do COLOR_OF[id]="green" end
+for _,id in ipairs{5,24,30} do COLOR_OF[id]="green" end
 for _,id in ipairs{10,11,13,14,15,31,32,33,46,47,48,49,50,51,57} do COLOR_OF[id]="yellow" end
 for _,id in ipairs{23,25,26,27,34,35,36,37,38,39,40} do COLOR_OF[id]="blue" end
 for _,d in ipairs(PARAMS) do d[4]=COLOR_OF[d[1]] or d[4] end
