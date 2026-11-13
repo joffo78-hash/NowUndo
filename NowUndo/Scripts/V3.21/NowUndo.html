@@ -261,6 +261,7 @@ html, body {
     <!-- LOOPERS -->
     <section class="view" id="view-loopers">
       <div id="lv-sel"></div>
+      <div id="lv-diag" style="font-size:11px;font-weight:700;padding:0 2px 6px;color:#f39c12">en attente des données du bridge…</div>
       <div id="lv-head"><span id="lv-title">L1</span><span id="lv-state">STOP</span><span id="lv-io"></span></div>
       <canvas id="lv-wave"></canvas>
       <div class="lv-vu"><span>IN</span><div class="bar"><div id="lv-vi"></div></div><span>OUT</span><div class="bar"><div id="lv-vo"></div></div></div>
@@ -970,8 +971,15 @@ html, body {
     });
     lvDraw();
   }
+  let lvLast = 0;
+  setInterval(function () {
+    const el = document.getElementById("lv-diag");
+    if (Date.now() - lvLast < 2000) { el.style.color = "#2ecc71"; el.textContent = "web v3.8 · bridge OK (" + lv.filter(l => l.alive).length + " looper(s) détecté(s))"; }
+    else { el.style.color = "#f39c12"; el.textContent = "web v3.8 · aucune donnée looper : remplacez et relancez NowUndo_Twister_Web.lua (version Loopers)"; }
+  }, 1000);
   function parseLvFast(str) {
     if (!str) return;
+    lvLast = Date.now();
     const now = Date.now();
     str.split(";").forEach(function (p) {
       const b = p.split(","); const i = parseInt(b[0], 10); if (!(i >= 0 && i < 8)) return;
