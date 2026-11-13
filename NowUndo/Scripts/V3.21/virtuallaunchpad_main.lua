@@ -3775,7 +3775,21 @@ local WEB = {
   last_lbl = 0,
   last_cmd = "",
   acks = {},      -- web v3.9 : dernier numero traite par page web (sid)
+  page = nil,     -- web v4.1 : page affichee sur la page web, independante de la fenetre / du Launchpad physique
 }
+-- Execute f avec la page WEB comme page courante, puis rend sa page au Launchpad. Un changement de page fait
+-- pendant f (bouton PAGE du web) ne change que la page web.
+function VL.web_with_page(f)
+  local real = S.page
+  S.page = WEB.page or real
+  local ok, err = pcall(f)
+  WEB.page = S.page
+  S.page = real
+  if not VL.mirror_mode and reaper and reaper.SetExtState then
+    reaper.SetExtState("nowundo_vl", "active_page", tostring(real), false)
+  end
+  if not ok then error(err, 0) end
+end
 local WEB_STATE_CODE = {
   off = "o", idle = "i", on = "n", warn = "w",
   armed = "a", armed_other = "x", cursor = "c", member_cursor = "m",
@@ -3911,7 +3925,8 @@ function VL.web_publish(t)
   if t - WEB.last_pub < 0.05 then return end   -- ~20 Hz max
   WEB.last_pub = t
 
-  local frame = VL.build_frame()
+  local frame
+  VL.web_with_page(function() frame = VL.build_frame() end)
   local parts = {}
   for key, v in pairs(frame) do
     local hex, state = v[1] or 0, v[2] or "off"
@@ -3932,7 +3947,7 @@ function VL.web_publish(t)
     for row = 0, 8 do
       for col = 1, 9 do
         if not (row == 0 and col == 9) then
-          local lab = VL.pad_label(S.page, row, col)
+          local lab = VL.pad_label(WEB.page or S.page, row, col)
           if lab and lab ~= "" then
             lab = tostring(lab):gsub("|", "¦"):gsub(":", "⁚")
             labs[#labs + 1] = row .. "," .. col .. ":" .. lab
@@ -3957,7 +3972,7 @@ function VL.web_publish(t)
   end
   local hg = held_group and held_group() or 0
   local meta = string.format("page=%d;layer=%s;hold=%d;layers=%s",
-    S.page or 1,
+    WEB.page or S.page or 1,
     tostring(S.p4_layer or "fx"),
     tonumber(hg) or 0,
     table.concat(layers, ","))
@@ -3990,6 +4005,7 @@ function VL.web_poll_cmd()
 
   local t = now()
   local acked = sid and (WEB.acks[sid] or 0) or 0
+  VL.web_with_page(function()
   for item in raw:gmatch("[^;]+") do
     local cmd = item
     if sid then
@@ -4028,6 +4044,7 @@ function VL.web_poll_cmd()
       end
     end
   end
+  end)
   if sid then
     WEB.acks[sid] = acked
     local parts = {}
