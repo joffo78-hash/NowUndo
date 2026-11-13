@@ -424,10 +424,25 @@ html, body {
 
   // Commandes Launchpad numerotees : web_cmd est une seule case (ecrasee a chaque envoi). On renvoie toutes les
   // commandes non acquittees (web_ack) -> un appui n'est plus perdu si le Launchpad lit moins vite qu'on n'ecrit.
+  // Compatibilite : si le Launchpad qui tourne est une ancienne version (aucun accuse web_ack), on repasse
+  // a l'ancien format (commandes en clair) ; une sonde reguliere detecte le passage a la nouvelle version.
   var CMD_SID = Math.random().toString(36).slice(2, 8), cmdSeq = 0, cmdPend = [], cmdSentAt = 0, cmdDirty = false;
+  var cmdAckSeen = false, cmdLegacy = false, cmdProbeAt = 0;
   function flushCmdQueue() {
-    if (!cmdPend.length) return;
     var now = Date.now();
+    if (!cmdAckSeen && cmdPend.length && now - cmdPend[0][2] > 1200) cmdLegacy = true;
+    if (cmdLegacy) {
+      if (cmdPend.length) {
+        if (now - cmdSentAt < 70) return;     // tout ce qui attend part en un seul envoi, espace de 70 ms
+        cmdSentAt = now;
+        wwr_req("SET/EXTSTATE/" + SECTION + "/web_cmd/" + encodeURIComponent(cmdPend.splice(0, 16).map(function (c) { return c[1]; }).join(";")));
+      } else if (now - cmdProbeAt > 3000 && now - cmdSentAt > 300) {
+        cmdProbeAt = now;
+        wwr_req("SET/EXTSTATE/" + SECTION + "/web_cmd/" + encodeURIComponent("@" + CMD_SID + ";"));
+      }
+      return;
+    }
+    if (!cmdPend.length) return;
     if (!cmdDirty && now - cmdSentAt < 150) return;
     cmdDirty = false; cmdSentAt = now;
     var batch = "@" + CMD_SID + ";" + cmdPend.slice(0, 40).map(function (c) { return "#" + c[0] + ":" + c[1]; }).join(";");
@@ -436,11 +451,17 @@ html, body {
   function onCmdAck(val) {
     var m = (val || "").match(new RegExp("(?:^|,)" + CMD_SID + ":(\\d+)"));
     if (!m) return;
+    cmdAckSeen = true; cmdLegacy = false;
     var n = parseInt(m[1], 10);
     while (cmdPend.length && cmdPend[0][0] <= n) cmdPend.shift();
   }
   setInterval(flushCmdQueue, 30);
-  function queueCmd(cmd) { cmdPend.push([++cmdSeq, cmd]); cmdDirty = true; flushCmdQueue(); }
+  function queueCmd(cmd) { cmdPend.push([++cmdSeq, cmd, Date.now()]); cmdDirty = true; flushCmdQueue(); }
+  setInterval(function () {
+    if (holdOn) return;
+    helpEl.style.color = cmdLegacy ? "#f39c12" : "";
+    helpEl.textContent = cmdLegacy ? "Launchpad ancienne version : remplacez virtuallaunchpad_main.lua puis relancez-le" : "";
+  }, 1000);
 
   function onPadDown(row, col) {
     var key = row + "," + col;
@@ -1035,7 +1056,8 @@ html, body {
   let lvLast = 0;
   setInterval(function () {
     const el = document.getElementById("lv-diag");
-    if (Date.now() - lvLast < 2000) { el.style.color = "#2ecc71"; el.textContent = "web v4.0 · bridge OK (" + lv.filter(l => l.alive).length + " looper(s) détecté(s))"; }
+    if (cmdLegacy) { el.style.color = "#f39c12"; el.textContent = "web v4.0 · Launchpad ancienne version : remplacez virtuallaunchpad_main.lua et relancez-le (boutons ci-dessous inactifs)"; }
+    else if (Date.now() - lvLast < 2000) { el.style.color = "#2ecc71"; el.textContent = "web v4.0 · bridge OK (" + lv.filter(l => l.alive).length + " looper(s) détecté(s))"; }
     else { el.style.color = "#f39c12"; el.textContent = "web v4.0 · aucune donnée looper : remplacez et relancez NowUndo_Twister_Web.lua (version Loopers)"; }
   }, 1000);
   function parseLvFast(str) {
@@ -1071,8 +1093,15 @@ html, body {
   // ═══════════════════════════════════════════
   // WWR
   // ═══════════════════════════════════════════
+  // Une exception ici bloquerait definitivement la boucle d'envoi de main.js (REAPER) : chaque ligne est protegee.
   function wwr_onreply(results) {
     results.split("\n").forEach(function (line) {
+      try { onReplyLine(line); }
+      catch (e) { statusEl.textContent = "erreur page : " + (e && e.message); if (window.console) console.error(e); }
+    });
+  }
+  function onReplyLine(line) {
+    {
       if (!line) return;
       var tok = line.split("\t");
       if (tok[0] !== "EXTSTATE") return;
@@ -1103,7 +1132,7 @@ html, body {
         twLastTick = Date.now();
         twConn.className = "ok";
       }
-    });
+    }
   }
   window.wwr_onreply = wwr_onreply;
 
