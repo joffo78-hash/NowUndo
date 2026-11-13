@@ -179,16 +179,7 @@ html, body {
   <nav id="tabs">
     <button class="tab active" data-view="launchpad">Launchpad</button>
     <button class="tab" data-view="twister">Twister</button>
-    <button class="tab" data-view="dashboard">Dashboard</button>
-    <button class="tab sub" data-view="looper1">L1</button>
-    <button class="tab sub" data-view="looper2">L2</button>
-    <button class="tab sub" data-view="looper3">L3</button>
-    <button class="tab sub" data-view="looper4">L4</button>
-    <button class="tab sub" data-view="looper5">L5</button>
-    <button class="tab sub" data-view="looper6">L6</button>
-    <button class="tab sub" data-view="looper7">L7</button>
-    <button class="tab sub" data-view="looper8">L8</button>
-    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.5</span>
+    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.6</span>
   </nav>
 
   <div id="views">
@@ -229,20 +220,6 @@ html, body {
       </div>
     </section>
 
-    <!-- DASHBOARD -->
-    <section class="view" id="view-dashboard">
-      <div class="dash-grid" id="dash-grid"></div>
-    </section>
-
-    <!-- LOOPERS 1-8 -->
-    <section class="view" id="view-looper1"><div class="tw-placeholder">Looper 1 — vue détaillée (à venir)</div></section>
-    <section class="view" id="view-looper2"><div class="tw-placeholder">Looper 2 — vue détaillée (à venir)</div></section>
-    <section class="view" id="view-looper3"><div class="tw-placeholder">Looper 3 — vue détaillée (à venir)</div></section>
-    <section class="view" id="view-looper4"><div class="tw-placeholder">Looper 4 — vue détaillée (à venir)</div></section>
-    <section class="view" id="view-looper5"><div class="tw-placeholder">Looper 5 — vue détaillée (à venir)</div></section>
-    <section class="view" id="view-looper6"><div class="tw-placeholder">Looper 6 — vue détaillée (à venir)</div></section>
-    <section class="view" id="view-looper7"><div class="tw-placeholder">Looper 7 — vue détaillée (à venir)</div></section>
-    <section class="view" id="view-looper8"><div class="tw-placeholder">Looper 8 — vue détaillée (à venir)</div></section>
   </div>
 </div>
 <div id="layer-menu"></div>
@@ -697,7 +674,7 @@ html, body {
     updateTwDiag();
   }
   // Diagnostic : la page web (version ci-dessous) recoit-elle les knobs du script Twister ?
-  const WEB_VER = "web-tw 3.5";
+  const WEB_VER = "web-tw 3.6";
   let twKTick = "", twKTickAt = 0, twErr = "";
   function updateTwDiag() {
     const el = document.getElementById("tw-diag");
@@ -749,18 +726,6 @@ html, body {
       twState[i].len = parseFloat(b[4]) || 0;
       updateRangeUI(i);
     });
-  }
-
-  // Dashboard cards
-  const dashGrid = document.getElementById("dash-grid");
-  for (let i = 0; i < 8; i++) {
-    const c = document.createElement("div");
-    c.className = "dash-card";
-    c.style.background = LOOPER_COL[i];
-    c.innerHTML = "<h3>L" + (i + 1) + " · Main</h3><div class='meta'>Vue dashboard — bientôt liée au gmem</div>";
-    c.style.cursor = "pointer";
-    c.addEventListener("click", function () { showView("looper" + (i + 1)); });
-    dashGrid.appendChild(c);
   }
 
   // ═══════════════════════════════════════════
