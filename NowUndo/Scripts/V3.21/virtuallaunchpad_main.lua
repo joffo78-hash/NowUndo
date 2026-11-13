@@ -1909,22 +1909,35 @@ end
 
 -- NAVIGATION AUTO du Twister : une action du Launchpad amene le Twister sur la page utile.
 -- Valeur = BOUTON de page Twister (v3.3 : 1 Vol/Feedback, 2 Pitch/Speed, 3 In/Out, 4 Slicer, 5 Cloud, 6 Effets).
--- Slicer / Cloud : seulement a l'ACTIVATION (couper le mode ne change pas de page).
+-- RELACHE -> retour sur Volume (page 1) : couper Slicer / Cloud, pitch qui revient a 0, speed qui revient a 100 %,
+-- Reset Pitch / Reset Speed (et desactiver un effet : voir la couche Effects).
 -- (champs de VL et non locales : le chunk principal est a la limite Lua de 200 variables locales)
-VL.AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,
+VL.AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2, reset_pitch = 1, reset_speed = 1,
                rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
-function VL.auto_twister(action, targets)
+function VL.auto_twister(action, targets, args)
   local pg = VL.AUTO_TW[action]
   if not pg or VL.mirror_mode then return end
-  local def = ACTIONS[action]
-  if def and def.kind == "toggle" and (action == "slicer" or action == "cloud") and toggle_on(def.key, targets) then return end
+  if action == "slicer" or action == "cloud" then
+    local def = ACTIONS[action]
+    if def and toggle_on(def.key, targets) then pg = 1 end            -- on coupe le mode -> Volume
+  elseif action == "pitch_step" or action == "speed_step" then
+    local L = S.loopers[ref_looper(targets)] or {}
+    local st = tonumber(args) or 12
+    if action == "pitch_step" then
+      local np = math.max(-48, math.min(48, (L.pitch or 0) + st))
+      if math.abs(np) < 0.01 then pg = 1 end                          -- pitch revenu a 0 -> Volume
+    else
+      local ns = math.max(0.01, math.min(100, (L.speed or 1) * (2 ^ (st / 12))))
+      if math.abs(ns - 1) < 0.001 then pg = 1 end                     -- speed revenu a 100 % -> Volume
+    end
+  end
   VL.set_fighter_page(pg)
 end
 
 function VL.trigger(action, args, targets)    -- targets : cibles explicites (couches), sinon looper / groupe actif
   if pedal_capture_action(action, args) then return end
   targets = targets or VL.targets()
-  VL.auto_twister(action, targets)
+  VL.auto_twister(action, targets, args)
   if S.launch then arm(action, args, targets) else exec(action, args, targets) end
 end
 
@@ -2586,11 +2599,14 @@ VL.register_layer({ id = "fx", name = "Effects", cell = function(row, col)
   local sh = fn(function()
     VL.toggle_fx(kind, id, slot)
     -- NAVIGATION AUTO : activer un effet amene le Twister sur la page Effets, sur CET effet (source + slot du FX Router)
-    if S.fx[kind][id][slot] and not VL.mirror_mode then
+    if VL.mirror_mode then return end
+    if S.fx[kind][id][slot] then
       S.fx_source = (kind == "input") and id or (NIN + id)
       VL.publish_fx_source()
       VL.set_fx_slot(slot)
       VL.set_fighter_page(6)
+    else
+      VL.set_fighter_page(1)                                         -- effet desactive -> Volume
     end
   end)
   sh.paint = { get = function() return S.fx[kind][id][slot] end, set = function(v) VL.set_fx(kind, id, slot, v) end }

@@ -5,6 +5,7 @@
 --          (CC absolu ; note / push = valeur par defaut ; Pickup possible) + Full Loop.
 --          Navigation auto du Twister : Slicer -> page Slicer, Cloud -> page Cloud, Pitch/Speed -> page Pitch/Speed,
 --          Rec / Re-Rec / Clear All -> page Volume, Quantise In/Out -> page In/Out (comme le Launchpad).
+--          Relache -> Volume : couper Slicer / Cloud, pitch revenu a 0, speed revenu a 100 %.
 --          Pages Twister : bouton 1 = Vol/Fdbk, 3 = In/Out (Twister v3.3).
 --   v2.2 : page Twister 6 "Effets" (FX Router) + parametre learn "Selection FX" (+ / - / encodeur / knob absolu).
 --   Mapping MIDI pour actions NowUndo + navigation + 16 knobs / 16 boutons Twister.
@@ -798,16 +799,23 @@ end
 -- v2.5 : NAVIGATION AUTO du Twister (meme regle que le Launchpad). Valeur = BOUTON de page (1 Vol, 2 Pitch, 3 In/Out...)
 local AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,
                   rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
-local function auto_twister(action, looper)
+-- Relache -> Volume (page 1) : couper Slicer / Cloud, pitch revenu a 0, speed revenu a 100 %.
+local function auto_twister(action, looper, args)
   local pg = AUTO_TW[action]
   if not pg then return end
-  if action == "slicer" or action == "cloud" then      -- seulement a l'ACTIVATION (pas en coupant le mode)
-    local s = looper or sel_looper()
-    if alive(s) then
-      reaper.gmem_attach(GMEM)
-      local b = gbase(s, active_part(s))
+  local s = looper or sel_looper()
+  if alive(s) then
+    reaper.gmem_attach(GMEM)
+    local b = gbase(s, active_part(s))
+    if action == "slicer" or action == "cloud" then
       local on = (action == "slicer") and ((reaper.gmem_read(b + 8) or 0) == 1) or ((reaper.gmem_read(b + 24) or 0) > 0.5)
-      if on then return end
+      if on then pg = 1 end                                        -- on coupe le mode -> Volume
+    elseif action == "pitch_step" then
+      local np = math.max(-48, math.min(48, (reaper.gmem_read(b + 4) or 0) + (tonumber(args) or 12)))
+      if math.abs(np) < 0.01 then pg = 1 end
+    elseif action == "speed_step" then
+      local ns = math.max(0.01, math.min(100, (reaper.gmem_read(b + 3) or 1) * (2 ^ ((tonumber(args) or 12) / 12))))
+      if math.abs(ns - 1) < 0.001 then pg = 1 end
     end
   end
   fire_ui({ fighter = pg })
@@ -828,7 +836,7 @@ local function execute_target(tgt, m, velocity, is_on, is_off)
   -- (avant : "Return" renvoyait 127 a chaque tick de knob => l'anneau sautait a fond).
   if tgt.kind == "tw_knob" or tgt.kind == "tw_btn" then return end
   if tgt.kind == "action" then
-    if is_on then auto_twister(tgt.action, tgt.looper) end   -- v2.5 : AVANT l'action (l'etat lu est celui d'avant)
+    if is_on then auto_twister(tgt.action, tgt.looper, tgt.args) end   -- v2.5 : AVANT l'action (l'etat lu est celui d'avant)
     if m.gate then
       if is_on or is_off then fire_action(tgt.action, tgt.args, tgt.looper) end
     else
