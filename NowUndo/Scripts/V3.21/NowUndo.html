@@ -129,6 +129,23 @@ html, body {
   background: rgba(255,255,255,.9); opacity: 0.95;
 }
 
+/* Twister : grille de knobs (pages autres que In/Out) */
+.tw-knobs {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  width: 100%; max-width: min(100%, calc(100vh - 170px)); margin: 0 auto; padding: 4px 0;
+}
+.tw-knob {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  display: flex; flex-direction: column; align-items: center; padding: 6px 4px 8px;
+  touch-action: none; cursor: ns-resize; position: relative;
+}
+.tw-knob.empty { opacity: .25; cursor: default; }
+.tw-knob.dim { opacity: .38; }
+.tw-knob.ro { cursor: default; }
+.tw-knob.active { box-shadow: 0 0 0 2px rgba(255,255,255,.35); }
+.tw-knob .kl { font-size: 11px; font-weight: 700; height: 14px; overflow: hidden; white-space: nowrap; max-width: 100%; text-overflow: ellipsis; }
+.tw-knob svg { width: 100%; max-width: 92px; aspect-ratio: 1; display: block; }
+.tw-knob .kv { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; height: 14px; white-space: nowrap; }
 .tw-placeholder {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 14px; text-align: center; padding: 24px;
@@ -200,6 +217,7 @@ html, body {
       </div>
       <div id="tw-page">
         <div class="tw-faders" id="tw-faders"></div>
+        <div class="tw-knobs" id="tw-knobs" style="display:none"></div>
         <div class="tw-placeholder" id="tw-placeholder" style="display:none">
           Page Twister à venir — pilotée aussi depuis le Launchpad (fighter page).
         </div>
@@ -562,6 +580,102 @@ html, body {
     el.range.addEventListener("pointercancel", function () { drag = null; });
   });
 
+  // ── Twister : pages en knobs (publiees par le script Twister : nowundo_tw/tw_knobs) ──
+  const twKnobsEl = document.getElementById("tw-knobs");
+  let knobData = { page: 0, k: {} };      // k[idx] = { n, label, disp, hex, dim, ro, push }
+  const knobEls = [];
+  const kDrag = {};                       // idx -> { y, n0, moved, last }
+  const kHold = {};                       // idx -> horodatage : ignorer l'etat publie juste apres un geste
+  const kPending = {};                    // idx -> valeur a envoyer (coalescence)
+  function arcPath(n) {
+    // couronne 270 degres (de -225 a +45), comme le Twister
+    const a0 = -225 * Math.PI / 180, a1 = a0 + Math.max(0.0001, n) * 1.5 * Math.PI;
+    const r = 38, cx = 50, cy = 50;
+    const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+    return "M" + x0.toFixed(2) + " " + y0.toFixed(2) + " A" + r + " " + r + " 0 " + ((a1 - a0) > Math.PI ? 1 : 0) + " 1 " + x1.toFixed(2) + " " + y1.toFixed(2);
+  }
+  const TRACK = arcPath(1);
+  for (let idx = 0; idx < 16; idx++) {
+    const el = document.createElement("div");
+    el.className = "tw-knob empty";
+    el.innerHTML = '<div class="kl"></div>' +
+      '<svg viewBox="0 0 100 100"><path d="' + TRACK + '" fill="none" stroke="#2c2c34" stroke-width="9" stroke-linecap="round"/>' +
+      '<path class="arc" d="" fill="none" stroke="#888" stroke-width="9" stroke-linecap="round"/>' +
+      '<circle cx="50" cy="50" r="26" fill="#1c1c22" stroke="#333" stroke-width="1.5"/>' +
+      '<line class="ptr" x1="50" y1="50" x2="50" y2="28" stroke="#ddd" stroke-width="3" stroke-linecap="round"/></svg>' +
+      '<div class="kv"></div>';
+    twKnobsEl.appendChild(el);
+    knobEls.push({ el: el, lab: el.querySelector(".kl"), arc: el.querySelector(".arc"), ptr: el.querySelector(".ptr"), val: el.querySelector(".kv") });
+    el.addEventListener("pointerdown", function (e) {
+      const k = knobData.k[idx];
+      if (!k || k.ro || k.dim) return;
+      e.preventDefault(); el.setPointerCapture(e.pointerId);
+      kDrag[idx] = { y: e.clientY, n0: k.n, moved: false };
+      el.classList.add("active");
+    });
+    el.addEventListener("pointermove", function (e) {
+      const d = kDrag[idx]; if (!d) return;
+      const dy = d.y - e.clientY;
+      if (Math.abs(dy) > 3) d.moved = true;
+      if (!d.moved) return;
+      const n = Math.max(0, Math.min(1, d.n0 + dy / 180));
+      knobData.k[idx].n = n; kHold[idx] = Date.now();
+      drawKnob(idx);
+      kPending[idx] = n;
+    });
+    function up() {
+      const d = kDrag[idx]; if (!d) return;
+      delete kDrag[idx]; el.classList.remove("active"); kHold[idx] = Date.now();
+      const k = knobData.k[idx];
+      if (!d.moved && k && k.push) twKCmd("B," + twPage + "," + idx);   // toucher simple = push
+    }
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  }
+  function drawKnob(idx) {
+    const ke = knobEls[idx], k = knobData.k[idx];
+    if (!k) {
+      ke.el.className = "tw-knob empty"; ke.lab.textContent = ""; ke.val.textContent = "";
+      ke.arc.setAttribute("d", ""); ke.ptr.setAttribute("transform", "rotate(-135 50 50)");
+      return;
+    }
+    ke.el.className = "tw-knob" + (k.dim ? " dim" : "") + (k.ro ? " ro" : "") + (kDrag[idx] ? " active" : "");
+    ke.lab.textContent = k.label; ke.lab.style.color = "#" + k.hex;
+    ke.val.textContent = k.disp;
+    ke.arc.setAttribute("d", k.n > 0.002 ? arcPath(k.n) : "");
+    ke.arc.setAttribute("stroke", "#" + k.hex);
+    ke.ptr.setAttribute("transform", "rotate(" + (-135 + k.n * 270).toFixed(1) + " 50 50)");
+  }
+  function renderKnobs() { for (let i = 0; i < 16; i++) drawKnob(i); }
+  function parseTwKnobs(str) {
+    if (!str) return;
+    const parts = str.split("|");
+    const pg = parseInt(parts[0], 10) || 0;
+    const now = Date.now();
+    const fresh = {};
+    for (let j = 1; j < parts.length; j++) {
+      const b = parts[j].split(":");
+      if (b.length < 6) continue;
+      const idx = parseInt(b[0], 10);
+      const un = function (t) { return (t || "").replace(/¦/g, "|").replace(/⁚/g, ":"); };
+      fresh[idx] = { n: parseFloat(b[1]) || 0, label: un(b[2]), disp: un(b[3]), hex: b[4] || "888888",
+                     dim: b[5].indexOf("d") >= 0, ro: b[5].indexOf("r") >= 0, push: b[5].indexOf("p") >= 0 };
+      // pendant / juste apres un geste : on garde la valeur locale (pas de saut)
+      if ((kDrag[idx] || (kHold[idx] && now - kHold[idx] < 400)) && knobData.k[idx] && pg === knobData.page) fresh[idx].n = knobData.k[idx].n;
+    }
+    knobData = { page: pg, k: fresh };
+    if (pg >= 1 && pg <= 8 && pg !== twPage) showTwPage(pg);
+    else if (twPage !== TW_IO_PAGE) renderKnobs();
+  }
+  function twKCmd(cmd) { wwr_req("SET/EXTSTATE/" + TW_SECTION + "/tw_kcmd/" + encodeURIComponent(cmd)); }
+  // envoi des knobs coalesce (~30 envois / s max) : seule la derniere valeur de chaque knob part
+  setInterval(function () {
+    const cmds = [];
+    for (const idx in kPending) { cmds.push("K," + twPage + "," + idx + "," + kPending[idx].toFixed(4)); delete kPending[idx]; }
+    if (cmds.length) twKCmd(cmds.join(";"));
+  }, 35);
+
   // Pages Twister (numeros = boutons du Launchpad). Le web suit aussi la page choisie ailleurs (tw_page).
   const twResetBtn = document.getElementById("tw-reset");
   function showTwPage(p) {
@@ -571,11 +685,10 @@ html, body {
     });
     const isIO = twPage === TW_IO_PAGE;
     twFaders.style.display = isIO ? "" : "none";
-    twPlaceholder.style.display = isIO ? "none" : "";
     twResetBtn.style.display = isIO ? "" : "none";        // RESET = In/Out pleine boucle : seulement sur la page In/Out
-    if (!isIO) {
-      twPlaceholder.textContent = "Page " + twPage + " " + (TW_NAMES[twPage] || "") + " — affichée sur le Twister (vue web à venir)";
-    }
+    twKnobsEl.style.display = isIO ? "none" : "";
+    twPlaceholder.style.display = "none";
+    if (!isIO) renderKnobs();
   }
   document.querySelectorAll("#tw-bar .pg").forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -645,6 +758,7 @@ html, body {
         }
       }
       if (key === "tw_state") parseTwState(val);
+      else if (key === "tw_knobs") parseTwKnobs(val);
       else if (key === "tw_page") {
         var tp = parseInt(val, 10);
         if (tp >= 1 && tp <= 8 && tp !== twPage) showTwPage(tp);
@@ -673,6 +787,7 @@ html, body {
     "GET/EXTSTATE/" + SECTION + "/web_tick;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_state;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_page;" +
+    "GET/EXTSTATE/" + TW_SECTION + "/tw_knobs;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_tick",
     POLL_MS
   );

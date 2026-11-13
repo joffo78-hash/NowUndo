@@ -1,5 +1,5 @@
 -- @description NowUndo Twister Control - Multi pages virtuelles
--- @version 3.4
+-- @version 3.5
 -- @about
 --   Page 1 Vol/Feedback | 2 Pitch/Speed | 3 In/Out | 4 Slicer | 5 Cloud | 6 Effets (FX Router)
 --   (v3.3 : pages 1 et 3 permutees ; chaque page garde sa couleur : Vol/Feedback rouge, In/Out vert.
@@ -1326,7 +1326,7 @@ end
 -- Init / loop
 --------------------------------------------------------------------------
 local HB_EXT = "NowUndo_Twister"
-local SCRIPT_VERSION = "3.4-custom-display"   -- change a chaque version : la nouvelle instance remplace l'ancienne
+local SCRIPT_VERSION = "3.5-web"   -- change a chaque version : la nouvelle instance remplace l'ancienne
 local ui_open = true
 
 function init()
@@ -2104,6 +2104,67 @@ local function midi_process()
   end
 end
 
+-- ===== v3.5 : TWISTER WEB (NowUndo.html, onglet Twister) =====
+-- Publie la page active (16 knobs : libelle, valeur 0..1, affichage, couleur, etat) dans ExtState nowundo_tw/tw_knobs,
+-- et execute les commandes du web (nowundo_tw/tw_kcmd) : "K,bouton,idx,valeur" (knob absolu) | "B,bouton,idx" (push).
+-- Memes regles que le vrai Twister (groupes, pickup, pages logiques). La page In/Out reste geree par le bridge (sliders).
+CU.web_t, CU.web_sig = 0, ""
+function CU.web_esc(v) return (tostring(v or ""):gsub("[|:;]", function(c) return c == "|" and "¦" or (c == ":" and "⁚" or ",") end)) end
+function CU.web_tick()
+  local now = reaper.time_precise()
+  -- 1) commandes du web
+  local raw = reaper.GetExtState("nowundo_tw", "tw_kcmd")
+  if raw ~= "" then
+    reaper.SetExtState("nowundo_tw", "tw_kcmd", "", false)
+    for cmd in raw:gmatch("[^;]+") do
+      local op, pg, idx, v = cmd:match("^(%a),(%d+),(%d+),?([%d%.]*)$")
+      pg, idx, v = tonumber(pg), tonumber(idx), tonumber(v)
+      if op and pg and idx and idx >= 0 and idx <= 15 then
+        pg = PAGE_SLOT_SWAP[pg] or pg                      -- numero de bouton -> page logique
+        if op == "K" and v then midi_apply_knob(idx, clamp(v, 0, 1), pg)
+        elseif op == "B" then midi_apply_btn(idx, pg) end
+      end
+    end
+  end
+  -- 2) publication de la page active (~15 Hz, seulement si quelque chose a change)
+  if now - CU.web_t < 0.066 then return end
+  CU.web_t = now
+  local page = fighter_page()
+  local col = PAGE_COL[page] or PAGE_COL[1]
+  local cells = {}
+  if page == 6 then cells = fx_cells()
+  elseif page >= 7 then cells = CU.page_cells(page)
+  elseif page ~= 1 then cells = PAGES[page] or {} end
+  local out = { tostring(PAGE_SLOT_SWAP[page] or page) }
+  for idx = 0, 15 do
+    local r, c = math.floor(idx / 4), idx % 4
+    local spec = cells[r .. "," .. c]
+    if spec then
+      local li = spec.looper
+      local alive = (not li) or looper_alive(li, now)
+      local raw_v, disp = 0, ""
+      if alive then
+        local ok, rv = pcall(function() if li then return spec.get(li) end return spec.get() end)
+        if ok and rv then raw_v = rv end
+        if spec.disp then local ok2, d = pcall(spec.disp, raw_v); if ok2 and d then disp = d end end
+      end
+      local n = read_knob_norm(page, idx, now)
+      if disp == "" then disp = string.format("%.0f%%", n * 100) end
+      local kc = (page == 6) and (PAGE6_COL[c] or col) or ((page == 7 and spec.col) or col)
+      local hex = string.format("%02X%02X%02X", math.floor(kc[1] * 255 + 0.5), math.floor(kc[2] * 255 + 0.5), math.floor(kc[3] * 255 + 0.5))
+      local flags = ((spec.inactive and spec.inactive()) or not alive) and "d" or ""
+      if page == 8 then flags = flags .. "r" end                    -- page Display : lecture seule
+      if spec.push or page == 2 or page == 3 then flags = flags .. "p" end
+      out[#out + 1] = idx .. ":" .. string.format("%.3f", n) .. ":" .. CU.web_esc(spec.label) .. ":" .. CU.web_esc(disp) .. ":" .. hex .. ":" .. flags
+    end
+  end
+  local sig = table.concat(out, "|")
+  if sig ~= CU.web_sig then
+    CU.web_sig = sig
+    reaper.SetExtState("nowundo_tw", "tw_knobs", sig, false)
+  end
+end
+
 function main()
   -- Une nouvelle version demande a l'ancienne instance de s'arreter (le moteur tourne meme fenetre fermee)
   if reaper.GetExtState(HB_EXT, "quit_req") == "1" then
@@ -2147,6 +2208,7 @@ function main()
     midi_feedback_sync(page, false)
   end
   aux_feedback()
+  pcall(CU.web_tick)   -- v3.5 : page web Twister (sans risque pour le moteur si une page a un souci)
 
   -- Fenetre : le moteur continue meme si elle est fermee
   if reaper.GetExtState(HB_EXT, "ui_req") == "1" then
