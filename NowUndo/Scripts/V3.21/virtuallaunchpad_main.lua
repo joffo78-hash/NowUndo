@@ -270,6 +270,8 @@ local function gmem_write_cmd(looper, cmd, arg, part)
   local base = gmem_base(looper, part)
   reaper.gmem_attach(GMEM_NAME)
   if arg ~= nil then reaper.gmem_write(base + 49, arg) end
+  -- NowUndo V3.22 : heure de l'appui (gmem 950) + cible (951) -> le JSFX cale le REC sur l'appui, pas sur l'arrivee
+  reaper.gmem_write(950, VL.press_t or now()); reaper.gmem_write(951, base + 48)
   reaper.gmem_write(base + 48, cmd)   -- ecrit en dernier : le JSFX consomme des que cmd > 0
   return true
 end
@@ -4338,7 +4340,12 @@ local function lp_poll_input(t)
     if ((dev or 0) & 0xFFFF) == LP_IN then pending[#pending + 1] = { seq = seq, msg = msg } end
   end
   -- L'historique est du plus recent au plus ancien : traiter les nouveaux evenements dans l'ordre.
+  -- Heure estimee de l'appui : milieu de l'intervalle depuis la lecture precedente (le script tourne ~30 fois/s)
+  local prev = VL._lp_prev_poll or t
+  VL._lp_prev_poll = t
+  if #pending > 0 then VL.press_t = t - math.min(t - prev, 0.1) * 0.5 end
   for i = #pending, 1, -1 do lp_parse_event(pending[i].msg, t) end
+  VL.press_t = nil
   local seq0 = reaper.MIDI_GetRecentInputEvent(0)
   if seq0 and seq0 > LP_LAST_SEQ then LP_LAST_SEQ = seq0 end
 end

@@ -724,11 +724,13 @@ local function active_part(looper)
   return ap
 end
 
+local PRESS = { prev = nil, t = nil }   -- NowUndo V3.22 : heure estimee de l'appui MIDI (REC cale sur l'appui)
 local function write_cmd(looper, cmd, arg)
   if not cmd then return end
   reaper.gmem_attach(GMEM)
   local b = gbase(looper, active_part(looper))
   if arg ~= nil then reaper.gmem_write(b + 49, arg) end
+  reaper.gmem_write(950, PRESS.t or reaper.time_precise()); reaper.gmem_write(951, b + 48)
   reaper.gmem_write(b + 48, cmd)
 end
 
@@ -1258,7 +1260,12 @@ local function process_midi()
     evs[#evs + 1] = { msg = msg, dev = dev }
   end
   if newest then last_seq = newest end
+  local tnow = reaper.time_precise()
+  local prev = PRESS.prev or tnow
+  PRESS.prev = tnow
+  if #evs > 0 then PRESS.t = tnow - math.min(tnow - prev, 0.1) * 0.5 end
   for k = #evs, 1, -1 do handle_event(evs[k].msg, evs[k].dev) end
+  PRESS.t = nil
 end
 
 --------------------------------------------------------------------------
