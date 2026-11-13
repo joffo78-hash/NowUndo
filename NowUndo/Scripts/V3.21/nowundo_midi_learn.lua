@@ -1894,7 +1894,14 @@ end
 
 -- Le moteur MIDI tourne en permanence ; la fenetre est facultative.
 -- v2.7 : lecture du clavier (js_ReaScriptAPI). Front montant = appui, front descendant = relachement (Gate).
+-- Modificateurs : etat REEL au moment de l'appui (JS_Mouse_GetState). La table JS_VKeys garde une touche "enfoncee"
+-- tant qu'elle n'a pas vu son relachement : apres un Alt+Tab (relachement parti vers une autre fenetre), Alt y restait
+-- coince et R etait lu comme Alt+R.
 function KB.mods(st)
+  if reaper.JS_Mouse_GetState then
+    local m = math.floor(tonumber(reaper.JS_Mouse_GetState(4 + 8 + 16)) or 0)   -- 4 Ctrl, 8 Shift, 16 Alt
+    return (((m & 8) ~= 0) and 1 or 0) + (((m & 4) ~= 0) and 2 or 0) + (((m & 16) ~= 0) and 4 or 0)
+  end
   local function dn(vk) return st:byte(vk) ~= 0 end
   return (dn(16) and 1 or 0) + (dn(17) and 2 or 0) + (dn(18) and 4 or 0)
 end
