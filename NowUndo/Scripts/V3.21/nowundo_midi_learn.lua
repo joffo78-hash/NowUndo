@@ -349,12 +349,12 @@ function CUL.set(t, id)
 end
 function CUL.text(t)
   local e = CUL.find(t, CUL.get(t) or "")
-  if not e then return "— (aucune)", { 0.45, 0.45, 0.5 } end
+  if not e then return (t.kind == "cu_btn") and "— (defaut du knob)" or "— (aucune)", { 0.45, 0.45, 0.5 } end
   return e[2], CUL.RGB[e[3]] or { 0.8, 0.8, 0.85 }
 end
 function CUL.menu(t)
   local cur = CUL.get(t)
-  local items, ids = { (cur and "" or "!") .. "(aucune)" }, { "" }
+  local items, ids = { (cur and "" or "!") .. ((t.kind == "cu_btn") and "(aucune = defaut du knob)" or "(aucune)") }, { "" }
   for _, f in ipairs(CU_FAM_NAME) do
     local sub = {}
     for _, e in ipairs(CUL.list(t)) do if e[3] == f[1] then sub[#sub + 1] = e end end

@@ -853,7 +853,7 @@ function CU.cells()
         get = function() return k and CU.get_n(k, sel_looper()) or 0 end,
         set = function(_, n) if k then CU.set_n(k, sel_looper(), n) end end,
         to_n = function(n) return n end, from_n = function(n) return n end,
-        push = b and function() CU.fire(bid, kid) end or nil,
+        push = function() CU.fire(bid or "knob_def", kid) end,   -- push non assigne = valeur par defaut du knob
         disp = function() if k then return CU.disp(k, sel_looper()) end return b and "push" or "" end,
       }
     end
