@@ -714,7 +714,6 @@ CU_KNOBS = {
   { "cl_lfo_d",  "Cloud LFO Depth",    "cloud",  41, 41,  0,     100,  0 },
   -- Effets (FX Router) : fonctions speciales, executees a part (pas de parametre JSFX)
   { "fx_type",   "Effet du slot (type)", "fx" },
-  { "fx_src",    "Source FX (Looper / IN1-8)", "fx" },
 }
 CU_BTNS = {
   { "rec",        "Rec / Overdub",      "play",   1 },
@@ -750,8 +749,6 @@ CU_BTNS = {
   { "cloud",      "Cloud on/off",       "cloud",  7 },
   { "cl_freeze",  "Cloud Freeze",       "cloud",  nil, nil, 63, "tog", 191 },
   { "cl_posmode", "Cloud Pos Link/Free","cloud",  nil, nil, 37, "tog", 37 },
-  { "fx_src_tog", "Source FX Entree/Looper", "fx" },
-  { "fx_src_next","Source FX suivante", "fx" },
   { "knob_def",   "Defaut du knob",     "" },
 }
 CU_FAM_NAME = { { "play", "Lecture / Sortie / Transport" }, { "pitch", "Pitch / Speed / Grain" },
@@ -835,19 +832,7 @@ function CU.disp(k, s)
   return string.format("%.2f", v)
 end
 -- Regle de groupe : les push agissent sur le looper selectionne ET les membres de son groupe (chacun selon son etat)
--- Commande vers le Launchpad (file NowUndo_VLcmd) : source FX
-function CU.vlq(name)
-  local q = reaper.GetExtState("NowUndo_VLcmd", "q")
-  reaper.SetExtState("NowUndo_VLcmd", "q", q .. string.format("%s\t%.3f\n", name, reaper.time_precise()), false)
-end
--- Source FX publiee par le Launchpad : 0 = looper, 1..8 = entree
-function CU.src_k()
-  local n = tonumber(reaper.GetExtState(VL_SEC, "fx_source")) or 9
-  return (n >= 1 and n <= 8) and math.floor(n) or 0
-end
 function CU.fire(bid, kid)
-  if bid == "fx_src_tog" then CU.vlq("fxsrc_tog") return end
-  if bid == "fx_src_next" then CU.vlq("fxsrc_next") return end
   local now = reaper.time_precise()
   for _, s in ipairs(page_targets()) do
     if looper_alive(s, now) then CU.fire1(bid, kid, s) end
@@ -886,30 +871,16 @@ function CU.cells()
   for idx = 0, 15 do
     local kid, bid = asg["k" .. idx], asg["b" .. idx]
     local k, b = kid and CU.K[kid], bid and CU.B[bid]
-    local sp = k and (kid == "fx_type" or kid == "fx_src")
-    if sp then
+    local sp = k and kid == "fx_type"
+    if sp then   -- Effet du slot choisi (D5-D8) : position dans la bibliotheque du FX Router, nom de l'effet affiche
       local fam = CU.FAM.fx
       cells[math.floor(idx / 4) .. "," .. (idx % 4)] = {
         label = k[2], col = { fam[1], fam[2], fam[3] }, twc = fam[4],
-        get = function()
-          if kid == "fx_src" then
-            if CU.src_pend and reaper.time_precise() - (CU.src_t or 0) > 0.5 then CU.src_pend = nil end
-            return (CU.src_pend or CU.src_k()) / 8
-          end
-          return CU.fx_pos and CU.fx_pos() or 0
-        end,
-        set = function(_, n)
-          if kid == "fx_src" then
-            local kk = math.floor(clamp(n, 0, 1) * 8 + 0.5)
-            if kk ~= (CU.src_pend or CU.src_k()) then CU.src_pend, CU.src_t = kk, reaper.time_precise(); CU.vlq("fxsrc_set_" .. kk) end
-          elseif CU.fx_move then CU.fx_move(clamp(n, 0, 1), true) end
-        end,
+        get = function() return CU.fx_pos and CU.fx_pos() or 0 end,
+        set = function(_, n) if CU.fx_move then CU.fx_move(clamp(n, 0, 1), true) end end,
         to_n = function(n) return n end, from_n = function(n) return n end,
-        push = function() CU.fire(bid or (kid == "fx_src" and "fx_src_tog" or "knob_def"), kid) end,
-        disp = function()
-          if kid == "fx_src" then local kk = CU.src_pend or CU.src_k(); return kk == 0 and "Looper" or ("IN" .. kk) end
-          return CU.fx_name and CU.fx_name() or ""
-        end,
+        push = function() if bid then CU.fire(bid, kid) end end,
+        disp = function() return CU.fx_name and CU.fx_name() or "" end,
       }
       k = nil
     end

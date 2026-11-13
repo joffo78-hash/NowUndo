@@ -197,16 +197,6 @@ for _, d in ipairs({
   TARGETS[#TARGETS + 1] = { id = "nav:fxsel:" .. d[1], name = d[2], cat = "FX", kind = "nav", nav = d[3] }
 end
 
--- Source FX (Launchpad) : entree <-> looper. Une entree choisie reste la source jusqu'au retour en looper.
-for _, d in ipairs({
-  { "tog",  "Source FX : Entree <-> Looper (bascule)", "fxsrc_tog" },
-  { "next", "Source FX  +  (Looper, IN1..IN8)",          "fxsrc_next" },
-  { "prev", "Source FX  -  (precedente)",               "fxsrc_prev" },
-}) do
-  TARGETS[#TARGETS + 1] = { id = "fxsrc:" .. d[1], name = d[2], cat = "FX", kind = "vlq", q = d[3] }
-end
-TARGETS[#TARGETS + 1] = { id = "fxsrc:knob", name = "Source FX : knob (Looper, IN1..IN8)", cat = "FX", kind = "vlq_knob" }
-
 -- Un seul jeu physique Twister : 16 knobs + 16 push (page = fighter active)
 for idx = 0, 15 do
   local row, col = math.floor(idx / 4) + 1, (idx % 4) + 1
@@ -291,7 +281,6 @@ CU_KNOBS = {
   { "cl_lfo_d",  "Cloud LFO Depth",    "cloud",  41, 41,  0,     100,  0 },
   -- Effets (FX Router) : fonctions speciales, executees a part (pas de parametre JSFX)
   { "fx_type",   "Effet du slot (type)", "fx" },
-  { "fx_src",    "Source FX (Looper / IN1-8)", "fx" },
 }
 CU_BTNS = {
   { "rec",        "Rec / Overdub",      "play",   1 },
@@ -327,8 +316,6 @@ CU_BTNS = {
   { "cloud",      "Cloud on/off",       "cloud",  7 },
   { "cl_freeze",  "Cloud Freeze",       "cloud",  nil, nil, 63, "tog", 191 },
   { "cl_posmode", "Cloud Pos Link/Free","cloud",  nil, nil, 37, "tog", 37 },
-  { "fx_src_tog", "Source FX Entree/Looper", "fx" },
-  { "fx_src_next","Source FX suivante", "fx" },
   { "knob_def",   "Defaut du knob",     "" },
 }
 CU_FAM_NAME = { { "play", "Lecture / Sortie / Transport" }, { "pitch", "Pitch / Speed / Grain" },
@@ -740,11 +727,6 @@ local function active_part(looper)
 end
 
 local PRESS = { prev = nil, t = nil }   -- NowUndo V3.22 : heure estimee de l'appui MIDI (REC cale sur l'appui)
--- Commande vers le Launchpad (file NowUndo_VLcmd)
-function PRESS.vlq(name)
-  local q = reaper.GetExtState("NowUndo_VLcmd", "q")
-  reaper.SetExtState("NowUndo_VLcmd", "q", q .. string.format("%s\t%.3f\n", name, reaper.time_precise()), false)
-end
 local function write_cmd(looper, cmd, arg)
   if not cmd then return end
   reaper.gmem_attach(GMEM)
@@ -1052,14 +1034,6 @@ local function execute_target(tgt, m, velocity, is_on, is_off)
     else
       if is_on then fire_action(tgt.action, tgt.args, tgt.looper) end
     end
-  elseif tgt.kind == "vlq" then
-    if is_on then PRESS.vlq(tgt.q) end
-  elseif tgt.kind == "vlq_knob" then
-    if m.status == 0xB0 then
-      local k = math.floor(math.max(0, math.min(127, velocity)) / 127 * 8 + 0.5)
-      if k ~= PRESS.src_k then PRESS.src_k = k; PRESS.vlq("fxsrc_set_" .. k) end
-    end
-    return
   elseif tgt.kind == "ui" and tgt.ui.inhibit then
     if is_on then reaper.SetExtState(VL_SEC, "group_inhibit_ml", "1", false)
     elseif is_off then reaper.SetExtState(VL_SEC, "group_inhibit_ml", "0", false) end

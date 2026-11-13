@@ -1007,35 +1007,15 @@ end
 function VL.select_looper(i)
   S.sel_looper = clamp(i, 1, NLOOP)
   follow_group()
-  if not S.fx_in_lock then S.fx_source = NIN + S.sel_looper end   -- source FX verrouillee sur une entree : on la garde
+  S.fx_source = NIN + S.sel_looper
   VL.publish_fx_source()
   log("info", "looper %d selectionne", S.sel_looper)
   if VL.follow_looper_window then VL.follow_looper_window() end   -- une fenetre looper ouverte bascule sur le nouveau
 end
--- Source FX : 0 = looper selectionne, 1..NIN = entree. Une entree choisie RESTE la source (meme si on change de
--- looper) jusqu'au retour en mode looper (bascule, choix 0, pad d'effet d'un looper).
-function VL.fx_src_set(k)
-  k = math.floor(tonumber(k) or 0)
-  if k >= 1 and k <= NIN then
-    S.fx_source, S.fx_in_lock, S.fx_last_in = k, true, k
-  else
-    S.fx_source, S.fx_in_lock = NIN + clamp(S.sel_looper or 1, 1, NLOOP), false
-  end
-  VL.publish_fx_source()
-  if VL.sync_out then VL.sync_out() end
-  log("info", "source FX : %s", S.fx_in_lock and ("entree " .. S.fx_source) or ("looper " .. (S.fx_source - NIN)))
-end
-function VL.fx_src_toggle()
-  if (S.fx_source or (NIN + 1)) <= NIN then VL.fx_src_set(0) else VL.fx_src_set(S.fx_last_in or S.sel_input or 1) end
-end
-function VL.fx_src_step(d)        -- defile : Looper, IN1 .. INn, Looper ...
-  local cur = ((S.fx_source or (NIN + 1)) <= NIN) and S.fx_source or 0
-  VL.fx_src_set((cur + d) % (NIN + 1))
-end
 function VL.step_looper(d)
   S.sel_looper = ((S.sel_looper - 1 + d) % NLOOP) + 1
   follow_group()
-  if not S.fx_in_lock then S.fx_source = NIN + S.sel_looper end   -- source FX verrouillee sur une entree : on la garde
+  S.fx_source = NIN + S.sel_looper
   VL.publish_fx_source()
   log("info", "looper %d selectionne", S.sel_looper)
   if VL.follow_looper_window then VL.follow_looper_window() end
@@ -2034,8 +2014,6 @@ function VL.fx_nav(kind, id, slot)
   end
   if on_slot then
     S.fx_source = (kind == "input") and id or (NIN + id)
-    S.fx_in_lock = (kind == "input")
-    if kind == "input" then S.fx_last_in = id end
     VL.publish_fx_source()
     VL.set_fx_slot(on_slot)
     VL.set_fighter_page(6)
@@ -2372,13 +2350,7 @@ function VL.ext_cmd_poll()
   for line in c:gmatch("[^\n]+") do
     local name, ts = line:match("^(%a[%w_]*)\t([%d%.]+)")
     if name == "rec_dub_toggle" and ts and t - tonumber(ts) < 2 then VL.rec_dub_toggle() end
-    -- Source FX (MIDI Learn / Twister Custom) : bascule entree <-> looper, suivante / precedente, choix direct
     if name and ts and t - tonumber(ts) < 2 then
-      if name == "fxsrc_tog" then VL.fx_src_toggle()
-      elseif name == "fxsrc_next" then VL.fx_src_step(1)
-      elseif name == "fxsrc_prev" then VL.fx_src_step(-1) end
-      local sk = name:match("^fxsrc_set_(%d+)$")
-      if sk then VL.fx_src_set(tonumber(sk)) end
       -- fxg_<looper>_<slot>_tog (boutons d'effet du web) : comme le pad d'effet, le groupe du looper suit
       local gi, gs = name:match("^fxg_(%d+)_(%d+)_tog$")
       gi, gs = tonumber(gi), tonumber(gs)
@@ -2629,6 +2601,9 @@ local function looper_status(i)
 end
 
 function VL.pad_label(page, row, col)
+  if page == 1 and row == 0 and col <= NIN and VL.p1_held and VL.p1_held() then   -- PAGE 1 maintenue
+    return "IN" .. col .. " / L" .. clamp(S.sel_looper or 1, 1, NLOOP)
+  end
   -- Rangée D (row 5) : labels HARDCODÉS — indépendants de PAD_LABEL / MOVE (évite les bugs remote)
   if page == 1 and row == 5 then
     if col == 1 then
@@ -3026,13 +3001,36 @@ local function end_paint()
   if p.dirty_fx then VL.hooks.fx_changed(VL.fx_list()) end
 end
 
+function VL.p1_held() return down[(NGROUP + 1) .. ",9"] ~= nil end
+-- Execute f avec la page p comme page courante (le Launchpad garde sa page affichee).
+function VL.with_page(p, f)
+  local real = S.page
+  S.page = p
+  local ok, err = pcall(f)
+  S.page = real
+  if not VL.mirror_mode and reaper and reaper.SetExtState then
+    reaper.SetExtState("nowundo_vl", "active_page", tostring(real), false)
+  end
+  if not ok then error(err, 0) end
+end
+-- PAGE 1 MAINTENUE (page Main) : les 8 boutons du haut deviennent les 8 cases de la page 2 du looper selectionne
+-- (entree n -> looper selectionne) : memes couleurs, memes gestes ; un appui choisit aussi l'entree comme source FX.
+VL._p1map = {}
 function VL.on_pad_pressed(row, col, t)
   t = t or now()
+  if row == 0 and col >= 1 and col <= NIN and S.page == 1 and down[(NGROUP + 1) .. ",9"] then
+    local L = clamp(S.sel_looper or 1, 1, NLOOP)
+    down[(NGROUP + 1) .. ",9"].consumed = true
+    VL._p1map[col] = { col, L }
+    VL.with_page(2, function() VL.on_pad_pressed(col, L, t) end)
+    VL.sync_out()
+    return
+  end
   -- Seuls les pads 1..8 x 1..8 de la matrice d'entrees peuvent changer la source FX.
   -- Les boutons lateraux (colonne 9 : pages/groupes) ne doivent jamais etre lus comme une entree.
   if S.page == 2 and row >= 1 and row <= NIN and col >= 1 and col <= 8 then
     S.sel_input = row
-    S.fx_source, S.fx_in_lock, S.fx_last_in = row, true, row
+    S.fx_source = row
     VL.publish_fx_source()
   end
   local key = row .. "," .. col
@@ -3151,6 +3149,12 @@ function VL.on_pad_dragged(row, col)
 end
 
 function VL.on_pad_released(row, col, t)
+  if row == 0 and VL._p1map[col] then          -- relachement d'une case page 2 jouee depuis la rangee du haut
+    local m = VL._p1map[col]
+    VL._p1map[col] = nil
+    VL.with_page(2, function() VL.on_pad_released(m[1], m[2], t) end)
+    return
+  end
   local key = row .. "," .. col
   local d = down[key]
   down[key] = nil
@@ -3657,6 +3661,21 @@ function VL.build_frame()
         if spec then put(row, col, type(spec.hex) == "function" and spec.hex() or spec.hex, spec.state()) else put(row, col, base, "off") end
       end
     end end
+  end
+  -- PAGE 1 maintenue : rangee du haut = colonne du looper selectionne de la page 2 (entrees -> ce looper)
+  if page == 1 and down[(NGROUP + 1) .. ",9"] then
+    local L, fb2 = clamp(S.sel_looper or 1, 1, NLOOP), LPF.compute_feedback()
+    for n = 1, 8 do
+      if n <= NIN then
+        if VL.input_parent_cut(n) then
+          put(0, n, 0x2D5BFF, S.routing.in_l[n][L] and "armed" or "idle")
+        else
+          put(0, n, cell_led(S.routing.in_l[n][L], fb2["in_l:" .. n .. ":" .. L], PAD_RGB[2][n .. "," .. L] or COL.default))
+        end
+      else
+        put(0, n, 0, "off")
+      end
+    end
   end
   return f
 end
@@ -4931,7 +4950,6 @@ VL.reset()
 VL.model_load()      -- routing / effets / groupes / presets du dernier modele sauve (fichier a cote du script)
 -- Au demarrage, la source initiale suit le looper restaure, sans dependre de la page affichee.
 S.fx_source = NIN + clamp(S.sel_looper or 1, 1, NLOOP)
-S.fx_in_lock = false              -- au demarrage la source FX suit le looper selectionne
 VL.publish_fx_source()
 -- Applique l'etat de routing initial (tout ferme) + mute auto des IN non routees
 if VL.scan_fx_present then VL.scan_fx_present() end
