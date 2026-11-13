@@ -52,6 +52,8 @@ local function publish(force)
   local t = reaper.time_precise()
   if not force and (t - last_pub) < (1 / POLL_HZ) then return end
   last_pub = t
+  -- page Twister active (choisie au Launchpad, au MIDI Learn ou au web) : le web la suit
+  reaper.SetExtState(SECTION, "tw_page", reaper.GetExtState("nowundo_vl", "fighter_page"), false)
   local sig = read_state()
   if sig == last_sig and not force then
     reaper.SetExtState(SECTION, "tw_tick", string.format("%.3f", t), false)
@@ -150,10 +152,9 @@ local function process_cmd(cmd)
   elseif op == "PAGE" then
     local p = tonumber(a)
     if p then
-      -- La page web numerote les pages par CONTENU (1 In/Out, 2 Pitch, 3 Volume, 4 Slicer, 5 Cloud...).
-      -- Twister v3.3+ : le BOUTON 1 = Vol/Feedback et le bouton 3 = In/Out -> conversion contenu -> bouton.
+      -- La page web (NowUndo.html a jour) numerote les pages comme les BOUTONS du Launchpad / Twister v3.3+
+      -- (1 Volume, 2 Pitch, 3 In/Out, 4 Slicer, 5 Cloud, 6 Effets, 7 Custom, 8 Display).
       p = math.max(1, math.min(8, math.floor(p)))
-      if p == 1 then p = 3 elseif p == 3 then p = 1 end
       set_fighter_page(p)
       -- si le Launchpad tourne, on peut aussi pousser via une cmd dédiée plus tard
     end

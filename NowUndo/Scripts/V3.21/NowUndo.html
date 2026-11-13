@@ -187,11 +187,15 @@ html, body {
     <section class="view" id="view-twister">
       <div id="tw-bar">
         <div id="tw-conn" title="Backend Twister"></div>
-        <button class="pg active" data-page="1">1 In/Out</button>
+        <!-- numeros = boutons de page du Launchpad / Twister v3.3+ (1 Volume, 3 In/Out) -->
+        <button class="pg" data-page="1">1 Volume</button>
         <button class="pg" data-page="2">2 Pitch</button>
-        <button class="pg" data-page="3">3 Volume</button>
+        <button class="pg active" data-page="3">3 In/Out</button>
         <button class="pg" data-page="4">4 Slicer</button>
         <button class="pg" data-page="5">5 Cloud</button>
+        <button class="pg" data-page="6">6 Effets</button>
+        <button class="pg" data-page="7">7 Custom</button>
+        <button class="pg" data-page="8">8 Display</button>
         <button class="btn reset-btn" id="tw-reset">RESET</button>
       </div>
       <div id="tw-page">
@@ -437,7 +441,9 @@ html, body {
   // TWISTER — dual range faders
   // ═══════════════════════════════════════════
   const TW_SECTION = "nowundo_tw";
-  let twPage = 1;
+  const TW_IO_PAGE = 3;   // page In/Out = bouton 3 (Twister v3.3+)
+  const TW_NAMES = { 1: "Volume", 2: "Pitch", 3: "In/Out", 4: "Slicer", 5: "Cloud", 6: "Effets", 7: "Custom", 8: "Display" };
+  let twPage = TW_IO_PAGE;
   let twState = []; // [{on, inN, outN, len}]
   for (let i = 0; i < 8; i++) twState.push({ on: false, inN: 0, outN: 1, len: 0 });
 
@@ -556,28 +562,30 @@ html, body {
     el.range.addEventListener("pointercancel", function () { drag = null; });
   });
 
-  // Pages Twister
+  // Pages Twister (numeros = boutons du Launchpad). Le web suit aussi la page choisie ailleurs (tw_page).
+  const twResetBtn = document.getElementById("tw-reset");
+  function showTwPage(p) {
+    twPage = p;
+    document.querySelectorAll("#tw-bar .pg").forEach(function (b) {
+      b.classList.toggle("active", +b.dataset.page === twPage);
+    });
+    const isIO = twPage === TW_IO_PAGE;
+    twFaders.style.display = isIO ? "" : "none";
+    twPlaceholder.style.display = isIO ? "none" : "";
+    twResetBtn.style.display = isIO ? "" : "none";        // RESET = In/Out pleine boucle : seulement sur la page In/Out
+    if (!isIO) {
+      twPlaceholder.textContent = "Page " + twPage + " " + (TW_NAMES[twPage] || "") + " — affichée sur le Twister (vue web à venir)";
+    }
+  }
   document.querySelectorAll("#tw-bar .pg").forEach(function (btn) {
     btn.addEventListener("click", function () {
-      twPage = +btn.dataset.page;
-      document.querySelectorAll("#tw-bar .pg").forEach(function (b) {
-        b.classList.toggle("active", +b.dataset.page === twPage);
-      });
-      const isIO = twPage === 1;
-      twFaders.style.display = isIO ? "" : "none";
-      twPlaceholder.style.display = isIO ? "none" : "";
-      if (!isIO) {
-        twPlaceholder.textContent = "Page " + twPage + " — à venir (Pitch / Volume / Slicer / Cloud)";
-      }
-      twCmd("PAGE," + twPage);
-      // synchro fighter_page côté Launchpad backend
-      queueCmd("PAGE," + twPage); // no - different section
-      // Launchpad fighter page via VL command if we add it - for now ExtState on tw
+      showTwPage(+btn.dataset.page);
+      twCmd("PAGE," + twPage);   // (ne PAS envoyer PAGE au Launchpad : il changerait SA page)
     });
   });
 
-  document.getElementById("tw-reset").addEventListener("click", function () {
-    if (twPage === 1) {
+  twResetBtn.addEventListener("click", function () {
+    if (twPage === TW_IO_PAGE) {
       // reset all In/Out to full loop
       for (let i = 0; i < 8; i++) {
         if (!twState[i].on) continue;
@@ -585,8 +593,6 @@ html, body {
         twState[i].outN = 1;
         updateRangeUI(i);
       }
-      twCmd("RESET");
-    } else {
       twCmd("RESET");
     }
   });
@@ -639,6 +645,10 @@ html, body {
         }
       }
       if (key === "tw_state") parseTwState(val);
+      else if (key === "tw_page") {
+        var tp = parseInt(val, 10);
+        if (tp >= 1 && tp <= 8 && tp !== twPage) showTwPage(tp);
+      }
       else if (key === "tw_tick") {
         twLastTick = Date.now();
         twConn.className = "ok";
@@ -662,6 +672,7 @@ html, body {
     "GET/EXTSTATE/" + SECTION + "/web_meta;" +
     "GET/EXTSTATE/" + SECTION + "/web_tick;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_state;" +
+    "GET/EXTSTATE/" + TW_SECTION + "/tw_page;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_tick",
     POLL_MS
   );
