@@ -1,5 +1,6 @@
 -- @description NowUndo 8 Looper Panel - compact dashboard
--- @version 1.3
+-- @version 1.4
+-- v1.4 : cartes Slicer affichees seulement si le Slicer est actif, cartes Cloud seulement si le Cloud est actif.
 -- @author OpenAI
 -- Base: DashBoard_slices_test.lua / NowUndo V3.7
 
@@ -251,6 +252,10 @@ local function is_default(def,v,d)
   -- Same text on screen as the default => not a visible change (float noise).
   return fmt_param(def,v)==fmt_param(def,d)
 end
+-- v1.4 : familles conditionnelles. Slicer = cartes jaunes SAUF Auto seuil / Auto maintien (10, 11 : Auto-Rec) ;
+-- Cloud = cartes bleues. Elles ne s'affichent que si le mode correspondant est actif sur la part publiee.
+local SLICER_PARAM={[13]=true,[14]=true,[15]=true,[31]=true,[32]=true,[33]=true,[46]=true,[47]=true,[48]=true,[49]=true,[50]=true,[51]=true,[57]=true}
+local CLOUD_PARAM={[25]=true,[26]=true,[27]=true,[34]=true,[35]=true,[36]=true,[37]=true,[38]=true,[39]=true,[40]=true}
 local function get_changed_params(param_base,inst)
   local out={}
   -- Snapshot valid only if the JSFX published the matching instance / Song Part.
@@ -259,10 +264,15 @@ local function get_changed_params(param_base,inst)
   local expected_instance = math.floor((param_base-PARAM_GMEM_BASE)/(3*PARAM_GMEM_STRIDE)) + 1
   if math.floor(read(param_base,57)+0.5) ~= expected_instance then return out end
   if math.floor(read(param_base,58)+0.5) ~= expected_part then return out end
+  local slicer_on=math.floor(read(param_base,5)+.5)==1      -- param 6 = play mode (1 = Slicer)
+  local cloud_on=read(param_base,22)>0.5                      -- param 23 = Cloud ON
   for _,def in ipairs(PARAMS) do
-    local v=read(param_base,def[1]-1)
-    local d=default_of(inst,def[1])
-    if not is_default(def,v,d) and not is_hidden(def,v) then out[#out+1]={def=def,value=v} end
+    local id=def[1]
+    if (slicer_on or not SLICER_PARAM[id]) and (cloud_on or not CLOUD_PARAM[id]) then
+      local v=read(param_base,id-1)
+      local d=default_of(inst,id)
+      if not is_default(def,v,d) and not is_hidden(def,v) then out[#out+1]={def=def,value=v} end
+    end
   end
   return out
 end
