@@ -3200,7 +3200,9 @@ function VL.on_pad_released(row, col, t)
     end
     if paint and paint.first == key then end_paint() end
   elseif not d.short_done and not d.long_fired and not d.consumed then
-    dispatch(d.b.short)
+    -- PAGE 2 / PAGE 3 tenue 1 s ou plus sans rien faire : c'etait un maintien -> on reste sur la page courante
+    local hold_btn = (key == (NGROUP + 2) .. ",9" or key == (NGROUP + 3) .. ",9")
+    if not (hold_btn and d.t and ((t or now()) - d.t) >= LONG_PRESS_S) then dispatch(d.b.short) end
   elseif d.b.release and not d.long_fired and not d.consumed then
     dispatch(d.b.release)
   end
