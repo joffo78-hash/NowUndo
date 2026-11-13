@@ -2146,7 +2146,9 @@ end
 for g = 1, NGROUP do
   bind_all(g, 9, fn(function() VL.group_pad_tap(g) end, function() return S.sel_group == g and "on" or "idle" end), nil, false, true)
 end
-for p = 1, NPAGE do bind_all(NGROUP + p, 9, fn(function() VL.set_page(p) end, function() return S.page == p and "on" or "idle" end)) end
+-- PAGE 2 / PAGE 3 servent aussi de MODIFICATEURS depuis la page Main (voir VL.hold_page) : leur changement de page part
+-- au RELACHEMENT, et pas du tout s'ils ont servi de maintien.
+for p = 1, NPAGE do bind_all(NGROUP + p, 9, fn(function() VL.set_page(p) end, function() return S.page == p and "on" or "idle" end), nil, false, p == 2 or p == 3) end
 
 -- Page 1 : Main
 -- row 0 = selection loopers | row 1 = statut loopers | rows 2-5 = ancienne grille 1-4 decalee
@@ -2601,8 +2603,11 @@ local function looper_status(i)
 end
 
 function VL.pad_label(page, row, col)
-  if page == 1 and row == 0 and col <= NIN and VL.p1_held and VL.p1_held() then   -- PAGE 1 maintenue
-    return "IN" .. col .. " / L" .. clamp(S.sel_looper or 1, 1, NLOOP)
+  local hp = (page == 1 and row == 0 and VL.hold_page) and VL.hold_page() or nil   -- PAGE 2 / 3 maintenue
+  if hp then
+    local L = clamp(S.sel_looper or 1, 1, NLOOP)
+    if not VL.hold_cell(hp, col, L) then return "" end
+    return (hp == 2 and ("IN" .. col) or ("L" .. col)) .. " > L" .. L
   end
   -- Rangée D (row 5) : labels HARDCODÉS — indépendants de PAD_LABEL / MOVE (évite les bugs remote)
   if page == 1 and row == 5 then
@@ -3001,7 +3006,19 @@ local function end_paint()
   if p.dirty_fx then VL.hooks.fx_changed(VL.fx_list()) end
 end
 
-function VL.p1_held() return down[(NGROUP + 1) .. ",9"] ~= nil end
+-- Page Main + PAGE 2 maintenue -> 2 (entrees -> looper selectionne) ; PAGE 3 maintenue -> 3 (loopers -> looper selectionne)
+function VL.hold_page()
+  if S.page ~= 1 then return nil end
+  if down[(NGROUP + 2) .. ",9"] then return 2 end
+  if down[(NGROUP + 3) .. ",9"] then return 3 end
+  return nil
+end
+-- case de la page hp jouee par le bouton du haut n (nil = sans objet)
+function VL.hold_cell(hp, n, L)
+  if hp == 2 then return (n <= NIN) and n or nil, L end
+  if hp == 3 then if n ~= L then return L, n end end
+  return nil
+end
 -- Execute f avec la page p comme page courante (le Launchpad garde sa page affichee).
 function VL.with_page(p, f)
   local real = S.page
@@ -3013,17 +3030,22 @@ function VL.with_page(p, f)
   end
   if not ok then error(err, 0) end
 end
--- PAGE 1 MAINTENUE (page Main) : les 8 boutons du haut deviennent les 8 cases de la page 2 du looper selectionne
--- (entree n -> looper selectionne) : memes couleurs, memes gestes ; un appui choisit aussi l'entree comme source FX.
+-- Depuis la page Main, PAGE 2 (ou PAGE 3) MAINTENUE : les 8 boutons du haut deviennent la ligne du looper selectionne
+-- de la page 2 (entree n -> ce looper ; un appui choisit aussi l'entree comme source FX) ou de la page 3
+-- (looper n -> ce looper). Memes couleurs, memes gestes que sur ces pages.
 VL._p1map = {}
 function VL.on_pad_pressed(row, col, t)
   t = t or now()
-  if row == 0 and col >= 1 and col <= NIN and S.page == 1 and down[(NGROUP + 1) .. ",9"] then
+  local hp = (row == 0 and col >= 1 and col <= NLOOP) and VL.hold_page() or nil
+  if hp then
     local L = clamp(S.sel_looper or 1, 1, NLOOP)
-    down[(NGROUP + 1) .. ",9"].consumed = true
-    VL._p1map[col] = { col, L }
-    VL.with_page(2, function() VL.on_pad_pressed(col, L, t) end)
-    VL.sync_out()
+    down[(NGROUP + hp) .. ",9"].consumed = true          -- le bouton de page a servi de maintien : pas de changement de page
+    local r2, c2 = VL.hold_cell(hp, col, L)
+    if r2 then
+      VL._p1map[col] = { r2, c2, hp }
+      VL.with_page(hp, function() VL.on_pad_pressed(r2, c2, t) end)
+      VL.sync_out()
+    end
     return
   end
   -- Seuls les pads 1..8 x 1..8 de la matrice d'entrees peuvent changer la source FX.
@@ -3152,7 +3174,7 @@ function VL.on_pad_released(row, col, t)
   if row == 0 and VL._p1map[col] then          -- relachement d'une case page 2 jouee depuis la rangee du haut
     local m = VL._p1map[col]
     VL._p1map[col] = nil
-    VL.with_page(2, function() VL.on_pad_released(m[1], m[2], t) end)
+    VL.with_page(m[3], function() VL.on_pad_released(m[1], m[2], t) end)
     return
   end
   local key = row .. "," .. col
@@ -3662,18 +3684,20 @@ function VL.build_frame()
       end
     end end
   end
-  -- PAGE 1 maintenue : rangee du haut = colonne du looper selectionne de la page 2 (entrees -> ce looper)
-  if page == 1 and down[(NGROUP + 1) .. ",9"] then
+  -- PAGE 2 / PAGE 3 maintenue (page Main) : rangee du haut = ligne du looper selectionne de cette page
+  local hp = (page == 1) and VL.hold_page() or nil
+  if hp then
     local L, fb2 = clamp(S.sel_looper or 1, 1, NLOOP), LPF.compute_feedback()
     for n = 1, 8 do
-      if n <= NIN then
-        if VL.input_parent_cut(n) then
-          put(0, n, 0x2D5BFF, S.routing.in_l[n][L] and "armed" or "idle")
-        else
-          put(0, n, cell_led(S.routing.in_l[n][L], fb2["in_l:" .. n .. ":" .. L], PAD_RGB[2][n .. "," .. L] or COL.default))
-        end
-      else
+      local r2, c2 = VL.hold_cell(hp, n, L)
+      if not r2 then
         put(0, n, 0, "off")
+      elseif hp == 2 and VL.input_parent_cut(n) then
+        put(0, n, 0x2D5BFF, S.routing.in_l[n][L] and "armed" or "idle")
+      elseif hp == 2 then
+        put(0, n, cell_led(S.routing.in_l[n][L], fb2["in_l:" .. n .. ":" .. L], PAD_RGB[2][r2 .. "," .. c2] or COL.default))
+      else
+        put(0, n, cell_led(S.routing.l_l[n][L], fb2["l_l:" .. n .. ":" .. L], PAD_RGB[3][r2 .. "," .. c2] or COL.default))
       end
     end
   end
