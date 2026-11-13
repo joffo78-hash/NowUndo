@@ -138,7 +138,7 @@ local function set_fighter_page(p)
 end
 
 -- ===== VUES LOOPER (onglet Loopers de NowUndo.html) =====
--- lv_fast (~15 Hz) : par looper "i,vivant,etat,pos%,in,out,vuIn,vuOut,flags,degradation,output,stereo,longueur,part"
+-- lv_fast (~15 Hz) : par looper "i,vivant,etat,pos%,in,out,vuIn,vuOut,flags,degradation,output,stereo,longueur,part,feedback"
 --   flags : 1 reverse | 2 ping-pong | 4 slicer | 8 cloud | 16 beat repeat | 32 one-shot | 64 auto rec
 -- lv_wave (~2 Hz, si change) : 8 formes d'onde de 100 points, 1 caractere par point (0..61), separees par "|"
 local LV = { t = 0, wt = 0, wsig = "", ALPHA = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" }
@@ -163,8 +163,8 @@ local function lv_publish(t)
     local pm = math.floor(g(8) + 0.5)
     local fl = (g(17) > 0.5 and 1 or 0) + (g(18) > 0.5 and 2 or 0) + (pm == 1 and 4 or 0) + (g(24) > 0.5 and 8 or 0)
              + (g(189) > 0.5 and 16 or 0) + (pm == 2 and 32 or 0) + (g(43) > 0.5 and 64 or 0)
-    parts[#parts + 1] = string.format("%d,%d,%d,%.2f,%.4f,%.4f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.0f,%d",
-      i, alive and 1 or 0, math.floor(g(2) + 0.5), g(47), in_n, out_n, g(172), g(173), fl, g(20), g(22), g(21), len, ap)
+    parts[#parts + 1] = string.format("%d,%d,%d,%.2f,%.4f,%.4f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.0f,%d,%.3f",
+      i, alive and 1 or 0, math.floor(g(2) + 0.5), g(47), in_n, out_n, g(172), g(173), fl, g(20), g(22), g(21), len, ap, g(19))
   end
   reaper.SetExtState(SECTION, "lv_fast", table.concat(parts, ";"), false)
   if t - LV.wt >= 0.5 then

@@ -4017,6 +4017,15 @@ function VL.web_poll_cmd()
       if VL.set_layer then VL.set_layer(a) end
     elseif op == "PAGE" and tonumber(a) then
       if VL.set_page then VL.set_page(tonumber(a)) end
+    elseif op == "SEL" and tonumber(a) then         -- web v4.0 : appeler un looper (onglet Loopers) le selectionne ici
+      local i = math.floor(tonumber(a))
+      if i >= 1 and i <= NLOOP and S.sel_looper ~= i then VL.select_looper(i) end
+    elseif op == "ACT" and tonumber(a) and ACTIONS[b] then   -- ACT,looper,action : bouton de l'onglet Loopers
+      local i = math.floor(tonumber(a))                      -- = meme chemin qu'un pad (groupe, etats, page Twister)
+      if i >= 1 and i <= NLOOP then
+        if S.sel_looper ~= i then VL.select_looper(i) end
+        VL.trigger(b)
+      end
     end
   end
   if sid then
@@ -4026,6 +4035,7 @@ function VL.web_poll_cmd()
     if #parts > 8 then WEB.acks = { [sid] = acked }; parts = { sid .. ":" .. acked } end
     reaper.SetExtState(WEB.section, "web_ack", table.concat(parts, ","), false)
   end
+  if VL.sync_out then VL.sync_out() end
 end
 
 function VL.render(t)

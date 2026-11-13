@@ -159,12 +159,25 @@ html, body {
 .tw-xbtn.absent { opacity: .3; cursor: default; }
 .tw-xbtn small { display: block; font-size: 10px; font-weight: 600; letter-spacing: 0; margin-top: 2px; opacity: .85; }
 /* ── Vue Looper ── */
+/* Navigation commune : 8 pages Twister + 8 loopers, toujours visibles */
+#nav2 { flex-shrink: 0; padding: 6px 10px 0; }
+#nav-tw { display: flex; gap: 4px; padding-bottom: 4px; }
+#nav-tw button {
+  flex: 1; border: none; border-radius: 6px; padding: 7px 0; font-size: 10px; font-weight: 700;
+  background: #252530; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden;
+}
+#nav-tw button.cur { background: #3a3a48; color: #fff; }
+#nav-tw button.sel { background: var(--accent); color: #fff; }
+#tw-bar .pg { display: none !important; }
+.lv-btns.b8 { grid-template-columns: repeat(8, 1fr); gap: 4px; margin-bottom: 4px; }
+.lv-btns.b8 .lv-btn { font-size: 9px; padding: 4px 1px; min-height: 44px; line-height: 1.15; letter-spacing: 0; }
 #lv-sel { display: flex; gap: 4px; padding: 2px 0 8px; flex-shrink: 0; }
 #lv-sel button {
   flex: 1; border: 2px solid transparent; border-radius: 8px; padding: 8px 0; font-size: 12px; font-weight: 800;
   color: #fff; cursor: pointer; opacity: .55;
 }
 #lv-sel button.sel { opacity: 1; border-color: #fff; }
+#lv-sel.away button.sel { border-color: transparent; }
 #lv-sel button.dead { opacity: .18; }
 #lv-head { display: flex; align-items: baseline; gap: 10px; padding: 0 2px 6px; flex-shrink: 0; }
 #lv-title { font-size: 16px; font-weight: 800; }
@@ -216,8 +229,9 @@ html, body {
     <button class="tab active" data-view="launchpad">Launchpad</button>
     <button class="tab" data-view="twister">Twister</button>
     <button class="tab" data-view="loopers">Loopers</button>
-    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.9</span>
+    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v4.0</span>
   </nav>
+  <div id="nav2"><div id="nav-tw"></div><div id="lv-sel"></div></div>
 
   <div id="views">
     <!-- LAUNCHPAD -->
@@ -260,15 +274,13 @@ html, body {
 
     <!-- LOOPERS -->
     <section class="view" id="view-loopers">
-      <div id="lv-sel"></div>
       <div id="lv-diag" style="font-size:11px;font-weight:700;padding:0 2px 6px;color:#f39c12">en attente des données du bridge…</div>
       <div id="lv-head"><span id="lv-title">L1</span><span id="lv-state">STOP</span><span id="lv-io"></span></div>
       <canvas id="lv-wave"></canvas>
       <div class="lv-vu"><span>IN</span><div class="bar"><div id="lv-vi"></div></div><span>OUT</span><div class="bar"><div id="lv-vo"></div></div></div>
-      <div class="lv-grp">TRANSPORT</div>
-      <div class="lv-btns" id="lv-tr"></div>
-      <div class="lv-grp">ENREGISTREMENT</div>
-      <div class="lv-btns" id="lv-rec"></div>
+      <div class="lv-grp">LECTURE / REC (comme les 2 rangées du bas du Launchpad)</div>
+      <div class="lv-btns b8" id="lv-tr"></div>
+      <div class="lv-btns b8" id="lv-rec"></div>
       <div class="lv-grp">MODES</div>
       <div class="lv-btns" id="lv-mod"></div>
       <div class="lv-grp">SORTIE</div>
@@ -302,6 +314,7 @@ html, body {
   function showView(id) {
     tabs.forEach(t => t.classList.toggle("active", t.dataset.view === id));
     views.forEach(v => v.classList.toggle("active", v.id === "view-" + id));
+    if (navReady) navRender();
   }
   tabs.forEach(t => t.addEventListener("click", () => showView(t.dataset.view)));
 
@@ -762,6 +775,7 @@ html, body {
   const twResetBtn = document.getElementById("tw-reset");
   function showTwPage(p) {
     twPage = p;
+    if (navReady) navRender();
     document.querySelectorAll("#tw-bar .pg").forEach(function (b) {
       b.classList.toggle("active", +b.dataset.page === twPage);
     });
@@ -775,7 +789,7 @@ html, body {
     updateTwDiag();
   }
   // Diagnostic : la page web (version ci-dessous) recoit-elle les knobs du script Twister ?
-  const WEB_VER = "web-tw 3.9";
+  const WEB_VER = "web-tw 4.0";
   let twKTick = "", twKTickAt = 0, twErr = "";
   function updateTwDiag() {
     const el = document.getElementById("tw-diag");
@@ -838,34 +852,72 @@ html, body {
   const ALPHA = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   let lvSel = 0;
   const lv = [];
-  for (let i = 0; i < 8; i++) lv.push({ alive: false, st: 0, pos: 0, inN: 0, outN: 1, vi: 0, vo: 0, fl: 0, dg: 1, ov: 1, sw: 0, len: 0, part: 1, wave: [] });
-  const lvHold = { io: 0, dg: 0, ov: 0, sw: 0 };
+  for (let i = 0; i < 8; i++) lv.push({ alive: false, st: 0, pos: 0, inN: 0, outN: 1, vi: 0, vo: 0, fl: 0, dg: 1, ov: 1, sw: 0, fb: 1, len: 0, part: 1, wave: [] });
+  const lvHold = { io: 0, dg: 0, ov: 0, sw: 0, fb: 0 };
   const lvSelEl = document.getElementById("lv-sel");
   for (let i = 0; i < 8; i++) {
     const b = document.createElement("button");
     b.textContent = "L" + (i + 1); b.style.background = LOOPER_COL[i];
-    b.addEventListener("click", function () { lvSel = i; lvRender(true); });
+    b.addEventListener("click", function () { lvCall(i); });
     lvSelEl.appendChild(b);
   }
-  // [libelle, commande JSFX, etat allume(l)]
-  const LV_TR = [["PLAY/STOP", 3, l => l.st >= 2 && l.st <= 6], ["RESTART", 16], ["REVERSE", 4, l => l.fl & 1], ["PING-PONG", 5, l => l.fl & 2],
-                 ["ONE-SHOT", 18, l => l.fl & 32], ["UNDO", 14], ["REDO", 15], ["CLEAR", 2]];
-  const LV_REC = [["REC / DUB", 1, l => l.st === 1 || l.st === 3 || l.st === 8], ["REPLACE", 9, l => l.st === 4], ["AUTO-REP", 10, l => l.st === 5],
-                  ["MULTIPLY", 13, l => l.st === 6], ["RE-REC", 17], ["AUTO REC", 19, l => (l.fl & 64) || l.st === 7]];
-  const LV_MOD = [["SLICER", 6, l => l.fl & 4, "#F2D933"], ["CLOUD", 7, l => l.fl & 8, "#408CF2"], ["BEAT REPEAT", 33, l => l.fl & 16, "#52C78C"], ["FULL LOOP", 22]];
-  function lvButtons(el, defs, col) {
+  // Appeler un looper = l'afficher ET le selectionner sur le Launchpad (l'inverse non : choisir un looper
+  // sur le Launchpad ne change pas la vue affichee ici).
+  function lvCall(i) {
+    lvSel = i; queueCmd("SEL," + (i + 1));
+    showView("loopers"); lvRender(true);
+  }
+  // 8 pages du Twister, accessibles depuis toutes les vues
+  const NAV_TW = ["1 Vol", "2 Pitch", "3 In/Out", "4 Slicer", "5 Cloud", "6 FX", "7 Cust", "8 Disp"];
+  const navTw = document.getElementById("nav-tw");
+  NAV_TW.forEach(function (lab, k) {
+    const b = document.createElement("button");
+    b.textContent = lab;
+    b.addEventListener("click", function () { showView("twister"); showTwPage(k + 1); twCmd("PAGE," + (k + 1)); navRender(); });
+    navTw.appendChild(b);
+  });
+  var navReady = true;
+  function navRender() {
+    const v = document.querySelector(".tab.active"), view = v ? v.dataset.view : "";
+    navTw.querySelectorAll("button").forEach(function (b, k) {
+      b.classList.toggle("sel", view === "twister" && twPage === k + 1);
+      b.classList.toggle("cur", view !== "twister" && twPage === k + 1);
+    });
+    lvSelEl.classList.toggle("away", view !== "loopers");
+    lvSelEl.querySelectorAll("button").forEach(function (b, i) {
+      b.classList.toggle("sel", i === lvSel); b.classList.toggle("dead", !lv[i].alive);
+    });
+  }
+  // Rangees B et A du Launchpad (page 1), memes positions et couleurs. {a: action} passe par le Launchpad
+  // (meme logique de groupe que le pad, et etats du Launchpad tenus a jour) ; {c: n} = commande directe au JSFX.
+  const LV_TR = [["FULL LOOP", { a: "full_loop" }, l => l.len > 0 && l.inN <= 0.001 && l.outN >= 0.999, "#DDDDDD"],
+                 ["QUANTISE", { a: "quantise_inout" }, null, "#99FF66"], ["RESTART", { a: "restart" }, null, "#CCCCCC"],
+                 ["REVERSE", { a: "reverse" }, l => l.fl & 1, "#FFD320"], ["CLOUD", { a: "cloud" }, l => l.fl & 8, "#66CCFF"],
+                 ["SLICER", { a: "slicer" }, l => l.fl & 4, "#FFD320"], ["REDO", { a: "redo" }, null, "#CCCCCC"],
+                 ["UNDO", { a: "undo" }, null, "#CCCCCC"]];
+  const LV_REC = [["CLEAR", { a: "clear" }, null, "#CCCCCC"], ["RESET", { a: "reset" }, null, "#FF8040"],
+                  ["ONE SHOT", { a: "one_shot" }, l => l.fl & 32, "#CCCCCC"], ["STOP / PLAY", { a: "stop_play" }, l => l.st >= 2 && l.st <= 6, "#009933"],
+                  ["MULTIPLY", { a: "multiply" }, l => l.st === 6, "#9933FF"], ["REPLACE", { a: "replace" }, l => l.st === 4, "#FF3300"],
+                  ["RE-REC", { a: "rerec" }, null, "#FF3333"], ["REC / DUB", { a: "rec_overdub" }, l => l.st === 1 || l.st === 3 || l.st === 8, "#FF0000"]];
+  const LV_MOD = [["PING-PONG", { a: "auto_rev" }, l => l.fl & 2, "#FFD320"], ["AUTO REC", { a: "auto" }, l => (l.fl & 64) || l.st === 7, "#9999FF"],
+                  ["AUTO-REP", { c: 10 }, l => l.st === 5, "#d6b07a"], ["BEAT REPEAT", { c: 33 }, l => l.fl & 16, "#52C78C"]];
+  function lvSend(x) {
+    if (x.a) queueCmd("ACT," + (lvSel + 1) + "," + x.a);
+    else lvQ.push("CMD," + lvSel + "," + x.c);
+  }
+  function lvButtons(el, defs) {
     defs.forEach(function (d) {
       const b = document.createElement("button");
       b.className = "lv-btn"; b.textContent = d[0];
-      b.addEventListener("click", function () { lvQ.push("CMD," + lvSel + "," + d[1]); });
-      el.appendChild(b); d.el = b; d.col = d[3] || col;
+      b.addEventListener("click", function () { lvSend(d[1]); });
+      el.appendChild(b); d.el = b; d.col = d[3];
     });
   }
-  lvButtons(document.getElementById("lv-tr"), LV_TR, "#e0e0e0");
-  lvButtons(document.getElementById("lv-rec"), LV_REC, "#e74c3c");
-  lvButtons(document.getElementById("lv-mod"), LV_MOD, "#e0e0e0");
+  lvButtons(document.getElementById("lv-tr"), LV_TR);
+  lvButtons(document.getElementById("lv-rec"), LV_REC);
+  lvButtons(document.getElementById("lv-mod"), LV_MOD);
   // Degradation 0..1 (20) | Output 0..2 (22) | Stereo 0..1 (21)
-  const LV_SL = [["Degradation", "dg", 20, 1, v => Math.round(v * 100) + "%"], ["Output", "ov", 22, 2, v => Math.round(v * 100) + "%"],
+  const LV_SL = [["Feedback", "fb", 19, 2, v => Math.round(v * 100) + "%"], ["Degradation", "dg", 20, 1, v => Math.round(v * 100) + "%"], ["Output", "ov", 22, 2, v => Math.round(v * 100) + "%"],
                  ["Stereo", "sw", 21, 1, v => Math.round(v * 100) + "%"]];
   const lvSls = document.getElementById("lv-sls");
   const lvPend = {};
@@ -918,7 +970,7 @@ html, body {
   cv.addEventListener("pointermove", lvMove);
   cv.addEventListener("pointerup", function () { ioDrag = null; });
   cv.addEventListener("pointercancel", function () { ioDrag = null; });
-  cv.addEventListener("dblclick", function () { lvQ.push("CMD," + lvSel + ",22"); });   // double clic = boucle complete
+  cv.addEventListener("dblclick", function () { lvSend({ a: "full_loop" }); });   // double clic = boucle complete
 
   function lvDraw() {
     const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
@@ -959,9 +1011,7 @@ html, body {
   }
   function lvRender(force) {
     const l = lv[lvSel], st = LV_STATE[l.st] || LV_STATE[0];
-    lvSelEl.querySelectorAll("button").forEach(function (b, i) {
-      b.classList.toggle("sel", i === lvSel); b.classList.toggle("dead", !lv[i].alive);
-    });
+    navRender();
     document.getElementById("lv-title").textContent = "L" + (lvSel + 1) + " · " + (LV_PART[l.part] || "MAIN");
     const se = document.getElementById("lv-state");
     se.textContent = l.alive ? st[0] : "ABSENT"; se.style.background = l.alive ? st[1] : "#222"; se.style.color = (l.st === 0 || !l.alive) ? "#ddd" : "#111";
@@ -972,8 +1022,9 @@ html, body {
     [LV_TR, LV_REC, LV_MOD].forEach(function (defs) {
       defs.forEach(function (d) {
         const on = d[2] ? !!d[2](l) : false;
-        d.el.classList.toggle("on", on);
-        d.el.style.background = on ? d.col : ""; d.el.style.borderColor = on ? d.col : "";
+        d.el.classList.toggle("on", on);   // comme une LED du Launchpad : couleur pleine si actif, attenuee sinon
+        d.el.style.background = on ? d.col : d.col + "26"; d.el.style.borderColor = on ? d.col : d.col + "59";
+        d.el.style.color = on ? "#111" : d.col;
       });
     });
     LV_SL.forEach(function (d) {
@@ -984,8 +1035,8 @@ html, body {
   let lvLast = 0;
   setInterval(function () {
     const el = document.getElementById("lv-diag");
-    if (Date.now() - lvLast < 2000) { el.style.color = "#2ecc71"; el.textContent = "web v3.9 · bridge OK (" + lv.filter(l => l.alive).length + " looper(s) détecté(s))"; }
-    else { el.style.color = "#f39c12"; el.textContent = "web v3.9 · aucune donnée looper : remplacez et relancez NowUndo_Twister_Web.lua (version Loopers)"; }
+    if (Date.now() - lvLast < 2000) { el.style.color = "#2ecc71"; el.textContent = "web v4.0 · bridge OK (" + lv.filter(l => l.alive).length + " looper(s) détecté(s))"; }
+    else { el.style.color = "#f39c12"; el.textContent = "web v4.0 · aucune donnée looper : remplacez et relancez NowUndo_Twister_Web.lua (version Loopers)"; }
   }, 1000);
   function parseLvFast(str) {
     if (!str) return;
@@ -1001,8 +1052,9 @@ html, body {
       if (!(i === lvSel && now - lvHold.ov < 400)) l.ov = parseFloat(b[10]) || 0;
       if (!(i === lvSel && now - lvHold.sw < 400)) l.sw = parseFloat(b[11]) || 0;
       l.len = parseFloat(b[12]) || 0; l.part = parseInt(b[13], 10) || 1;
+      if (b.length > 14 && !(i === lvSel && now - lvHold.fb < 400)) l.fb = parseFloat(b[14]) || 0;
     });
-    if (document.getElementById("view-loopers").classList.contains("active")) lvRender(false);
+    if (document.getElementById("view-loopers").classList.contains("active")) lvRender(false); else navRender();
   }
   function parseLvWave(str) {
     if (!str) return;
