@@ -2985,7 +2985,7 @@ end
 -- pads qu'on peut "maintenir" (utile pour la souris : bouton HOLD) : GROUP 1-4 et cellules de matrice
 function VL.is_holdable(row, col)
   local b = BIND[S.page][row .. "," .. col]
-  return b ~= nil and (b.short.paint ~= nil or (col == 9 and row >= 1 and row <= NGROUP) or (col == 9 and row == 5))
+  return b ~= nil and (b.short.paint ~= nil or (col == 9 and row >= 1 and row <= NGROUP) or (col == 9 and row >= 5 and row <= 7))
 end
 
 local function paint_apply(key, pnt)
@@ -4757,7 +4757,7 @@ local HOLD = {
         end
       end
       if sticky_on and not sticky_pad and VL.is_holdable(r, c)
-         and (c == 9 and r == 5 or (S.sel_group == 0 and not (c == 9 and r >= 1 and r <= 4))) then
+         and ((c == 9 and r >= 5 and r <= 7) or (S.sel_group == 0 and not (c == 9 and r >= 1 and r <= 4))) then
         sticky_pad = { r, c }
       else
         VL.on_pad_released(r, c, t)
@@ -4917,6 +4917,8 @@ local HOLD = {
       local eg = VL.held_group()
       if eg then label = "HOLD  GROUP " .. eg
       elseif sticky_pad and sticky_pad[1] == 5 and sticky_pad[2] == 9 then label = "HOLD PAGE 1 : clic FX"
+      elseif sticky_pad and sticky_pad[2] == 9 and (sticky_pad[1] == 6 or sticky_pad[1] == 7) then
+        label = (sticky_pad[1] == 6 and "HOLD P2 : IN > L" or "HOLD P3 : L > L") .. (S.sel_looper or 1)
       elseif sticky_pad then label = "HOLD  (held)"
       else label = "HOLD  pick GROUP" end
     end

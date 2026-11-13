@@ -423,9 +423,12 @@ html, body {
     updateHelp();
   }
   function updateHelp() {
-    helpEl.textContent = holdOn
-      ? (meta.holdGroup > 0 ? "EDIT GROUP " + meta.holdGroup : "HOLD : tapez un pad GROUP")
-      : "";
+    var sk = stickyKey ? stickyKey.split(",")[0] : null;
+    helpEl.textContent = !holdOn ? ""
+      : sk === "6" ? "PAGE 2 maintenue : les boutons du haut = entrees -> looper selectionne (retaper PAGE 2 pour relacher)"
+      : sk === "7" ? "PAGE 3 maintenue : les boutons du haut = loopers -> looper selectionne (retaper PAGE 3 pour relacher)"
+      : sk === "5" ? "PAGE 1 maintenue : cliquez un pad FX pour changer son mode"
+      : (meta.holdGroup > 0 ? "EDIT GROUP " + meta.holdGroup : "HOLD : tapez un pad GROUP, ou PAGE 2 / PAGE 3");
   }
 
   // Commandes Launchpad numerotees : web_cmd est une seule case (ecrasee a chaque envoi). On renvoie toutes les
@@ -472,8 +475,21 @@ html, body {
       : cmdLegacy ? "Launchpad ancienne version : remplacez virtuallaunchpad_main.lua puis relancez-le" : "";
   }, 500);
 
+  // HOLD + bouton PAGE 1 / 2 / 3 : le bouton reste ENFONCE (comme un maintien au doigt) jusqu'a un 2e tap ou HOLD off.
+  // PAGE 2 maintenue = entrees -> looper selectionne, PAGE 3 = loopers -> looper selectionne (rangee du haut).
+  var stickyKey = null;
+  function isStickyPage(row, col) { return col === 9 && row >= 5 && row <= 7; }
+  function releaseSticky() {
+    if (!stickyKey) return;
+    var p = stickyKey.split(",");
+    if (pads[stickyKey]) pads[stickyKey].el.classList.remove("down");
+    downPads.delete(stickyKey); stickyKey = null;
+    queueCmd("R," + p[0] + "," + p[1]);
+    updateHelp();
+  }
   function onPadDown(row, col) {
     var key = row + "," + col;
+    if (key === stickyKey) { releaseSticky(); return; }   // 2e tap : relache le bouton maintenu
     if (downPads.has(key)) return;
     downPads.add(key); lastDragKey = key;
     if (pads[key]) pads[key].el.classList.add("down");
@@ -482,6 +498,7 @@ html, body {
   function onPadUp(row, col) {
     var key = row + "," + col;
     if (!downPads.has(key)) return;
+    if (holdOn && !stickyKey && isStickyPage(row, col)) { stickyKey = key; updateHelp(); return; }   // reste enfonce
     downPads.delete(key);
     if (pads[key]) pads[key].el.classList.remove("down");
     queueCmd("R," + row + "," + col);
@@ -516,6 +533,7 @@ html, body {
 
   btnHold.addEventListener("click", function () {
     holdOn = !holdOn;
+    if (!holdOn) releaseSticky();
     btnHold.classList.toggle("on", holdOn);
     btnHold.textContent = holdOn ? "HOLD ON" : "HOLD";
     queueCmd("H," + (holdOn ? "1" : "0"));
