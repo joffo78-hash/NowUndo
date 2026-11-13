@@ -129,28 +129,23 @@ html, body {
   background: rgba(255,255,255,.9); opacity: 0.95;
 }
 
-/* Twister : boitier facon Midi Fighter Twister (pages autres que In/Out) */
+/* Twister : grille de knobs (pages autres que In/Out) */
 .tw-knobs {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 6px;
-  width: 100%; max-width: min(100%, calc(100vh - 150px)); margin: 4px auto; padding: 14px 12px 10px;
-  border-radius: 22px;
-  background: linear-gradient(160deg, #26262b 0%, #1b1b1f 45%, #131316 100%);   /* boitier noir mat */
-  box-shadow: 0 0 0 2px #2e2e34, 0 0 0 4px #0b0b0d, inset 0 1px 2px rgba(255,255,255,.08), inset 0 -3px 6px rgba(0,0,0,.5), 0 10px 26px rgba(0,0,0,.7);
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  width: 100%; max-width: min(100%, calc(100vh - 170px)); margin: 0 auto; padding: 4px 0;
 }
 .tw-knob {
-  display: flex; flex-direction: column; align-items: center; padding: 2px 0 2px;
-  touch-action: none; cursor: ns-resize; position: relative; border-radius: 50%;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  display: flex; flex-direction: column; align-items: center; padding: 6px 4px 8px;
+  touch-action: none; cursor: ns-resize; position: relative;
 }
-.tw-knob svg { width: 100%; max-width: 104px; aspect-ratio: 1; display: block; overflow: visible; }
-.tw-knob .kl, .tw-knob .kv {
-  font-size: 10px; line-height: 12px; height: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-  color: #c9cbd0; font-weight: 700;
-}
-.tw-knob .kv { font-weight: 600; color: #8d9097; font-variant-numeric: tabular-nums; }
-.tw-knob.empty, .tw-knob.ro { cursor: default; }
-.tw-knob.dim svg { opacity: .55; }
-.tw-knob .sel { display: none; }
-.tw-knob.active .sel { display: block; }
+.tw-knob.empty { opacity: .25; cursor: default; }
+.tw-knob.dim { opacity: .38; }
+.tw-knob.ro { cursor: default; }
+.tw-knob.active { box-shadow: 0 0 0 2px rgba(255,255,255,.35); }
+.tw-knob .kl { font-size: 11px; font-weight: 700; height: 14px; overflow: hidden; white-space: nowrap; max-width: 100%; text-overflow: ellipsis; }
+.tw-knob svg { width: 100%; max-width: 92px; aspect-ratio: 1; display: block; }
+.tw-knob .kv { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; height: 14px; white-space: nowrap; }
 .tw-placeholder {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 14px; text-align: center; padding: 24px;
@@ -592,47 +587,26 @@ html, body {
   const kDrag = {};                       // idx -> { y, n0, moved, last }
   const kHold = {};                       // idx -> horodatage : ignorer l'etat publie juste apres un geste
   const kPending = {};                    // idx -> valeur a envoyer (coalescence)
-  // Geometrie facon Twister : 11 LED d'indicateur sur 270 degres, capuchon strie, croissant RVB en bas
-  const NLED = 11;
-  const ledPos = [];
-  for (let i = 0; i < NLED; i++) {
-    const a = (135 + i * 27) * Math.PI / 180;            // de -225 (bas gauche) a +45 (bas droit), sens horaire
-    ledPos.push([50 + 41 * Math.cos(a), 50 + 41 * Math.sin(a)]);
+  function arcPath(n) {
+    // couronne 270 degres (de -225 a +45), comme le Twister
+    const a0 = -225 * Math.PI / 180, a1 = a0 + Math.max(0.0001, n) * 1.5 * Math.PI;
+    const r = 38, cx = 50, cy = 50;
+    const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+    return "M" + x0.toFixed(2) + " " + y0.toFixed(2) + " A" + r + " " + r + " 0 " + ((a1 - a0) > Math.PI ? 1 : 0) + " 1 " + x1.toFixed(2) + " " + y1.toFixed(2);
   }
-  let knurl = "";
-  for (let i = 0; i < 36; i++) {
-    const a = i * 10 * Math.PI / 180;
-    knurl += '<line x1="' + (50 + 21 * Math.cos(a)).toFixed(2) + '" y1="' + (50 + 21 * Math.sin(a)).toFixed(2) +
-             '" x2="' + (50 + 25 * Math.cos(a)).toFixed(2) + '" y2="' + (50 + 25 * Math.sin(a)).toFixed(2) + '"/>';
-  }
-  let svgDefs = '<defs>' +
-    '<radialGradient id="kbody" cx="50%" cy="40%" r="60%"><stop offset="0" stop-color="#3d3d43"/><stop offset="1" stop-color="#18181c"/></radialGradient>' +
-    '<radialGradient id="kcap" cx="45%" cy="35%" r="70%"><stop offset="0" stop-color="#4b4b51"/><stop offset=".6" stop-color="#26262b"/><stop offset="1" stop-color="#151518"/></radialGradient>' +
-    '<filter id="kglow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.6"/></filter>' +
-    '</defs>';
+  const TRACK = arcPath(1);
   for (let idx = 0; idx < 16; idx++) {
     const el = document.createElement("div");
     el.className = "tw-knob empty";
-    let leds = "";
-    for (let i = 0; i < NLED; i++) {
-      leds += '<circle class="led" cx="' + ledPos[i][0].toFixed(2) + '" cy="' + ledPos[i][1].toFixed(2) + '" r="2.6"/>';
-    }
     el.innerHTML = '<div class="kl"></div>' +
-      '<svg viewBox="0 0 100 100">' + (idx === 0 ? svgDefs : "") +
-      '<circle class="sel" cx="50" cy="50" r="48.5" fill="none" stroke="#2ea8ff" stroke-width="2.5"/>' +
-      '<circle cx="50" cy="50" r="47" fill="url(#kbody)" stroke="#3a3a41" stroke-width="1"/>' +
-      '<path class="rgbglow" d="M30 76 A26 26 0 0 0 70 76" fill="none" stroke="#f00" stroke-width="7" stroke-linecap="round" filter="url(#kglow)" opacity=".75"/>' +
-      '<path class="rgb" d="M30 76 A26 26 0 0 0 70 76" fill="none" stroke="#f00" stroke-width="4.5" stroke-linecap="round"/>' +
-      '<g class="leds" fill="#555">' + leds + '</g>' +
-      '<circle cx="50" cy="50" r="26" fill="url(#kcap)" stroke="#0a0a0c" stroke-width="1.2"/>' +
-      '<g stroke="#0e0e11" stroke-width="1.1" opacity=".9">' + knurl + '</g>' +
-      '<circle cx="50" cy="50" r="19" fill="url(#kcap)"/>' +
-      '<line class="ptr" x1="50" y1="40" x2="50" y2="33" stroke="#cfd2d6" stroke-width="2.4" stroke-linecap="round"/>' +
-      '</svg>' +
+      '<svg viewBox="0 0 100 100"><path d="' + TRACK + '" fill="none" stroke="#2c2c34" stroke-width="9" stroke-linecap="round"/>' +
+      '<path class="arc" d="" fill="none" stroke="#888" stroke-width="9" stroke-linecap="round"/>' +
+      '<circle cx="50" cy="50" r="26" fill="#1c1c22" stroke="#333" stroke-width="1.5"/>' +
+      '<line class="ptr" x1="50" y1="50" x2="50" y2="28" stroke="#ddd" stroke-width="3" stroke-linecap="round"/></svg>' +
       '<div class="kv"></div>';
     twKnobsEl.appendChild(el);
-    knobEls.push({ el: el, lab: el.querySelector(".kl"), val: el.querySelector(".kv"), ptr: el.querySelector(".ptr"),
-                   leds: el.querySelectorAll(".led"), rgb: el.querySelector(".rgb"), glow: el.querySelector(".rgbglow") });
+    knobEls.push({ el: el, lab: el.querySelector(".kl"), arc: el.querySelector(".arc"), ptr: el.querySelector(".ptr"), val: el.querySelector(".kv") });
     el.addEventListener("pointerdown", function (e) {
       const k = knobData.k[idx];
       if (!k || k.ro || k.dim) return;
@@ -661,27 +635,17 @@ html, body {
   }
   function drawKnob(idx) {
     const ke = knobEls[idx], k = knobData.k[idx];
-    const on = k && !k.dim;
-    ke.el.className = "tw-knob" + (!k ? " empty" : "") + (k && k.dim ? " dim" : "") + (k && k.ro ? " ro" : "") + (kDrag[idx] ? " active" : "");
-    ke.lab.textContent = k ? k.label : "";
-    ke.val.textContent = k ? k.disp : "";
-    // couronne : LED allumees jusqu'a la valeur (la derniere partiellement), comme l'indicateur en barre du Twister
-    const pos = k ? k.n * (NLED - 1) : -1;
-    for (let i = 0; i < NLED; i++) {
-      const lv = !k ? 0 : (i <= pos ? 1 : Math.max(0, 1 - (i - pos)));
-      const led = ke.leds[i];
-      if (lv > 0.05) {
-        const g = Math.round(150 + 105 * lv);
-        led.setAttribute("fill", "rgb(" + g + "," + g + "," + Math.min(255, g + 8) + ")");
-        led.setAttribute("r", (2.4 + 0.6 * lv).toFixed(2));
-      } else { led.setAttribute("fill", "#55575c"); led.setAttribute("r", "2.3"); }
+    if (!k) {
+      ke.el.className = "tw-knob empty"; ke.lab.textContent = ""; ke.val.textContent = "";
+      ke.arc.setAttribute("d", ""); ke.ptr.setAttribute("transform", "rotate(-135 50 50)");
+      return;
     }
-    // croissant RVB : couleur de la page / de la fonction ; eteint si vide (et sur la page Display, comme le vrai Twister)
-    const showRgb = k && knobData.page !== 8;
-    const col = showRgb ? "#" + k.hex : "#2a2a2e";
-    ke.rgb.setAttribute("stroke", col); ke.glow.setAttribute("stroke", col);
-    ke.glow.setAttribute("opacity", showRgb ? (on ? ".8" : ".35") : "0");
-    ke.ptr.setAttribute("transform", "rotate(" + (-135 + (k ? k.n : 0) * 270).toFixed(1) + " 50 50)");
+    ke.el.className = "tw-knob" + (k.dim ? " dim" : "") + (k.ro ? " ro" : "") + (kDrag[idx] ? " active" : "");
+    ke.lab.textContent = k.label; ke.lab.style.color = "#" + k.hex;
+    ke.val.textContent = k.disp;
+    ke.arc.setAttribute("d", k.n > 0.002 ? arcPath(k.n) : "");
+    ke.arc.setAttribute("stroke", "#" + k.hex);
+    ke.ptr.setAttribute("transform", "rotate(" + (-135 + k.n * 270).toFixed(1) + " 50 50)");
   }
   function renderKnobs() { for (let i = 0; i < 16; i++) drawKnob(i); }
   function parseTwKnobs(str) {
