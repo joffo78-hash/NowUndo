@@ -1,6 +1,7 @@
 -- @description NowUndo MIDI Learn — Launchpad + Twister
--- @version 2.7
+-- @version 2.8
 -- @about
+--   v2.8 : clavier ET MIDI cumulables sur une meme fonction (touches dans une table separee : maps_kbd).
 --   v2.7 : TOUCHES CLAVIER. Le meme bouton Learn accepte une note / CC MIDI OU une touche du clavier (avec Ctrl / Maj /
 --          Alt) : la touche devient un raccourci de la fonction. Necessite l'extension js_ReaScriptAPI (ReaPack) :
 --          lecture du clavier dans tout REAPER, et blocage des touches apprises (touche I : bloquer / laisser passer)
@@ -414,6 +415,24 @@ end
 
 local function is_aux_id(id) return id:sub(1, 4) == "aux:" end
 
+-- v2.7 : clavier. status KEYST, d1 = code touche Windows (VK) + modificateurs * 256 (1 Maj, 2 Ctrl, 4 Alt)
+-- k[id] = code : touches apprises, SEPAREES des assignations MIDI (une fonction peut avoir les deux)
+local KB = { ST = 256, prev = nil, down = {}, icpt = {}, warned = false, sig = nil, k = {} }
+KB.NAMES = { [8] = "Retour", [9] = "Tab", [13] = "Entree", [19] = "Pause", [20] = "VerrMaj", [27] = "Echap", [32] = "Espace",
+  [33] = "PgPrec", [34] = "PgSuiv", [35] = "Fin", [36] = "Debut", [37] = "Gauche", [38] = "Haut", [39] = "Droite", [40] = "Bas",
+  [45] = "Inser", [46] = "Suppr", [106] = "Pav*", [107] = "Pav+", [109] = "Pav-", [110] = "Pav.", [111] = "Pav/",
+  [186] = ";", [187] = "=", [188] = ",", [189] = "-", [190] = ".", [191] = "/", [192] = "`", [219] = "[", [220] = "\\", [221] = "]", [222] = "'" }
+function KB.name(code)
+  local vk, md = code % 256, math.floor(code / 256)
+  local n = KB.NAMES[vk]
+  if not n then
+    if (vk >= 48 and vk <= 57) or (vk >= 65 and vk <= 90) then n = string.char(vk)
+    elseif vk >= 96 and vk <= 105 then n = "Pav" .. (vk - 96)
+    elseif vk >= 112 and vk <= 135 then n = "F" .. (vk - 111)
+    else n = "#" .. vk end
+  end
+  return ((md & 2) ~= 0 and "Ctrl+" or "") .. ((md & 4) ~= 0 and "Alt+" or "") .. ((md & 1) ~= 0 and "Maj+" or "") .. n
+end
 local function save_maps()
   local lines, aux = {}, {}
   for id, m in pairs(maps) do
@@ -431,6 +450,10 @@ local function save_maps()
   table.sort(aux)
   reaper.SetExtState(EXT, "maps", table.concat(lines, "\n"), true)
   reaper.SetExtState(EXT, "maps_aux", table.concat(aux, "\n"), true)
+  local kl = {}
+  for id, code in pairs(KB.k) do kl[#kl + 1] = id .. "|" .. code end
+  table.sort(kl)
+  reaper.SetExtState(EXT, "maps_kbd", table.concat(kl, "\n"), true)       -- v2.8 : touches clavier
   local pk = {}
   for id in pairs(pickup) do pk[#pk + 1] = id end
   table.sort(pk)
@@ -474,6 +497,14 @@ local function load_maps()
     local id, dev = line:match("^([^|]+)|(.*)$")
     if id and maps[id] and not is_aux_id(id) then maps[id].dev = dev end
   end
+  KB.k = {}
+  for line in (reaper.GetExtState(EXT, "maps_kbd") or ""):gmatch("[^\n]+") do
+    local id, code = line:match("^([^|]+)|(%d+)$")
+    if id and BY_ID[id] then KB.k[id] = tonumber(code) end
+  end
+  for id, m in pairs(maps) do                           -- v2.7 -> v2.8 : touches qui etaient rangees dans les maps MIDI
+    if m.status == KB.ST then KB.k[id] = m.d1; maps[id] = nil end
+  end
   pickup = {}
   for id in (reaper.GetExtState(EXT, "pickup") or ""):gmatch("[^,]+") do
     if BY_ID[id] then pickup[id] = true end
@@ -489,23 +520,6 @@ end
 --------------------------------------------------------------------------
 -- MIDI helpers
 --------------------------------------------------------------------------
--- v2.7 : clavier. status KEYST, d1 = code touche Windows (VK) + modificateurs * 256 (1 Maj, 2 Ctrl, 4 Alt)
-local KB = { ST = 256, prev = nil, down = {}, icpt = {}, warned = false, sig = nil }
-KB.NAMES = { [8] = "Retour", [9] = "Tab", [13] = "Entree", [19] = "Pause", [20] = "VerrMaj", [27] = "Echap", [32] = "Espace",
-  [33] = "PgPrec", [34] = "PgSuiv", [35] = "Fin", [36] = "Debut", [37] = "Gauche", [38] = "Haut", [39] = "Droite", [40] = "Bas",
-  [45] = "Inser", [46] = "Suppr", [106] = "Pav*", [107] = "Pav+", [109] = "Pav-", [110] = "Pav.", [111] = "Pav/",
-  [186] = ";", [187] = "=", [188] = ",", [189] = "-", [190] = ".", [191] = "/", [192] = "`", [219] = "[", [220] = "\\", [221] = "]", [222] = "'" }
-function KB.name(code)
-  local vk, md = code % 256, math.floor(code / 256)
-  local n = KB.NAMES[vk]
-  if not n then
-    if (vk >= 48 and vk <= 57) or (vk >= 65 and vk <= 90) then n = string.char(vk)
-    elseif vk >= 96 and vk <= 105 then n = "Pav" .. (vk - 96)
-    elseif vk >= 112 and vk <= 135 then n = "F" .. (vk - 111)
-    else n = "#" .. vk end
-  end
-  return ((md & 2) ~= 0 and "Ctrl+" or "") .. ((md & 4) ~= 0 and "Alt+" or "") .. ((md & 1) ~= 0 and "Maj+" or "") .. n
-end
 local function fmt_midi(m)
   if not m or not m.status then return "—" end
   local st = m.status
@@ -1158,7 +1172,23 @@ local function handle_event(msg, dev, kev)
       if not is_off then notify("Clavier : pas pour les knobs / push du Twister (ils sont lus par le script Twister)") end
       return
     end
-    if (now - learn_armed_t) > 0.05 and not is_off then
+    if ev.status == KB.ST and (now - learn_armed_t) > 0.05 and not is_off then
+      -- v2.8 : une TOUCHE s'ajoute a l'assignation MIDI (elle ne la remplace pas) ; 1 touche = 1 seule fonction
+      local done_id, removed = learn_id, {}
+      for id, code in pairs(KB.k) do
+        if id ~= done_id and code == ev.d1 then KB.k[id] = nil; removed[#removed + 1] = BY_ID[id] and BY_ID[id].name or id end
+      end
+      KB.k[done_id] = ev.d1
+      local msgtxt = "Learned " .. (BY_ID[done_id] and BY_ID[done_id].name or done_id) .. " ← Touche " .. KB.name(ev.d1)
+      if #removed > 0 then msgtxt = msgtxt .. "   (retire de: " .. table.concat(removed, ", ") .. ")" end
+      notify(msgtxt)
+      learn_id = nil
+      learn_block = { dn = dn, st = ev.status, ch = ev.ch, t = now }
+      save_maps()
+      advance_learn(done_id)
+      return
+    end
+    if ev.status ~= KB.ST and (now - learn_armed_t) > 0.05 and not is_off then
       local done_id = learn_id
       local removed = steal_assignment(done_id, ev, dn)
       maps[done_id] = {
@@ -1179,6 +1209,17 @@ local function handle_event(msg, dev, kev)
     return
   end
 
+  if ev.status == KB.ST then                            -- v2.8 : touches clavier (table separee)
+    for id, code in pairs(KB.k) do
+      local tgt = BY_ID[id]
+      if tgt and code == ev.d1 then
+        local m = maps[id]
+        local mk = { status = KB.ST, ch = 0, d1 = code, gate = m and m.gate or false, ret = false }
+        execute_target(tgt, mk, ev.d2, ev.d2 > 0, ev.d2 == 0)
+      end
+    end
+    return
+  end
   -- Un message appris en aux (pour CE peripherique) n'est jamais traite par les maps principales.
   if matches_aux(ev, dn) then return end
 
@@ -1228,7 +1269,7 @@ end
 -- Fichier : nowundo_midi_learn_model.txt, dans le dossier du script. Charge par defaut au demarrage.
 -- Boutons / touches : T sauver | L recharger | E exporter | I importer | M demarrer sur modele on/off
 --------------------------------------------------------------------------
-local TPL_KEYS = { "maps", "maps_aux", "maps_dev", "pickup", "midi_out", "midi_out_name", "custom" }
+local TPL_KEYS = { "maps", "maps_aux", "maps_dev", "pickup", "midi_out", "midi_out_name", "custom", "maps_kbd" }
 local model_blob = nil          -- contenu du modele tel que sauve/charge (pour detecter les modifications)
 local model_dirty_t, model_dirty = -10, false
 
@@ -1553,6 +1594,11 @@ local function draw()
     gfx.x = COLS[3].x
     local midi_txt = fmt_midi(m)
     if m and m.dev and m.dev ~= "" then midi_txt = midi_txt .. "  @" .. m.dev end
+    if KB.k[t.id] then                                -- v2.8 : touche en plus (ou a la place) du MIDI
+      local kt = "Touche " .. KB.name(KB.k[t.id])
+      midi_txt = (m and (m.status or 0) > 0) and (midi_txt .. "  +  " .. kt) or kt
+      gfx.set(0.45, 0.8, 0.95)
+    end
     if CUL.is(t) then                                 -- v2.6 : Custom P7 = fonction choisie (couleur de sa famille)
       local c
       midi_txt, c = CUL.text(t)
@@ -1591,7 +1637,7 @@ local function draw()
       if pk_on then gfx.set(1, 1, 1); gfx.x, gfx.y = px + S(3), y + S(5); gfx.drawstr("✓") end
     end
 
-    if m or (CUL.is(t) and CUL.get(t)) then
+    if m or KB.k[t.id] or (CUL.is(t) and CUL.get(t)) then
       local cx = COLS[8].x + S(6)
       gfx.set(0.35, 0.2, 0.2)
       gfx.rect(cx, y + S(4), S(44), ROW_H - S(8), 1)
@@ -1621,8 +1667,8 @@ local function draw()
         if pickup[t.id] then pickup[t.id] = nil else pickup[t.id] = true end
         save_maps()
         notify((pickup[t.id] and "Soft takeover ON : " or "Soft takeover OFF : ") .. t.name)
-      elseif col == "clear" and m then
-        maps[t.id] = nil
+      elseif col == "clear" and (m or KB.k[t.id]) then
+        maps[t.id] = nil; KB.k[t.id] = nil                -- efface MIDI et touche
         save_maps()
         notify("Cleared " .. t.name)
       end
@@ -1876,8 +1922,8 @@ function KB.sync_intercept()
   if not reaper.JS_VKeys_Intercept then return end
   local want = {}
   if reaper.GetExtState(EXT, "kbd_intercept") ~= "0" then
-    for id, m in pairs(maps) do
-      if m.status == KB.ST and (m.d1 or 0) < 256 and not is_aux_id(id) then want[m.d1] = true end
+    for id, code in pairs(KB.k) do
+      if code < 256 then want[code] = true end
     end
   end
   for vk in pairs(KB.icpt) do if not want[vk] then reaper.JS_VKeys_Intercept(vk, -1); KB.icpt[vk] = nil end end
@@ -1894,7 +1940,7 @@ local function main()
   process_midi()
   process_keys()
   do                                                   -- v2.7 : blocage des touches apprises (si les maps changent)
-    local sig = (reaper.GetExtState(EXT, "maps") or "") .. "#" .. reaper.GetExtState(EXT, "kbd_intercept")
+    local sig = (reaper.GetExtState(EXT, "maps_kbd") or "") .. "#" .. reaper.GetExtState(EXT, "kbd_intercept")
     if sig ~= KB.sig then KB.sig = sig; KB.sync_intercept() end
   end
 

@@ -2374,6 +2374,16 @@ function VL.ext_cmd_poll()
         VL._scn_quiet = false
       end
     end
+    -- fxin_<n>_<slot>_<on|off|tog> : effet d'une ENTREE (page web Twister / Effets)
+    local ii, is_, ia = (name or ""):match("^fxin_(%d+)_(%d+)_(%a+)$")
+    if ii and ts and t - tonumber(ts) < 2 then
+      ii, is_ = tonumber(ii), tonumber(is_)
+      if ii >= 1 and ii <= NIN and is_ >= 1 and is_ <= NSLOT then
+        if ia == "on" then VL.set_fx("input", ii, is_, true)
+        elseif ia == "off" then VL.set_fx("input", ii, is_, false)
+        elseif ia == "tog" then VL.toggle_fx("input", ii, is_) end
+      end
+    end
   end
 end
 bind(1, 8, 7, act("rerec"));     bind(1, 8, 8, act("rec_overdub"), fn(function() VL.rec_pad_long() end), true) -- REC + sortie REC immediats a l'appui ; long = annule/clear si vide

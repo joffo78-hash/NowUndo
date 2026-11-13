@@ -2108,7 +2108,7 @@ end
 -- Publie la page active (16 knobs : libelle, valeur 0..1, affichage, couleur, etat) dans ExtState nowundo_tw/tw_knobs,
 -- et execute les commandes du web (nowundo_tw/tw_kcmd) : "K,bouton,idx,valeur" (knob absolu) | "B,bouton,idx" (push).
 -- Memes regles que le vrai Twister (groupes, pickup, pages logiques). La page In/Out reste geree par le bridge (sliders).
-CU.web_t, CU.web_sig = 0, ""
+CU.web_t, CU.web_sig, CU.web_ex = 0, "", nil
 function CU.web_esc(v) return (tostring(v or ""):gsub("[|:;]", function(c) return c == "|" and "¦" or (c == ":" and "⁚" or ",") end)) end
 function CU.web_tick()
   local now = reaper.time_precise()
@@ -2117,6 +2117,8 @@ function CU.web_tick()
   if raw ~= "" then
     reaper.SetExtState("nowundo_tw", "tw_kcmd", "", false)
     for cmd in raw:gmatch("[^;]+") do
+      local xo, xa = cmd:match("^([XF]),(%d+)$")
+      if xo then CU.web_extra_cmd(xo, tonumber(xa)) end
       local op, pg, idx, v = cmd:match("^(%a),(%d+),(%d+),?([%d%.]*)$")
       pg, idx, v = tonumber(pg), tonumber(idx), tonumber(v)
       if op and pg and idx and idx >= 0 and idx <= 15 then
@@ -2163,6 +2165,58 @@ function CU.web_tick()
   if sig ~= CU.web_sig then
     CU.web_sig = sig
     reaper.SetExtState("nowundo_tw", "tw_knobs", sig, false)
+  end
+  -- boutons de la page web : Slicer on/off (page 4), Cloud on/off (page 5), 4 effets (page 6)
+  local ex = ""
+  local s1 = sel_looper()
+  if page == 4 then ex = "S|" .. ((looper_alive(s1, now) and read_fb(s1, 8) == 1) and 1 or 0)
+  elseif page == 5 then ex = "C|" .. ((looper_alive(s1, now) and read_fb(s1, 24) > 0.5) and 1 or 0)
+  elseif page == 6 then
+    local st = fx_struct()
+    local e = { "F", CU.web_esc(st.label) }
+    for k = 1, FX_NB_SLOTS do
+      local sl = st.slots[k] or {}
+      local nm = ""
+      if st.tr and sl.child then
+        local okn, n2 = reaper.TrackFX_GetFXName(st.tr, sl.child.fx, "")
+        nm = (okn and n2 or ""):gsub("^%w+:%s*", ""):sub(1, 18)
+      end
+      e[#e + 1] = ((sl.child or sl.cidx) and 1 or 0) .. ":" .. ((sl.cidx and not sl.inactive) and 1 or 0) .. ":" .. CU.web_esc(nm)
+    end
+    ex = table.concat(e, "|")
+  end
+  if ex ~= CU.web_ex then
+    CU.web_ex = ex
+    reaper.SetExtState("nowundo_tw", "tw_extra", ex, false)
+  end
+end
+-- X,4 = Slicer on/off ; X,5 = Cloud on/off (looper selectionne + son groupe, chacun selon son etat) ; F,n = effet n
+function CU.web_extra_cmd(op, a)
+  local now = reaper.time_precise()
+  if op == "X" and (a == 4 or a == 5) then
+    for _, li in ipairs(page_targets()) do
+      if looper_alive(li, now) then
+        local b = gbase(li, active_part(li))
+        reaper.gmem_write(b + 48, a == 4 and 6 or 7)
+      end
+    end
+  elseif op == "F" and a >= 1 and a <= FX_NB_SLOTS then
+    local st = fx_struct()
+    local id = st.is_looper and (st.src - FX_NB_SOURCES) or st.src
+    local hb = tonumber(reaper.GetExtState("nowundo_vl", "heartbeat")) or 0
+    if now - hb < 2 then
+      -- le Launchpad tourne : c'est lui qui bascule l'effet (son etat et ses LED restent justes)
+      local q = reaper.GetExtState("NowUndo_VLcmd", "q")
+      reaper.SetExtState("NowUndo_VLcmd", "q", q .. string.format("%s_%d_%d_tog\t%.3f\n", st.is_looper and "fx" or "fxin", id, a, now), false)
+    else
+      local sl = st.slots[a]
+      if st.tr and sl and sl.cidx then
+        local on = not sl.inactive
+        reaper.TrackFX_SetEnabled(st.tr, sl.cidx, not on)
+        if sl.child then reaper.TrackFX_SetEnabled(st.tr, sl.child.fx, not on) end
+      end
+    end
+    fx_cache = nil
   end
 end
 

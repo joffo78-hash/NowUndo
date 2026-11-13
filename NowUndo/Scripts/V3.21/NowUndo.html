@@ -149,6 +149,15 @@ html, body {
 .tw-knob .kl { font-size: 11px; font-weight: 700; height: 14px; overflow: hidden; white-space: nowrap; max-width: 100%; text-overflow: ellipsis; }
 .tw-knob svg { width: 100%; max-width: 92px; aspect-ratio: 1; display: block; }
 .tw-knob .kv { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; height: 14px; white-space: nowrap; }
+/* Boutons de page : Slicer / Cloud on-off, effets */
+.tw-extra { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; padding: 0 0 10px; }
+.tw-xbtn {
+  border: 2px solid #333; border-radius: 10px; padding: 10px 16px; min-width: 120px;
+  font-size: 13px; font-weight: 800; letter-spacing: .5px; background: #1b1b21; color: #888; cursor: pointer;
+}
+.tw-xbtn.on { color: #111; }
+.tw-xbtn.absent { opacity: .3; cursor: default; }
+.tw-xbtn small { display: block; font-size: 10px; font-weight: 600; letter-spacing: 0; margin-top: 2px; opacity: .85; }
 .tw-placeholder {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 14px; text-align: center; padding: 24px;
@@ -179,7 +188,7 @@ html, body {
   <nav id="tabs">
     <button class="tab active" data-view="launchpad">Launchpad</button>
     <button class="tab" data-view="twister">Twister</button>
-    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.6</span>
+    <span style="margin-left:auto;align-self:center;font-size:10px;color:#6c9;padding:0 8px">web v3.7</span>
   </nav>
 
   <div id="views">
@@ -213,6 +222,7 @@ html, body {
       </div>
       <div id="tw-page">
         <div class="tw-faders" id="tw-faders"></div>
+        <div class="tw-extra" id="tw-extra" style="display:none"></div>
         <div class="tw-knobs" id="tw-knobs" style="display:none"></div>
         <div class="tw-placeholder" id="tw-placeholder" style="display:none">
           Page Twister à venir — pilotée aussi depuis le Launchpad (fighter page).
@@ -650,6 +660,42 @@ html, body {
     if (pg >= 1 && pg <= 8 && pg !== twPage) showTwPage(pg);
     else if (twPage !== TW_IO_PAGE) renderKnobs();
   }
+  // Boutons de page (publies par le script Twister : nowundo_tw/tw_extra)
+  //   page 4 : "S|on" (Slicer) ; page 5 : "C|on" (Cloud) ; page 6 : "F|source|present:actif:nom" x 4
+  const twExtraEl = document.getElementById("tw-extra");
+  const FX_COL = ["#EB944A", "#B86BE0", "#52C78C", "#E0616B"];
+  let twExtra = "";
+  function renderTwExtra() {
+    const parts = (twExtra || "").split("|");
+    const kind = parts[0];
+    const okPage = (kind === "S" && twPage === 4) || (kind === "C" && twPage === 5) || (kind === "F" && twPage === 6);
+    if (!okPage) { twExtraEl.style.display = "none"; twExtraEl.innerHTML = ""; return; }
+    twExtraEl.style.display = "";
+    const un = function (t) { return (t || "").replace(/¦/g, "|").replace(/⁚/g, ":"); };
+    let html = "";
+    if (kind === "S" || kind === "C") {
+      const on = parts[1] === "1", col = kind === "S" ? "#F2D933" : "#408CF2";
+      html = '<button class="tw-xbtn' + (on ? " on" : "") + '" data-x="' + (kind === "S" ? 4 : 5) + '" style="' +
+             (on ? "background:" + col + ";border-color:" + col : "border-color:" + col) + '">' +
+             (kind === "S" ? "SLICER" : "CLOUD") + " " + (on ? "ON" : "OFF") + "</button>";
+    } else {
+      for (let k = 1; k <= 4; k++) {
+        const b = (parts[k + 1] || "0:0:").split(":");
+        const present = b[0] === "1", on = b[1] === "1", nm = un(b.slice(2).join(":")) || "vide";
+        const col = FX_COL[k - 1];
+        html += '<button class="tw-xbtn' + (on ? " on" : "") + (present ? "" : " absent") + '" data-f="' + k + '" style="' +
+                (on ? "background:" + col + ";border-color:" + col : "border-color:" + col) + '">FX' + k + " " +
+                (on ? "ON" : "OFF") + "<small>" + nm + "</small></button>";
+      }
+      html += '<div style="width:100%;text-align:center;font-size:11px;color:#888">' + un(parts[1]) + "</div>";
+    }
+    twExtraEl.innerHTML = html;
+  }
+  twExtraEl.addEventListener("click", function (e) {
+    const b = e.target.closest(".tw-xbtn"); if (!b || b.classList.contains("absent")) return;
+    if (b.dataset.x) twKCmd("X," + b.dataset.x);
+    else if (b.dataset.f) twKCmd("F," + b.dataset.f);
+  });
   function twKCmd(cmd) { wwr_req("SET/EXTSTATE/" + TW_SECTION + "/tw_kcmd/" + encodeURIComponent(cmd)); }
   // envoi des knobs coalesce (~30 envois / s max) : seule la derniere valeur de chaque knob part
   setInterval(function () {
@@ -669,12 +715,13 @@ html, body {
     twFaders.style.display = isIO ? "" : "none";
     twResetBtn.style.display = isIO ? "" : "none";        // RESET = In/Out pleine boucle : seulement sur la page In/Out
     twKnobsEl.style.display = isIO ? "none" : "";
+    renderTwExtra();
     twPlaceholder.style.display = "none";
     if (!isIO) renderKnobs();
     updateTwDiag();
   }
   // Diagnostic : la page web (version ci-dessous) recoit-elle les knobs du script Twister ?
-  const WEB_VER = "web-tw 3.6";
+  const WEB_VER = "web-tw 3.7";
   let twKTick = "", twKTickAt = 0, twErr = "";
   function updateTwDiag() {
     const el = document.getElementById("tw-diag");
@@ -749,6 +796,7 @@ html, body {
       }
       if (key === "tw_state") parseTwState(val);
       else if (key === "tw_knobs") parseTwKnobs(val);
+      else if (key === "tw_extra") { if (val !== twExtra) { twExtra = val; renderTwExtra(); } }
       else if (key === "tw_ktick") { if (val && val !== twKTick) { twKTick = val; twKTickAt = Date.now(); } }
       else if (key === "tw_err") { twErr = val || ""; }
       else if (key === "tw_page") {
@@ -780,6 +828,7 @@ html, body {
     "GET/EXTSTATE/" + TW_SECTION + "/tw_state;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_page;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_knobs;" +
+    "GET/EXTSTATE/" + TW_SECTION + "/tw_extra;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_ktick;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_err;" +
     "GET/EXTSTATE/" + TW_SECTION + "/tw_tick",
