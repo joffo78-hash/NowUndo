@@ -2779,6 +2779,11 @@ function VL.macros_poll(t)
     M.on_s, M.on = on_s, {}
     for n in on_s:gmatch("%d+") do M.on[tonumber(n)] = true end
   end
+  local pend_s = reaper.GetExtState(MACRO_EXT, "pend")          -- macros avec une action armee (*) en attente de synchro
+  if pend_s ~= M.pend_s then
+    M.pend_s, M.pend = pend_s, {}
+    for n in pend_s:gmatch("%d+") do M.pend[tonumber(n)] = true end
+  end
   if t - M.last_rev < 0.4 then return end
   M.last_rev = t
   local rev = reaper.GetExtState(MACRO_EXT, "rev")
@@ -2917,6 +2922,7 @@ VL.register_layer({ id = "macros", name = "Action macros", cell = function(row, 
       if not VL.macro_at(cell) then return "off" end
       if (VL.macros.flash[cell] or 0) > now() then return "armed" end
       local mm = VL.macro_at(cell)
+      if VL.macros.pend and VL.macros.pend[mm.id] then return "armed" end   -- action(s) en attente du point de synchro : clignote
       if mm.toggle or mm.gate then return VL.macros.on[mm.id] and "on" or "idle" end
       return "on"
     end }

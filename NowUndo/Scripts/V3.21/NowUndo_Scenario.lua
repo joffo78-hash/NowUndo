@@ -1965,7 +1965,7 @@ local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro
     if it.glob then
       fire_glob(it); nglob = nglob + 1
     elseif rd(100 + it.i - 1) > 0 then
-      Q[it.i][#Q[it.i] + 1] = { ch = it.ch, f = it.f, t0 = t0, sync = it.sync, grp = grp_counter }
+      Q[it.i][#Q[it.i] + 1] = { ch = it.ch, f = it.f, t0 = t0, sync = it.sync, grp = grp_counter, mid = m.id }
       if it.sync then nsync = nsync + 1 end
     elseif not it.all and not m.all and not seen[it.i] then seen[it.i] = true; dead[#dead + 1] = "L" .. it.i end   -- ALL : les loopers absents sont ignores
   end
@@ -2036,6 +2036,14 @@ local function mac_poll()
     for _, m in ipairs(macros) do if m.toggle and mac_active(m, tg) then ids[#ids + 1] = m.id end end
     local s = table.concat(ids, ",")
     if s ~= mac_on_s then mac_on_s = s; reaper.SetExtState(MAC_EXT, "on", s, false) end
+    -- macros dont une action armee (*) attend le point de synchro : leur pad clignote sur le Launchpad
+    local pend, pl = {}, {}
+    for i = 1, NLOOP do for _, op in ipairs(Q[i]) do if op.sync and op.mid then pend[op.mid] = true end end end
+    for id in pairs(pend) do pl[#pl + 1] = id end
+    table.sort(pl)
+    local ps = table.concat(pl, ",")
+    H._pend = pend
+    if ps ~= H._pend_s then H._pend_s = ps; reaper.SetExtState(MAC_EXT, "pend", ps, false) end
   end
   if t - mac_alive_t > 0.3 then
     mac_alive_t = t
@@ -2277,6 +2285,9 @@ local function mac_draw(W, Hh, down)
         if msel[m.id] then gfx.set(0.40, 0.28, 0.08, 1); gfx.rect(x0, y, cw, RH)
         elseif r % 2 == 0 then gfx.set(0.13, 0.05, 0.06, 1); gfx.rect(x0, y, cw, RH) end
         if m.id == mcur then gfx.set(0.9, 0.8, 0.2, 0.9); gfx.rect(x0, y, cw, RH, 0) end
+        if H._pend and H._pend[m.id] and math.floor(reaper.time_precise() * 4) % 2 == 0 then   -- en attente du point de synchro : clignote
+          gfx.set(0.3, 0.6, 1, 0.35); gfx.rect(x0, y, cw, RH)
+        end
         gfx.setfont(2, "Arial", 12)
         gfx.set(1, 1, 1, 0.55); gfx.x, gfx.y = x0 + 4, y + 5
         gfx.drawstr(string.format("%02d", i))
