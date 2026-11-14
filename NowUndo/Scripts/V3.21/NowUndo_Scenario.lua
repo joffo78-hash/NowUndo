@@ -1603,6 +1603,12 @@ local function mac_edit()
   local m = mac_find(mcur)
   if not m then msg = "Selectionne une macro."; msg_err = true; return end
   ED.on, ED.id, ED.text, ED.off, ED.star = true, m.id, m.text or "", false, false
+  ED.cur, ED.sug, ED.si, ED.view = #ED.text, {}, 1, 0
+end
+-- boite REAPER a l'ancienne (Maj+E, ou bouton dans l'editeur)
+function ED.classic(text)
+  local ok, ret = reaper.GetUserInputs("Modifier la macro", 1, "Syntaxe (sans looper) :,extrawidth=520", ui_in(text))
+  if ok then return ui_out(ret) end
 end
 -- mots on / off (le bouton OFF leur ajoute "off")
 ED.ONOFF = { rec = 1, replace = 1, autorep = 1, multiply = 1, rev = 1, pp = 1, slicer = 1, cloud = 1, link = 1, auto = 1,
@@ -1633,9 +1639,51 @@ ED.VALS = {
   sattack = { "0", "10", "50", "100", "reset" }, spitch = { "0", "25", "50", "100", "reset" }, smax = { "4", "8", "16", "32", "reset" },
   ["r(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" }, ["g(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" },
 }
-function ED.add(tok)
-  local t = (ED.text:gsub("[%s,]+$", ""))
-  ED.text = (t == "") and tok or (t .. ", " .. tok)
+function ED.add(tok)                       -- ajoute une action (apres une virgule) a l'emplacement du curseur
+  local a, b = ED.text:sub(1, ED.cur), ED.text:sub(ED.cur + 1)
+  a = a:gsub("[%s,]+$", "")
+  local ins = (a == "") and tok or (a .. ", " .. tok)
+  b = b:gsub("^[%s,]+", "")
+  ED.text = ins .. ((b ~= "") and (", " .. b) or "")
+  ED.cur = #ins
+end
+-- ASSISTANT : mots possibles pour le mot en cours de frappe (ou valeurs apres un mot qui en attend une)
+function ED.words()
+  if ED._w then return ED._w end
+  local w, seen = {}, {}
+  local function add(k) if not seen[k] and not k:match("^_") then seen[k] = true; w[#w + 1] = k end end
+  for k, f in pairs(H) do if type(f) == "function" then add(k) end end
+  for k in pairs(ALIAS) do add(k) end
+  for _, k in ipairs({ "off", "on", "reset", "sync", "unsync", "syncall", "unsyncall" }) do add(k) end
+  table.sort(w)
+  ED._w = w
+  return w
+end
+function ED.suggest()
+  local before = ED.text:sub(1, ED.cur)
+  local pre = before:match("([%w%(%)/%.%%%-]*)$") or ""
+  local prevw = before:sub(1, #before - #pre):match("(%a+)%s+$")
+  local out = {}
+  local vals = prevw and ED.VALS[(ALIAS[prevw] or prevw)]
+  if vals and not before:sub(1, #before - #pre):match(",%s*$") then
+    for _, v in ipairs(vals) do if v:sub(1, #pre) == pre and v ~= pre then out[#out + 1] = v end end
+  elseif #pre >= 1 and pre:match("^%a") and not split_key(pre:lower()) then   -- mot deja complet : rien a proposer
+    local p = pre:lower()
+    for _, k in ipairs(ED.words()) do if k:sub(1, #p) == p and k ~= p then out[#out + 1] = k end end
+  end
+  while #out > 8 do out[#out] = nil end
+  ED.sug, ED.pre = out, pre
+  if ED.si > #out then ED.si = 1 end
+end
+function ED.accept(i)
+  local w = ED.sug[i or ED.si]
+  if not w then return false end
+  local k = ALIAS[w] or w
+  local tail = (VALKEYS[k] or k == "part") and " " or ""
+  ED.text = ED.text:sub(1, ED.cur - #ED.pre) .. w .. tail .. ED.text:sub(ED.cur + 1)
+  ED.cur = ED.cur - #ED.pre + #w + #tail
+  ED.si = 1
+  return true
 end
 function ED.pick(word)
   local key = word:gsub("%.%.%.$", "")
@@ -1670,10 +1718,27 @@ function ED.close(save)
   end
   ED.on = false
 end
+function ED.prev(t, i) i = i - 1; while i > 0 and (t:byte(i) or 0) >= 0x80 and (t:byte(i) or 0) < 0xC0 do i = i - 1 end return math.max(0, i) end
+function ED.next(t, i) i = i + 1; while i < #t and (t:byte(i + 1) or 0) >= 0x80 and (t:byte(i + 1) or 0) < 0xC0 do i = i + 1 end return math.min(#t, i) end
 function ED.key(c)
-  if c == 13 then ED.close(true)
-  elseif c == 8 then ED.text = ED.text:sub(1, (utf8.offset(ED.text, -1) or (#ED.text + 1)) - 1)
-  elseif c >= 32 and c <= 255 and c ~= 127 then ED.text = ED.text .. utf8.char(c) end
+  if c == 0 then return end
+  local t, i = ED.text, ED.cur
+  local has = #ED.sug > 0
+  if c == 9 then if has then ED.accept() end                                -- Tab : accepte la proposition
+  elseif c == 13 then if has then ED.accept() else ED.close(true) end      -- Entree : proposition, sinon valider
+  elseif c == 30064 then if has then ED.si = (ED.si - 2) % #ED.sug + 1 end -- haut / bas : choisir la proposition
+  elseif c == 1685026670 then if has then ED.si = ED.si % #ED.sug + 1 end
+  elseif c == 1818584692 then ED.cur = ED.prev(t, i)                        -- gauche / droite / debut / fin
+  elseif c == 1919379572 then ED.cur = ED.next(t, i)
+  elseif c == 1752132965 then ED.cur = 0
+  elseif c == 6647396 then ED.cur = #t
+  elseif c == 8 then if i > 0 then local j = ED.prev(t, i); ED.text = t:sub(1, j) .. t:sub(i + 1); ED.cur = j end
+  elseif c == 6579564 then if i < #t then local j = ED.next(t, i); ED.text = t:sub(1, i) .. t:sub(j + 1) end
+  elseif c >= 32 and c <= 255 and c ~= 127 then
+    local ch = utf8.char(c)
+    ED.text = t:sub(1, i) .. ch .. t:sub(i + 1); ED.cur = i + #ch
+  else return end
+  ED.suggest()
 end
 function ED.draw(W, Hh, eclick)
   local saved = click
@@ -1691,9 +1756,20 @@ function ED.draw(W, Hh, eclick)
   gfx.set(0.04, 0.04, 0.06, 1); gfx.rect(tx, ty, tw, th)
   gfx.set(0.55, 0.85, 1, 0.6); gfx.rect(tx, ty, tw, th, 0)
   gfx.setfont(2, "Arial", 14); gfx.set(1, 1, 1, 1)
-  local shown = ED.text .. ((math.floor(reaper.time_precise() * 2) % 2 == 0) and "|" or " ")
-  while #shown > 1 and gfx.measurestr(shown) > tw - 16 do shown = shown:sub((utf8.offset(shown, 2) or 2)) end
-  gfx.x, gfx.y = tx + 8, ty + 7; gfx.drawstr(shown)
+  local t = ED.text
+  ED.cur = math.max(0, math.min(#t, ED.cur or #t))
+  ED.view = math.max(0, math.min(ED.view or 0, ED.cur))                    -- defilement : le curseur reste visible
+  while ED.view < ED.cur and gfx.measurestr(t:sub(ED.view + 1, ED.cur)) > tw - 24 do ED.view = ED.next(t, ED.view) end
+  local vis = t:sub(ED.view + 1)
+  while #vis > 0 and gfx.measurestr(vis) > tw - 16 do vis = vis:sub(1, ED.prev(vis, #vis)) end
+  gfx.x, gfx.y = tx + 8, ty + 7; gfx.drawstr(vis)
+  local cx = tx + 8 + gfx.measurestr(t:sub(ED.view + 1, ED.cur))
+  if math.floor(reaper.time_precise() * 2) % 2 == 0 then gfx.line(cx, ty + 6, cx, ty + th - 6) end
+  if click and mx >= tx and mx <= tx + tw and my >= ty and my <= ty + th then   -- clic : place le curseur
+    local p = ED.view
+    while p < #t and tx + 8 + gfx.measurestr(t:sub(ED.view + 1, ED.next(t, p))) <= mx + 3 do p = ED.next(t, p) end
+    ED.cur = p; ED.suggest()
+  end
   -- verification en direct
   local _, errs = compile(ED.text, { 1 }, m and m.toggle)
   gfx.setfont(2, "Arial", 12)
@@ -1709,6 +1785,10 @@ function ED.draw(W, Hh, eclick)
   if btn(tx + 428, by, 80, bh, "EFFACER", 0.25, 0.25, 0.32) then ED.text = "" end
   if btn(tx + 520, by, 90, bh, ED.off and "OFF : oui" or "OFF : non", ED.off and 0.60 or 0.22, ED.off and 0.25 or 0.22, ED.off and 0.20 or 0.28) then ED.off = not ED.off end
   if btn(tx + 616, by, 120, bh, ED.star and "* SYNCHRO : oui" or "* SYNCHRO : non", ED.star and 0.20 or 0.22, ED.star and 0.40 or 0.22, ED.star and 0.65 or 0.28) then ED.star = not ED.star end
+  if btn(tx + 742, by, 110, bh, "BOITE REAPER", 0.25, 0.25, 0.32) then
+    local r = ED.classic(ED.text)
+    if r then ED.text = r; ED.cur = #r; ED.suggest() end
+  end
   -- palette
   local y = by + bh + 14
   gfx.setfont(2, "Arial", 12)
@@ -1722,10 +1802,26 @@ function ED.draw(W, Hh, eclick)
       if x + bw > tx + tw then x = tx + 112; y = y + 28 end
       local key = w:gsub("%.%.%.$", "")
       local isoff = ED.off and ED.ONOFF[key]
-      if btn(x, y, bw, 24, w, isoff and 0.40 or 0.20, isoff and 0.18 or 0.26, isoff and 0.18 or 0.36) then ED.pick(w) end
+      if btn(x, y, bw, 24, w, isoff and 0.40 or 0.20, isoff and 0.18 or 0.26, isoff and 0.18 or 0.36) then ED.pick(w); ED.suggest() end
       x = x + bw + 5
     end
     y = y + 32
+  end
+  -- propositions de l'assistant (sous le curseur, par-dessus la palette)
+  if #ED.sug > 0 then
+    gfx.setfont(2, "Arial", 13)
+    local lw = 140
+    for _, w in ipairs(ED.sug) do lw = math.max(lw, gfx.measurestr(w) + 24) end
+    local lx, ly, lh = math.min(cx, tx + tw - lw), ty + th + 2, 22
+    gfx.set(0.16, 0.18, 0.24, 1); gfx.rect(lx, ly, lw, lh * #ED.sug)
+    gfx.set(0.55, 0.85, 1, 0.6); gfx.rect(lx, ly, lw, lh * #ED.sug, 0)
+    for n, w in ipairs(ED.sug) do
+      local yy = ly + (n - 1) * lh
+      local hov = mx >= lx and mx <= lx + lw and my >= yy and my < yy + lh
+      if n == ED.si or hov then gfx.set(0.25, 0.45, 0.70, 1); gfx.rect(lx + 1, yy, lw - 2, lh) end
+      gfx.set(1, 1, 1, 1); gfx.x, gfx.y = lx + 10, yy + 4; gfx.drawstr(w)
+      if hov and click then ED.accept(n); ED.suggest() end
+    end
   end
   click = saved
 end
@@ -2010,7 +2106,17 @@ local function mac_key(c)
   end
   if c == 6579564 or c == 127 or c == 8 then mac_delete()                 -- Suppr / Delete / Retour arriere (Mac) : supprime la selection
   elseif c == 13 or c == 32 then mac_test()
-  elseif c == 101 or c == 69 then mac_edit()
+  elseif c == 101 then mac_edit()                                          -- E : editeur (assistant + palette)
+  elseif c == 69 then                                                      -- Maj+E : boite REAPER a l'ancienne
+    local m = mac_find(mcur)
+    if not m then msg = "Selectionne une macro."; msg_err = true
+    else
+      local t = ED.classic(m.text)
+      if t then
+        m.text = mac_clean(t:gsub(";", ",")); mac_check(m); mac_save()
+        msg = m.err and ("Macro invalide : " .. m.err) or "Macro modifiee."; msg_err = m.err ~= nil
+      end
+    end
   elseif c == 110 or c == 78 then mac_rename()
   elseif c == 103 or c == 71 then                                          -- G : mode GATE de la selection
     local ms = sel_ids()
