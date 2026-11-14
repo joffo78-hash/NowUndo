@@ -893,7 +893,7 @@ local HELP = {
   { "ADD / EDIT / NOM", "ecrire la syntaxe, la modifier (double-clic aussi), renommer" },
   { "T  (case toggle)", "entre la pastille et le titre (ou touche T) : on/off (rec, rev, slicer, cloud, play, br...) s'INVERSENT ; vol, speed, pitch, in/out... basculent valeur enregistree <-> defaut" },
   { "G  (case gate)", "entre T et A (ou touche G) : APPUI sur le pad = la macro telle qu'ecrite (tout ON), RELACHEMENT = tout OFF (on/off coupes, valeurs par defaut, In/Out en plein ; undo/clear... ne se defont pas). Ideal pour beat repeat" },
-  { "Ctrl+C / Ctrl+V", "copie les macros selectionnees, puis les colle en NOUVELLES macros (meme texte, nom, couleur, cases T / A / G)" },
+  { "Ctrl+C / X / V / D", "copier / couper / coller (juste apres la selection) / dupliquer les macros selectionnees ; clic droit sur une ligne = menu" },
   { "libelle du pad", "le nom ; s'il est vide, l'action elle-meme (NOM vide = retour a l'action)" },
   { "Ctrl+clic sur un pad LP", "page 4 du Launchpad : retire la macro de ce pad (elle reste dans le chutier)" },
   { "pastille / COULEUR", "clic sur la pastille = couleur suivante ; COULEUR = choisir librement (toute la selection)" },
@@ -1908,6 +1908,57 @@ local function mac_delete()
   mac_save()
   msg = #ms .. " macro(s) supprimee(s)."; msg_err = false
 end
+-- COPIER / COUPER / COLLER / DUPLIQUER (Ctrl+C / X / V / D, ou clic droit sur une ligne de la liste)
+function ED.mcopy(quiet)
+  local ms = sel_ids()
+  if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true; return false end
+  H._mclip = {}
+  for _, o in ipairs(ms) do
+    H._mclip[#H._mclip + 1] = { text = o.text, name = o.name, color = o.color, toggle = o.toggle, all = o.all, gate = o.gate }
+  end
+  if not quiet then msg = #ms .. " macro(s) copiee(s) : Ctrl+V pour les coller."; msg_err = false end
+  return true
+end
+function ED.mcut()
+  if not ED.mcopy(true) then return end
+  local rm = {}
+  for _, m in ipairs(sel_ids()) do rm[m.id] = true end
+  local keep = {}
+  for _, m in ipairs(macros) do if not rm[m.id] then keep[#keep + 1] = m end end
+  macros = keep
+  for c, id in pairs(layout) do if rm[id] then layout[c] = nil end end
+  msel, mcur, manchor = {}, 0, 0
+  mac_save()
+  msg = #H._mclip .. " macro(s) coupee(s) : Ctrl+V pour les coller."; msg_err = false
+end
+-- colle des copies JUSTE APRES la derniere macro selectionnee (sinon a la fin)
+function ED.mpaste(src)
+  src = src or H._mclip
+  if not src or #src == 0 then msg = "Rien a coller : Ctrl+C ou Ctrl+X sur une ou plusieurs macros d'abord."; msg_err = true; return end
+  local after = 0
+  for i, m in ipairs(macros) do if msel[m.id] then after = i end end
+  if after == 0 then local _, ci = mac_find(mcur); after = ci or #macros end
+  local made = {}
+  for _, o in ipairs(src) do
+    local m = mac_add(o.text, o.name, o.color)
+    if not m then break end
+    m.toggle, m.all, m.gate = o.toggle, o.all, o.gate
+    mac_check(m); made[#made + 1] = m
+  end
+  if #made == 0 then return end
+  for _ = 1, #made do table.remove(macros) end                           -- mac_add les a mises a la fin : on les replace
+  for k, m in ipairs(made) do table.insert(macros, math.min(after + k, #macros + 1), m) end
+  msel = {}; for _, m in ipairs(made) do msel[m.id] = true end
+  mcur = made[1].id; manchor = mcur; mwant = true
+  mac_save(); msg = #made .. " macro(s) collee(s)."; msg_err = false
+end
+function ED.mdup()
+  local ms = sel_ids()
+  if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true; return end
+  local src = {}
+  for _, o in ipairs(ms) do src[#src + 1] = { text = o.text, name = o.name, color = o.color, toggle = o.toggle, all = o.all, gate = o.gate } end
+  ED.mpaste(src)
+end
 local function mac_move(d)                           -- decale la selection d'un cran (les blocs se deplacent ensemble)
   local n = #macros
   if d < 0 then
@@ -2192,31 +2243,10 @@ local function mac_key(c)
       for _, o in ipairs(ms) do o.toggle = nv; mac_check(o) end
       mac_save(); msg = nv and "Mode TOGGLE actif." or "Mode TOGGLE retire."; msg_err = false
     end
-  elseif c == 3 then                                                       -- Ctrl+C : copie la selection
-    local ms = sel_ids()
-    if #ms == 0 then msg = "Selectionne une ou plusieurs macros a copier."; msg_err = true
-    else
-      H._mclip = {}
-      for _, o in ipairs(ms) do
-        H._mclip[#H._mclip + 1] = { text = o.text, name = o.name, color = o.color, toggle = o.toggle, all = o.all, gate = o.gate }
-      end
-      msg = #ms .. " macro(s) copiee(s) : Ctrl+V pour les coller."; msg_err = false
-    end
-  elseif c == 22 then                                                      -- Ctrl+V : colle (nouvelles macros)
-    if not H._mclip or #H._mclip == 0 then msg = "Rien a coller : Ctrl+C sur une ou plusieurs macros d'abord."; msg_err = true
-    else
-      local made = {}
-      for _, o in ipairs(H._mclip) do
-        local m = mac_add(o.text, o.name, o.color)
-        if not m then break end
-        m.toggle, m.all, m.gate = o.toggle, o.all, o.gate
-        mac_check(m); made[#made + 1] = m.id
-      end
-      if #made > 0 then
-        msel = {}; for _, id in ipairs(made) do msel[id] = true end
-        mac_save(); msg = #made .. " macro(s) collee(s)."; msg_err = false
-      end
-    end
+  elseif c == 3 then ED.mcopy()                                           -- Ctrl+C : copier
+  elseif c == 24 then ED.mcut()                                            -- Ctrl+X : couper
+  elseif c == 22 then ED.mpaste()                                          -- Ctrl+V : coller (apres la selection)
+  elseif c == 4 then ED.mdup()                                             -- Ctrl+D : dupliquer
   elseif c == 1 then for _, m in ipairs(macros) do msel[m.id] = true end   -- Ctrl+A
   elseif c == 30064 or c == 1685026670 then
     local _, i = mac_find(mcur)
@@ -2248,6 +2278,25 @@ local function mac_draw(W, Hh, down)
     local i = c * MPC + mscroll + math.floor((py - LIST_Y) / RH) + 1
     return macros[i] and i or nil
   end
+  -- clic droit sur une ligne : menu Copier / Couper / Coller / Dupliquer / Supprimer / Editer / Renommer
+  local rdn = (gfx.mouse_cap & 2) == 2
+  if rdn and not ED.mrwas and not ED.on and not show_help and not capturing then
+    local ri = idx_at(mx, my)
+    if ri then
+      local rm = macros[ri]
+      if not msel[rm.id] then msel = { [rm.id] = true }; mcur = rm.id; manchor = rm.id end
+    end
+    gfx.x, gfx.y = mx, my
+    local items = { ri and "Copier  (Ctrl+C)" or "#Copier  (Ctrl+C)", ri and "Couper  (Ctrl+X)" or "#Couper  (Ctrl+X)",
+                    (H._mclip and #H._mclip > 0) and "Coller  (Ctrl+V)" or "#Coller  (Ctrl+V)",
+                    ri and "Dupliquer  (Ctrl+D)" or "#Dupliquer  (Ctrl+D)", "",
+                    ri and "Supprimer  (Suppr)" or "#Supprimer  (Suppr)", "",
+                    ri and "Editer  (E)" or "#Editer  (E)", ri and "Renommer  (N)" or "#Renommer  (N)" }
+    local k = gfx.showmenu(table.concat(items, "|"))
+    if k == 1 then ED.mcopy() elseif k == 2 then ED.mcut() elseif k == 3 then ED.mpaste()
+    elseif k == 4 then ED.mdup() elseif k == 5 then mac_delete() elseif k == 6 then mac_edit() elseif k == 7 then mac_rename() end
+  end
+  ED.mrwas = rdn
   local _, ci = mac_find(mcur)
   if mwant then
     if ci then
