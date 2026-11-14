@@ -2872,28 +2872,38 @@ function VL.macro_at(cell)
   return id and VL.macros.by_id[id] or nil
 end
 
-function VL.macro_fire(cell)
+-- gst : "on" (appui) / "off" (relachement) pour une macro GATE ; tg : cibles imposees (celles de l'appui)
+function VL.macro_fire(cell, gst, tg)
   local m = VL.macro_at(cell)
   if not m then return end
+  tg = tg or VL.targets()
   VL.macros.flash[cell] = now() + 0.25
   local hb = tonumber(reaper.GetExtState("NowUndo_Scn", "alive")) or 0
   if reaper.time_precise() - hb > 2 then log("warn", "macro '%s' : le script NowUndo_Scenario ne tourne pas", LPF.macro_label(m)) end
   local cur = reaper.GetExtState("NowUndo_Scn", "mcr")
-  reaper.SetExtState("NowUndo_Scn", "mcr", cur .. string.format("%d\t%s\t%.3f\n", m.id, table.concat(VL.targets(), ","), reaper.time_precise()), false)
-  log("info", "macro '%s' -> %s", LPF.macro_label(m), table.concat(VL.targets(), ","))
+  reaper.SetExtState("NowUndo_Scn", "mcr", cur .. string.format("%d\t%s\t%.3f\t%s\n", m.id, table.concat(tg, ","), reaper.time_precise(), gst or ""), false)
+  log("info", "macro '%s' -> %s %s", LPF.macro_label(m), table.concat(tg, ","), gst or "")
 end
 
 function VL.macro_press(cell)
   local m = VL.macro_at(cell)
   if not m then return end
   if VL.ctrl_held and VL.ctrl_held() then VL.macro_unplace(cell); return end   -- Ctrl + clic : retire du Launchpad
-  VL.macro_fire(cell)
+  if m.gate then
+    VL.macros.gate_tg = VL.macros.gate_tg or {}
+    VL.macros.gate_tg[cell] = VL.targets()            -- le relachement visera les memes loopers
+    VL.macro_fire(cell, "on", VL.macros.gate_tg[cell])
+  else
+    VL.macro_fire(cell)
+  end
 end
 
 function VL.macro_release(cell)
   local m = VL.macro_at(cell)
   if not m or not m.gate then return end
-  VL.macro_fire(cell)   -- gate : second fire = desactivation (avec toggle)
+  local tg = VL.macros.gate_tg and VL.macros.gate_tg[cell]
+  if VL.macros.gate_tg then VL.macros.gate_tg[cell] = nil end
+  VL.macro_fire(cell, "off", tg)   -- gate : relachement = tout OFF (pas une bascule)
 end
 VL.register_layer({ id = "macros", name = "Action macros", cell = function(row, col)
   local cell = (row - 1) * 8 + col

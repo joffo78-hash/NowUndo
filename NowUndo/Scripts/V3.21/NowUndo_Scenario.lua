@@ -109,6 +109,7 @@ local function tog(cmd, get)
       want = onoff(v)
       if want == nil then return nil, "on/off attendu" end
     end
+    if H._omode then want = not want end   -- GATE, relachement : l'inverse de ce qui est ecrit
     return { { ch = "cmd", f = function(i)
       local F = fb(i)
       if get(F) ~= want then return F.b, cmd end   -- deja dans l'etat voulu : rien ne se passe
@@ -119,6 +120,7 @@ end
 local function cmdonly(cmd)
   return function(v)
     if v then return nil, "pas de valeur attendue" end
+    if H._omode then return {} end         -- GATE, relachement : une commande ponctuelle ne se defait pas
     return { { ch = "cmd", f = function(i) return fb(i).b, cmd end } }
   end
 end
@@ -146,6 +148,7 @@ for slot = 1, 4 do
       want = onoff(v)
       if want == nil then return nil, "on/off attendu" end
     end
+    if H._omode and want ~= nil then want = not want end
     return { { glob = "fx", slot = slot, want = want } }
   end
 end
@@ -155,6 +158,7 @@ H.clearfull = cmdonly(11)
 local function cmdall(cmd)                          -- CLEAR ALL : ignore la cible (et la selection d'une macro), vise les 8 loopers
   return function(v)
     if v then return nil, "pas de valeur attendue" end
+    if H._omode then return {} end
     return { { ch = "cmd", all = true, f = function(i) return fb(i).b, cmd end } }
   end
 end
@@ -177,6 +181,7 @@ local function play_h(default_on)
       if want == nil then return nil, "on/off attendu" end
       if not default_on then want = not want end
     end
+    if H._omode then want = not want end
     return { { ch = "cmd", f = function(i)
       local F = fb(i)
       if (want and F.st == 0) or ((not want) and F.playing) then return F.b, 3 end
@@ -189,6 +194,7 @@ H.stop = play_h(false)
 H.part = function(v)
   local n = v and tonumber(v)
   if not n or n < 1 or n > 3 or n ~= math.floor(n) then return nil, "part 1, 2 ou 3" end
+  if H._omode then return {} end
   return { { ch = "cmd", f = function(i) return base(i, n), 12 end } }
 end
 
@@ -203,6 +209,10 @@ local function param_h(id, default, lo, hi, conv, key)
       x = conv(n, k)
     end
     x = math.max(lo, math.min(hi, x))
+    if H._omode then                        -- GATE, relachement : retour a la valeur par defaut
+      if v == "reset" then return {} end
+      return { { ch = "param", f = function(i) return fb(i).b, id, default end } }
+    end
     if tmode and v ~= "reset" then          -- TOGGLE : valeur enregistree <-> valeur par defaut (selon l'etat de CHAQUE looper)
       return { { ch = "param", f = function(i)
         local F = fb(i)
@@ -226,6 +236,7 @@ H.pitch = param_h(4,  0, -48, 48,   function(n, k) return n end, "pitch")
 local function inout_h(which)
   return function(v)
     if not v then return nil, "valeur attendue (0..1, 25% ou reset)" end
+    if H._omode then v = "reset" end        -- GATE, relachement : In / Out reviennent en pleine boucle
     if v == "reset" then
       return { { ch = "edit", f = function(i)
         local F = fb(i); if F.len <= 0 then return nil end
@@ -295,6 +306,7 @@ H.brf = function(v)
     local F = fb(i)
     local val = idx
     if tg and math.floor(rd(F.b + 25) + 0.5) == idx then val = 0 end   -- TOGGLE : fraction <-> Free
+    if H._omode then val = 0 end                                       -- GATE, relachement : Free
     return F.b, 59, val
   end } }
 end
@@ -311,12 +323,12 @@ local VALKEYS = { ["in"] = 1, out = 1, brf = 1, brmix = 1, smix = 1, vol = 1, sp
 -- "recoff" -> rec + off
 local function split_key(piece)
   local k = ALIAS[piece] or piece
-  if H[k] then return k end
+  if type(H[k]) == "function" then return k end
   local p0, sfx = piece:match("^(.-)(off)$")
   if not p0 then p0, sfx = piece:match("^(.-)(on)$") end
   if p0 and p0 ~= "" then
     p0 = ALIAS[p0] or p0
-    if H[p0] then return p0, sfx end
+    if type(H[p0]) == "function" then return p0, sfx end
   end
 end
 
@@ -348,10 +360,11 @@ local PRESET_MAX = 8      -- presets de routing / de groupe du Launchpad (NPRESE
 local SYNC_WORDS = { sync = { true, false }, unsync = { false, false }, syncall = { true, true }, unsyncall = { false, true } }
 
 -- Compile un pas -> liste d'items {i, ch, f} (ou {glob, n} pour R(n) / G(n)), liste d'erreurs
-local function compile(text, forced, toggle)
+local function compile(text, forced, toggle, gate_off)
   local items, errs = {}, {}
   local last_targets = nil
   tmode = toggle and true or false
+  H._omode = gate_off and true or false     -- macro GATE au relachement : chaque action est defaite
   text = (text:gsub("//.*$", ""))
   text = (text:gsub("%f[%a]([eE])%s*%(%s*([1-4])%s*%)", "%1%2"))   -- e(2) = e2
   for act in (text .. ","):gmatch("([^,]*),") do
@@ -360,7 +373,9 @@ local function compile(text, forced, toggle)
     if act:sub(-1) == "*" and #act > 1 then sync = true; act = trim(act:sub(1, -2)) end
     local pk, pn = act:lower():match("^([rg])%s*%(%s*(%d+)%s*%)$")
     local sc = SYNC_WORDS[(act:lower():gsub("%s+", ""))]
-    if sc then
+    if (sc or pk) and H._omode then
+      -- GATE, relachement : pas de rappel de preset ni de synchro
+    elseif sc then
       items[#items + 1] = { glob = "sync", on = sc[1], parts_all = sc[2] }
     elseif pk then
       -- R(n) / G(n) : preset de routing / de groupe du Launchpad (global : ni cible, ni file par looper)
@@ -429,6 +444,7 @@ local function compile(text, forced, toggle)
     end
   end
   tmode = false
+  H._omode = false
   return items, errs
 end
 
@@ -876,7 +892,8 @@ local HELP = {
   { "● CAPTURE / VALIDER", "meme bouton (ou touche C / Entree) : 1er appui = capture, 2e = enregistre UNE macro (pas d'incrementation)" },
   { "ADD / EDIT / NOM", "ecrire la syntaxe, la modifier (double-clic aussi), renommer" },
   { "T  (case toggle)", "entre la pastille et le titre (ou touche T) : on/off (rec, rev, slicer, cloud, play, br...) s'INVERSENT ; vol, speed, pitch, in/out... basculent valeur enregistree <-> defaut" },
-  { "G  (case gate)", "entre T et A (ou touche G) : le pad Launchpad active la macro a l'appui et la desactive au relachement (ideal pour beat repeat)" },
+  { "G  (case gate)", "entre T et A (ou touche G) : APPUI sur le pad = la macro telle qu'ecrite (tout ON), RELACHEMENT = tout OFF (on/off coupes, valeurs par defaut, In/Out en plein ; undo/clear... ne se defont pas). Ideal pour beat repeat" },
+  { "Ctrl+C / Ctrl+V", "copie les macros selectionnees, puis les colle en NOUVELLES macros (meme texte, nom, couleur, cases T / A / G)" },
   { "libelle du pad", "le nom ; s'il est vide, l'action elle-meme (NOM vide = retour a l'action)" },
   { "Ctrl+clic sur un pad LP", "page 4 du Launchpad : retire la macro de ce pad (elle reste dans le chutier)" },
   { "pastille / COULEUR", "clic sur la pastille = couleur suivante ; COULEUR = choisir librement (toute la selection)" },
@@ -1669,11 +1686,16 @@ local function sel_targets()
   return { math.max(1, math.min(NLOOP, sl)) }
 end
 
-local function run_macro(m, targets)
+local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro GATE (appui / relachement du pad)
   if m.err then msg = "Macro '" .. mac_label(m) .. "' invalide : " .. m.err; msg_err = true; return end
   reaper.gmem_attach(GMEM)
   if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end       -- mode ALL : action collective sur les 8 loopers
-  local items = compile(m.text, targets, m.toggle)
+  local items
+  if m.gate and (gst == "on" or gst == "off") then
+    items = compile(m.text, targets, false, gst == "off")   -- GATE : appui = tout ON (tel qu'ecrit), relachement = tout OFF
+  else
+    items = compile(m.text, targets, m.toggle)
+  end
   grp_counter = grp_counter + 1
   local t0 = reaper.time_precise()
   local dead, seen, nsync, nglob = {}, {}, 0, 0
@@ -1773,7 +1795,7 @@ local function mac_poll()
   if q == "" then return end
   reaper.SetExtState(CAPEXT, "mcr", "", false)
   for line in q:gmatch("[^\n]+") do
-    local id, tg, ts = line:match("^(%d+)\t([%d,]*)\t([%d%.]+)")
+    local id, tg, ts, gst = line:match("^(%d+)\t([%d,]*)\t([%d%.]+)\t?(%a*)")
     if id and t - tonumber(ts) < 2 then
       local m = mac_find(tonumber(id))
       if m then
@@ -1782,7 +1804,7 @@ local function mac_poll()
           local k = tonumber(n)
           if k >= 1 and k <= NLOOP then targets[#targets + 1] = k end
         end
-        if #targets > 0 then run_macro(m, targets) end
+        if #targets > 0 then run_macro(m, targets, gst) end
       end
     end
   end
@@ -1889,6 +1911,31 @@ local function mac_key(c)
       local nv = not ms[1].toggle
       for _, o in ipairs(ms) do o.toggle = nv; mac_check(o) end
       mac_save(); msg = nv and "Mode TOGGLE actif." or "Mode TOGGLE retire."; msg_err = false
+    end
+  elseif c == 3 then                                                       -- Ctrl+C : copie la selection
+    local ms = sel_ids()
+    if #ms == 0 then msg = "Selectionne une ou plusieurs macros a copier."; msg_err = true
+    else
+      H._mclip = {}
+      for _, o in ipairs(ms) do
+        H._mclip[#H._mclip + 1] = { text = o.text, name = o.name, color = o.color, toggle = o.toggle, all = o.all, gate = o.gate }
+      end
+      msg = #ms .. " macro(s) copiee(s) : Ctrl+V pour les coller."; msg_err = false
+    end
+  elseif c == 22 then                                                      -- Ctrl+V : colle (nouvelles macros)
+    if not H._mclip or #H._mclip == 0 then msg = "Rien a coller : Ctrl+C sur une ou plusieurs macros d'abord."; msg_err = true
+    else
+      local made = {}
+      for _, o in ipairs(H._mclip) do
+        local m = mac_add(o.text, o.name, o.color)
+        if not m then break end
+        m.toggle, m.all, m.gate = o.toggle, o.all, o.gate
+        mac_check(m); made[#made + 1] = m.id
+      end
+      if #made > 0 then
+        msel = {}; for _, id in ipairs(made) do msel[id] = true end
+        mac_save(); msg = #made .. " macro(s) collee(s)."; msg_err = false
+      end
     end
   elseif c == 1 then for _, m in ipairs(macros) do msel[m.id] = true end   -- Ctrl+A
   elseif c == 30064 or c == 1685026670 then
