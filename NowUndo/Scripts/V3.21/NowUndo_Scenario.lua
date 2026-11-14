@@ -1952,6 +1952,22 @@ function ED.mpaste(src)
   mcur = made[1].id; manchor = mcur; mwant = true
   mac_save(); msg = #made .. " macro(s) collee(s)."; msg_err = false
 end
+-- Ctrl+C / X / V / D lus directement (js_ReaScriptAPI) quand la fenetre a le focus : marche meme si le MIDI Learn
+-- bloque C / V (touches apprises sans modificateur) ou si getchar ne renvoie pas les codes de controle.
+function ED.vk_poll()
+  if not reaper.JS_VKeys_GetState then return end
+  local st = reaper.JS_VKeys_GetState(0)
+  if not st or #st < 254 then return end
+  local prev = ED.vkprev or st
+  ED.vkprev = st
+  if (gfx.getchar(65536) & 2) == 0 then return end                          -- la fenetre n'a pas le focus
+  if st:byte(17) == 0 and st:byte(91) == 0 then return end                   -- ni Ctrl ni Win/Cmd
+  local function edge(vk) return st:byte(vk) ~= 0 and prev:byte(vk) == 0 end
+  local k = edge(67) and 1 or edge(88) and 2 or edge(86) and 3 or edge(68) and 4 or nil
+  if not k or reaper.time_precise() - (ED.ck_t or 0) < 0.3 then return end   -- deja traite par getchar
+  ED.vk_t = reaper.time_precise()
+  if k == 1 then ED.mcopy() elseif k == 2 then ED.mcut() elseif k == 3 then ED.mpaste() else ED.mdup() end
+end
 function ED.mdup()
   local ms = sel_ids()
   if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true; return end
@@ -2206,6 +2222,10 @@ local function mac_key(c)
     local CTRL = { [99] = 3, [67] = 3, [120] = 24, [88] = 24, [118] = 22, [86] = 22, [100] = 4, [68] = 4, [97] = 1, [65] = 1 }
     if CTRL[c] then c = CTRL[c]
     elseif c ~= 3 and c ~= 24 and c ~= 22 and c ~= 4 and c ~= 1 then return end   -- autre Ctrl+touche : ignore
+  end
+  if c == 3 or c == 24 or c == 22 or c == 4 then                          -- une seule voie par appui (getchar / lecture directe)
+    if reaper.time_precise() - (ED.vk_t or 0) < 0.3 then return end
+    ED.ck_t = reaper.time_precise()
   end
   if c == 63 or c == 104 or c == 72 then show_help = true; help_scroll = 0; return end
   if c == 99 or c == 67 then mac_capture_toggle(); return end
@@ -2621,6 +2641,7 @@ local function main()
     gfx.setfont(2, "Arial", 12)
   end
 
+  if tab == "mac" and not ED.on and not show_help then ED.vk_poll() else ED.vkprev = nil end
   if tab == "mac" then mac_draw(W, Hh, down) else
   -- liste des pas
   local list_h = Hh - LIST_Y - 134
