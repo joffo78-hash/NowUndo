@@ -2200,6 +2200,13 @@ local function mac_drop_outside(d)
 end
 
 local function mac_key(c)
+  -- Ctrl + lettre : selon le systeme, gfx.getchar renvoie le code de controle (3) OU la lettre (99) ; on normalise
+  -- d'apres Ctrl reellement tenu, sinon Ctrl+C lancait la CAPTURE (touche C) au lieu de copier.
+  if (gfx.mouse_cap & 4) ~= 0 and c > 0 then
+    local CTRL = { [99] = 3, [67] = 3, [120] = 24, [88] = 24, [118] = 22, [86] = 22, [100] = 4, [68] = 4, [97] = 1, [65] = 1 }
+    if CTRL[c] then c = CTRL[c]
+    elseif c ~= 3 and c ~= 24 and c ~= 22 and c ~= 4 and c ~= 1 then return end   -- autre Ctrl+touche : ignore
+  end
   if c == 63 or c == 104 or c == 72 then show_help = true; help_scroll = 0; return end
   if c == 99 or c == 67 then mac_capture_toggle(); return end
   if capturing then
