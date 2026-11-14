@@ -1,0 +1,2394 @@
+--[==[
+  NowUndo_Scenario.lua  -  sequenceur de scenarios pas a pas pour les 8 loopers NowUndo
+  Script REAPER autonome (gfx) : parle directement aux loopers via la gmem "nowundo_sync",
+  exactement comme le Virtual Launchpad (aucune modification de ce dernier necessaire).
+
+  SYNTAXE
+    un PAS      = une ou plusieurs ACTIONS separees par des virgules, termine (ou non) par ;
+    une ACTION  = CIBLE  MOT [valeur]  [MOT [valeur]] ...
+    CIBLE       = l1  |  l1/3/6  |  l2-4  |  all        (les loopers se separent par /)
+    MOTS        = rec dub(=rec) play stop clear clearfull replace multiply autorep
+                  rev pp slicer cloud link auto oneshot br      -> on / off (sans valeur = ON ; rien ne se passe si deja dans cet etat)
+                  undo redo restart rerec fullloop quant reset (tous les params)
+                  vol speed pitch                            -> valeur absolue (vol: 0..2, 50%, -6db)
+                  in out                                     -> fraction de la boucle (0.25 ou 25%) ou reset
+                  smix                                       -> dry/wet du slicer : 0..1 ou % (0 = boucle d'origine, 1 = slicer seul), reset (= 1)
+                  brmix                                      -> dry/wet du beat repeat : 0..1 ou % (0 = boucle d'origine, 1 = beat repeat seul), reset (= 1)
+                  brf                                        -> fraction du beat repeat : 1/2 1/3 1/4 1/6 1/8 1/12 1/16 1/32 1/64 | free  (ex : l1 brf 1/8, l1 br)
+                  part 1|2|3
+    On peut grouper des mots avec / :  "l1 in/out reset",  "l1 slicer/cloud off"
+    On peut coller on/off au mot :     "l2 recoff"
+    Mots de liaison ignores :          "a", "à", "=", ":"       ("l1 in 0.25 out à 0.5")
+    Decimales avec un POINT (la virgule separe les actions).
+    Cible omise apres une virgule = meme cible que l'action precedente :  "l1 rec off, rev"  =  "l1 recoff, l1 rev"
+    R(n) | G(n)       = rappelle le preset de ROUTING (R) ou de GROUPE (G) numero n (1-8) de la page principale du Launchpad
+                         (comme un appui sur son pad ; slot vide = rien). Utilisable seul ou avec d'autres actions : "r(2), l1 rec"
+    sync | unsync     = synchro Master Sync de la part en cours (comme le pad SYNC/UNSYNC) ; syncall | unsyncall = les 3 parts
+    e1..e4 | e(1)..e(4) = effet 1-4 du looper (page Effects du Launchpad), comme slicer :  "l1 e1" active, "l1 e1 off" desactive
+    * en fin d'action  = l'action est ARMEE : elle part au prochain point de synchro (grille de sortie du Master Sync)
+                         ex : "l1 rev*, l2 recoff"   (l2 part tout de suite, l1 attend le point de synchro)
+
+  EXEMPLE
+    l1/3/6 rev, l2 recoff;
+    l1/3/6 revoff, l2 rec;
+    l1 in 0.25 out 0.5, l4 vol -6db;
+    l1 in/out reset, l1 slicer/cloud off;
+
+  MACROS (onglet MACROS) : chutier de 64 actions SANS cible (elles s'appliquent au looper / groupe selectionne), partage avec
+  la page 4 du Launchpad (couche "Action macros"). Voir le lexique (?) pour le detail.
+
+  COMMANDES CLAVIER : Espace / Entree / Droite = GO | Gauche / Backspace = BACK
+                      Haut / Bas = choisir le pas | E = editer le pas | double-clic sur un pas = l'editer
+]==]
+
+local GMEM, EXT, NLOOP = "nowundo_sync", "nowundo_scn", 8
+local SEP = "¦"
+
+local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+
+--------------------------------------------------------------------------
+-- gmem : lecture du feedback + ecriture des commandes (meme protocole que le Virtual Launchpad)
+--------------------------------------------------------------------------
+local function rd(a) return reaper.gmem_read(a) or 0 end
+local function wr(a, v) reaper.gmem_write(a, v) end
+local function base(i, part) return 1000 + (i - 1) * 600 + (part - 1) * 200 end
+
+local function fb(i)
+  local part = math.floor(rd(base(i, 1) + 42) + 0.5)
+  if part < 1 or part > 3 then part = 1 end
+  local b = base(i, part)
+  local st = math.floor(rd(b + 2) + 0.5)
+  local pm = rd(b + 8)
+  return {
+    alive = rd(100 + i - 1) > 0, part = part, b = b, st = st,
+    rec = (st == 1 or st == 3 or st == 7 or st == 8),
+    playing = (st >= 2 and st <= 6),
+    rev = rd(b + 17) > 0.5, pp = rd(b + 18) > 0.5, cloud = rd(b + 24) > 0.5,
+    slicer = (pm > 0.5 and pm < 1.5), oneshot = pm > 1.5,
+    link = rd(b + 9) > 0.5, auto = rd(b + 43) > 0.5,
+    br = rd(b + 189) > 0.5,
+    len = rd(b + 46), lstart = rd(b + 44), lwidth = rd(b + 45),
+  }
+end
+
+--------------------------------------------------------------------------
+-- Valeurs
+--------------------------------------------------------------------------
+local function onoff(v)
+  if v == "on" or v == "true" or v == "yes" or v == "1" then return true end
+  if v == "off" or v == "false" or v == "no" or v == "0" then return false end
+  return nil
+end
+
+local function num(v)
+  local n, suf = v:match("^([+-]?%d*%.?%d+)(.*)$")
+  if not n then return nil end
+  n = tonumber(n)
+  if suf == "" then return n, "" end
+  if suf == "%" then return n / 100, "pct" end
+  if suf == "db" then return n, "db" end
+  return nil
+end
+
+--------------------------------------------------------------------------
+-- Mots-cles : chaque handler(v) -> liste d'ops | nil, erreur
+-- op = { ch = "cmd"|"param"|"edit", f = function(i) -> base, a, c, d }   (f est PURE : evaluee au moment d'ecrire)
+--   cmd   : a = numero de commande, c = argument optionnel   (+48 / +49)
+--   param : a = id parametre, c = valeur                      (+180 / +181)
+--   edit  : a = edit_cmd, c = in (+161), d = out (+162)       (+160)
+--------------------------------------------------------------------------
+local H = {}
+local tmode = false      -- vrai pendant la compilation d'une macro en mode TOGGLE
+local VPID               -- offsets de lecture du feedback (defini avec la capture)
+
+local function tog(cmd, get)
+  return function(v)
+    if tmode then return { { ch = "cmd", f = function(i) return fb(i).b, cmd end } } end   -- TOGGLE : on inverse l'etat de chaque looper
+    local want = true                      -- sans precision = ON
+    if v ~= nil then
+      want = onoff(v)
+      if want == nil then return nil, "on/off attendu" end
+    end
+    return { { ch = "cmd", f = function(i)
+      local F = fb(i)
+      if get(F) ~= want then return F.b, cmd end   -- deja dans l'etat voulu : rien ne se passe
+    end } }
+  end
+end
+
+local function cmdonly(cmd)
+  return function(v)
+    if v then return nil, "pas de valeur attendue" end
+    return { { ch = "cmd", f = function(i) return fb(i).b, cmd end } }
+  end
+end
+
+H.rec      = tog(1,  function(F) return F.rec end)
+H.replace  = tog(9,  function(F) return F.st == 4 end)
+H.autorep  = tog(10, function(F) return F.st == 5 end)
+H.multiply = tog(13, function(F) return F.st == 6 end)
+H.rev      = tog(4,  function(F) return F.rev end)
+H.pp       = tog(5,  function(F) return F.pp end)
+H.slicer   = tog(6,  function(F) return F.slicer end)
+H.cloud    = tog(7,  function(F) return F.cloud end)
+H.link     = tog(8,  function(F) return F.link end)
+H.auto     = tog(19, function(F) return F.auto end)
+H.oneshot  = tog(18, function(F) return F.oneshot end)
+H.br       = tog(33, function(F) return F.br end)
+
+-- e1..e4 : effets (slots FX 1-4 du looper = page Effects du Launchpad). Comme slicer : "l1 e1" active, "l1 e1 off" desactive.
+-- Execute par le Launchpad (commande ExtState), qui garde son affichage a jour. Macro TOGGLE : on inverse.
+for slot = 1, 4 do
+  H["e" .. slot] = function(v)
+    local want = true
+    if tmode then want = nil
+    elseif v ~= nil then
+      want = onoff(v)
+      if want == nil then return nil, "on/off attendu" end
+    end
+    return { { glob = "fx", slot = slot, want = want } }
+  end
+end
+
+H.clear     = cmdonly(2)
+H.clearfull = cmdonly(11)
+local function cmdall(cmd)                          -- CLEAR ALL : ignore la cible (et la selection d'une macro), vise les 8 loopers
+  return function(v)
+    if v then return nil, "pas de valeur attendue" end
+    return { { ch = "cmd", all = true, f = function(i) return fb(i).b, cmd end } }
+  end
+end
+H.clearall     = cmdall(2)
+H.clearallfull = cmdall(11)
+H.undo      = cmdonly(14)
+H.redo      = cmdonly(15)
+H.restart   = cmdonly(16)
+H.rerec     = cmdonly(17)
+H.fullloop  = cmdonly(22)
+H.quant     = cmdonly(23)
+H.reset     = cmdonly(24)
+
+local function play_h(default_on)
+  return function(v)
+    if tmode then return { { ch = "cmd", f = function(i) return fb(i).b, 3 end } } end    -- TOGGLE : play <-> stop
+    local want = default_on
+    if v ~= nil then
+      want = onoff(v)
+      if want == nil then return nil, "on/off attendu" end
+      if not default_on then want = not want end
+    end
+    return { { ch = "cmd", f = function(i)
+      local F = fb(i)
+      if (want and F.st == 0) or ((not want) and F.playing) then return F.b, 3 end
+    end } }
+  end
+end
+H.play = play_h(true)
+H.stop = play_h(false)
+
+H.part = function(v)
+  local n = v and tonumber(v)
+  if not n or n < 1 or n > 3 or n ~= math.floor(n) then return nil, "part 1, 2 ou 3" end
+  return { { ch = "cmd", f = function(i) return base(i, n), 12 end } }
+end
+
+local function param_h(id, default, lo, hi, conv, key)
+  return function(v)
+    if not v then return nil, "valeur attendue" end
+    local x
+    if v == "reset" then x = default
+    else
+      local n, k = num(v)
+      if not n then return nil, "nombre attendu" end
+      x = conv(n, k)
+    end
+    x = math.max(lo, math.min(hi, x))
+    if tmode and v ~= "reset" then          -- TOGGLE : valeur enregistree <-> valeur par defaut (selon l'etat de CHAQUE looper)
+      return { { ch = "param", f = function(i)
+        local F = fb(i)
+        local off = key and VPID and VPID[key]
+        local val = x
+        if off then
+          local cur = rd(F.b + off)
+          if key == "speed" and cur <= 0 then cur = 1 end
+          if math.abs(cur - x) <= 1e-3 + 0.003 * math.max(math.abs(cur), math.abs(x)) then val = default end
+        end
+        return F.b, id, val
+      end } }
+    end
+    return { { ch = "param", f = function(i) return fb(i).b, id, x end } }
+  end
+end
+H.vol   = param_h(22, 1, 0, 2,    function(n, k) return k == "db" and 10 ^ (n / 20) or n end, "vol")
+H.speed = param_h(3,  1, 0.01, 100, function(n, k) return n end, "speed")
+H.pitch = param_h(4,  0, -48, 48,   function(n, k) return n end, "pitch")
+
+local function inout_h(which)
+  return function(v)
+    if not v then return nil, "valeur attendue (0..1, 25% ou reset)" end
+    if v == "reset" then
+      return { { ch = "edit", f = function(i)
+        local F = fb(i); if F.len <= 0 then return nil end
+        if which == "in" then return F.b, 1, 0, nil end
+        return F.b, 2, nil, F.len
+      end } }
+    end
+    local n, k = num(v)
+    if not n or k == "db" then return nil, "fraction 0..1 ou % attendue" end
+    if n < 0 or n > 1 then return nil, "hors de 0..1 (ecris 0.25 ou 25%)" end
+    local tg = tmode
+    return { { ch = "edit", f = function(i)
+      local F = fb(i); if F.len <= 0 then return nil end
+      local cur = (which == "in") and (F.lstart / F.len) or ((F.lstart + F.lwidth) / F.len)
+      local val = n
+      if tg and math.abs(cur - n) <= 0.004 then val = (which == "in") and 0 or 1 end   -- TOGGLE : valeur <-> defaut
+      if which == "in" then return F.b, 1, val * F.len, nil end
+      return F.b, 2, nil, val * F.len
+    end } }
+  end
+end
+local function idc(n, k) return n end
+local function c100(n, k) return k == "pct" and n * 100 or n end
+H.fb        = param_h(19, 1,   0,   2,   idc, "fb")
+H.cdens     = param_h(26, 0.5, 0,   1,   idc, "cdens")
+H.cchaos    = param_h(27, 0,   0,   1,   idc, "cchaos")
+H.cspread   = param_h(28, 0.1, 0,   1,   idc, "cspread")
+H.cpitch    = param_h(35, 0,   0,   100, c100, "cpitch")
+H.cpos      = param_h(38, 50,  0,   100, c100, "cpos")
+H.clfo      = param_h(40, 1,   0.1, 4,   idc, "clfo")
+H.clfodepth = param_h(41, 0,   0,   100, c100, "clfodepth")
+H.clfoshape = param_h(39, 0,   0,   2,   idc, "clfoshape")
+H.sattack  = param_h(55, 0,     0,     100,  idc, "sattack")     -- slicer
+H.sdecay   = param_h(16, 150,   4,     2000, idc, "sdecay")
+H.ssteps   = param_h(47, 8,     1,     32,   idc, "ssteps")
+H.srate    = param_h(15, 3,     0,     5,    idc, "srate")
+H.smode    = param_h(14, 5,     0,     5,    idc, "smode")
+H.sgrid    = param_h(33, 3,     0,     9,    idc, "sgrid")
+H.spreset  = param_h(49, 1,     1,     4,    idc, "spreset")
+H.smax     = param_h(48, 16,    0,     32,   idc, "smax")
+H.sdetect  = param_h(50, 0.002, 0.001, 0.8,  idc, "sdetect")
+H.sdhold   = param_h(51, 120,   30,    1000, idc, "sdhold")
+H.sroot    = param_h(42, 48,    0,     127,  idc, "sroot")
+H.srelease = param_h(44, 0,     0,     3000, idc, "srelease")
+H.spitch   = param_h(34, 0,     0,     100,  idc, "spitch")
+H["in"]  = inout_h("in")
+H["out"] = inout_h("out")
+H.smix     = param_h(61, 1, 0, 1, idc, "smix")        -- slicer dry/wet : 0 = boucle d'origine, 1 = slicer
+H.brmix    = param_h(60, 1, 0, 1, idc, "brmix")      -- beat repeat dry/wet : 0 = boucle d'origine, 1 = beat repeat
+
+do
+-- brf : fraction de quantification du beat repeat (= bouton Quant). Index JSFX : 0=Free 1=1/2 2=1/3 3=1/4 4=1/6 5=1/8 6=1/12 7=1/16 8=1/32 9=1/64
+-- Ecrit "1/8", "8" (denominateur seul accepte) ou "free". Si le BR est actif, la fenetre est recalculee tout de suite.
+local BRF_IDX = { [2] = 1, [3] = 2, [4] = 3, [6] = 4, [8] = 5, [12] = 6, [16] = 7, [32] = 8, [64] = 9 }
+local function brf_parse(v)
+  if v == "free" or v == "libre" or v == "reset" or v == "0" then return 0 end
+  local den = v:match("^1/(%d+)$") or v:match("^(%d+)$")
+  den = den and tonumber(den)
+  return den and BRF_IDX[den] or nil
+end
+H.brf = function(v)
+  if not v then return nil, "fraction attendue (1/2 1/3 1/4 1/6 1/8 1/12 1/16 1/32 1/64 ou free)" end
+  local idx = brf_parse(v)
+  if not idx then return nil, "fraction inconnue : " .. v .. " (1/2 1/3 1/4 1/6 1/8 1/12 1/16 1/32 1/64 ou free)" end
+  local tg = tmode
+  return { { ch = "param", f = function(i)
+    local F = fb(i)
+    local val = idx
+    if tg and math.floor(rd(F.b + 25) + 0.5) == idx then val = 0 end   -- TOGGLE : fraction <-> Free
+    return F.b, 59, val
+  end } }
+end
+end
+
+local ALIAS = { feedback = "fb", reverse = "rev", pingpong = "pp", ping = "pp", pong = "pp", volume = "vol", dub = "rec",
+  mult = "multiply", rep = "autorep", full = "fullloop", clr = "clear", oneshot = "oneshot", beatrepeat = "br", beatrep = "br", beatfrac = "brf", brfrac = "brf", vitesse = "speed",
+  tempo = "speed", ["1shot"] = "oneshot" }
+local VALKEYS = { ["in"] = 1, out = 1, brf = 1, brmix = 1, smix = 1, vol = 1, speed = 1, pitch = 1, fb = 1, cdens = 1, cchaos = 1, cspread = 1,
+  cpitch = 1, cpos = 1, clfo = 1, clfodepth = 1, clfoshape = 1,
+  sattack = 1, sdecay = 1, ssteps = 1, srate = 1, smode = 1, sgrid = 1, spreset = 1, smax = 1, sdetect = 1, sdhold = 1,
+  sroot = 1, srelease = 1, spitch = 1 }
+
+-- "recoff" -> rec + off
+local function split_key(piece)
+  local k = ALIAS[piece] or piece
+  if H[k] then return k end
+  local p0, sfx = piece:match("^(.-)(off)$")
+  if not p0 then p0, sfx = piece:match("^(.-)(on)$") end
+  if p0 and p0 ~= "" then
+    p0 = ALIAS[p0] or p0
+    if H[p0] then return p0, sfx end
+  end
+end
+
+local function parse_target(s)
+  if s == "all" or s == "tous" or s == "*" then
+    local t = {}; for i = 1, NLOOP do t[i] = i end; return t
+  end
+  s = (s:gsub("^l", ""):gsub("/l", "/"))
+  local t = {}
+  for piece in s:gmatch("[^/]+") do
+    local a, b = piece:match("^(%d+)%-(%d+)$")
+    if a then
+      for i = tonumber(a), tonumber(b) do t[#t + 1] = i end
+    elseif piece:match("^%d+$") then
+      t[#t + 1] = tonumber(piece)
+    else
+      return nil, "cible invalide : " .. piece
+    end
+  end
+  if #t == 0 then return nil, "cible manquante" end
+  for _, i in ipairs(t) do
+    if i < 1 or i > NLOOP then return nil, "looper " .. i .. " inexistant (1-" .. NLOOP .. ")" end
+  end
+  return t
+end
+
+local PRESET_MAX = 8      -- presets de routing / de groupe du Launchpad (NPRESET)
+-- sync / unsync : synchro Master Sync de la part en cours (comme le pad SYNC/UNSYNC) ; syncall / unsyncall : les 3 parts
+local SYNC_WORDS = { sync = { true, false }, unsync = { false, false }, syncall = { true, true }, unsyncall = { false, true } }
+
+-- Compile un pas -> liste d'items {i, ch, f} (ou {glob, n} pour R(n) / G(n)), liste d'erreurs
+local function compile(text, forced, toggle)
+  local items, errs = {}, {}
+  local last_targets = nil
+  tmode = toggle and true or false
+  text = (text:gsub("//.*$", ""))
+  text = (text:gsub("%f[%a]([eE])%s*%(%s*([1-4])%s*%)", "%1%2"))   -- e(2) = e2
+  for act in (text .. ","):gmatch("([^,]*),") do
+    act = trim(act)
+    local sync = false
+    if act:sub(-1) == "*" and #act > 1 then sync = true; act = trim(act:sub(1, -2)) end
+    local pk, pn = act:lower():match("^([rg])%s*%(%s*(%d+)%s*%)$")
+    local sc = SYNC_WORDS[(act:lower():gsub("%s+", ""))]
+    if sc then
+      items[#items + 1] = { glob = "sync", on = sc[1], parts_all = sc[2] }
+    elseif pk then
+      -- R(n) / G(n) : preset de routing / de groupe du Launchpad (global : ni cible, ni file par looper)
+      pn = tonumber(pn)
+      if pn < 1 or pn > PRESET_MAX then
+        errs[#errs + 1] = "[" .. act .. "] preset " .. pn .. " inexistant (1-" .. PRESET_MAX .. ")"
+      else
+        items[#items + 1] = { glob = (pk == "r") and "routing" or "group", n = pn }
+      end
+    elseif act ~= "" then
+      local s = act:lower():gsub("à", " "):gsub("[=:]", " ")
+      local t = {}
+      for w in s:gmatch("%S+") do
+        if w ~= "a" and w ~= "to" and w ~= "at" and w ~= "->" then t[#t + 1] = w end
+      end
+      local first = t[1] or ""
+      local targets, terr
+      local is_target = first == "all" or first == "tous" or first == "*" or first:match("^l?%d") ~= nil
+      if forced then
+        targets = forced                      -- macro : pas de cible dans la syntaxe, elle est imposee a l'execution
+        table.insert(t, 1, "_")
+      elseif not is_target and last_targets and split_key(first:match("[^/]+") or "") then
+        targets = last_targets                -- pas de cible : on garde celle de l'action precedente
+        table.insert(t, 1, "_")
+      else
+        targets, terr = parse_target(first)
+        if targets then last_targets = targets end
+      end
+      if not targets then errs[#errs + 1] = "[" .. act .. "] " .. terr
+      elseif #t < 2 then errs[#errs + 1] = "[" .. act .. "] action manquante"
+      else
+        local idx, ok = 2, true
+        while idx <= #t and ok do
+          local keys, inline = {}, {}
+          for piece in t[idx]:gmatch("[^/]+") do
+            local k, iv = split_key(piece)
+            if not k then errs[#errs + 1] = "[" .. act .. "] mot inconnu : " .. piece; ok = false; break end
+            keys[#keys + 1] = k; inline[#keys] = iv
+          end
+          if not ok then break end
+          idx = idx + 1
+          local val
+          local tn = t[idx]
+          if tn then
+            local acceptsreset = false
+            for _, k in ipairs(keys) do if VALKEYS[k] then acceptsreset = true end end
+            local isbrf = false
+            for _, k in ipairs(keys) do if k == "brf" then isbrf = true end end
+            if onoff(tn) ~= nil or num(tn) or (tn == "reset" and acceptsreset)
+               or (isbrf and (tn:match("^1/%d+$") or tn == "free" or tn == "libre")) then val = tn; idx = idx + 1 end
+          end
+          for n, k in ipairs(keys) do
+            local ops, err = H[k](inline[n] or val)
+            if not ops then errs[#errs + 1] = "[" .. act .. "] " .. k .. " : " .. err; ok = false; break end
+            for _, i in ipairs(targets) do
+              for _, op in ipairs(ops) do
+                if not op.all then items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, glob = op.glob, slot = op.slot, want = op.want } end
+              end
+            end
+            for _, op in ipairs(ops) do
+              if op.all then for i = 1, NLOOP do items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, all = true } end end
+            end
+          end
+        end
+      end
+    end
+  end
+  tmode = false
+  return items, errs
+end
+
+--------------------------------------------------------------------------
+-- File d'envoi par looper : un looper consomme ses commandes une par une (cmd/param/edit),
+-- on n'ecrit donc le suivant qu'une fois le slot vide, avec un petit delai pour que le feedback se mette a jour.
+--------------------------------------------------------------------------
+local Q, nextok, grp_counter = {}, {}, 0
+for i = 1, NLOOP do Q[i] = {} end
+
+local function slot_free(ch, b)
+  local a = (ch == "cmd") and (b + 48) or (ch == "param" and (b + 180) or (b + 160))
+  return rd(a) == 0
+end
+
+-- Point de synchro d'un looper : meme horloge et meme grille que le looper lui-meme
+-- (slot Main/Chorus/Bridge = (part-1)*10 ; +2 periode, +3 phase en samples ; grille de sortie = gmem[99])
+local function sync_info(i)
+  local F = fb(i)
+  local so = (F.part - 1) * 10
+  local locked, period = rd(so), rd(so + 2)
+  if (locked ~= 1 and locked ~= 2) or period <= 0 then return nil end
+  local sr = rd(F.b + 186); if sr <= 0 then sr = 48000 end
+  local sg = math.max(0, math.min(4, math.floor(rd(99) + 0.5)))
+  local unit = period
+  if sg > 0 then
+    local hb
+    if locked == 2 then
+      hb = 60 * sr / math.max(reaper.Master_GetTempo(), 20)
+    else
+      local mid = rd(so + 1)
+      for k = 0, NLOOP - 1 do
+        local bb = 1000 + k * 600
+        if mid > 0 and (rd(bb) == mid or rd(bb + 1) == mid) then
+          local pp = rd(bb + 42); if pp < 1 then pp = 1 end
+          local bpm = rd(bb + (pp - 1) * 200 + 155)
+          if bpm > 0 then hb = 60 * sr / bpm end
+          break
+        end
+      end
+    end
+    if hb and hb > 0 then
+      local nb = period / hb
+      if nb >= 1 and math.abs(nb - math.floor(nb + 0.5)) < 0.05 then unit = hb / sg end
+    end
+  end
+  local ph = rd(so + 3) / unit
+  return ph - math.floor(ph), unit, sr, locked
+end
+
+-- true quand l'action armee (*) peut partir. On part juste AVANT le point (latence bloc + gmem).
+local function sync_ready(i, op, q, t, dt)
+  if q.released == op.grp then return true end       -- meme pas, meme looper : part avec la 1re
+  local ph, unit, sr, locked = sync_info(i)
+  if not ph then return true end                       -- aucune reference : immediat (comme le REC du looper)
+  if locked == 2 and (reaper.GetPlayState() & 1) == 0 then return true end   -- Host a l'arret
+  if op.prev == nil then op.prev = ph; op.chg = t; return false end
+  if ph ~= op.prev then op.chg = t end
+  local hit = ph < op.prev - 1e-6                      -- l'horloge a boucle
+  if (1 - ph) * unit / sr <= math.max(0.012, dt * 0.75) then hit = true end
+  if t - op.chg > 0.6 then hit = true end              -- horloge figee : pas de synchro possible
+  op.prev = ph
+  if hit then q.released = op.grp end
+  return hit
+end
+
+local last_pump = 0
+local function pump()
+  local t = reaper.time_precise()
+  local dt = math.min(0.1, t - last_pump); last_pump = t
+  for i = 1, NLOOP do
+    local q = Q[i]
+    while #q > 0 and t >= (nextok[i] or 0) do
+      local op = q[1]
+      if t - op.t0 > (op.sync and 300 or 3) then table.remove(q, 1)   -- bloque trop longtemps : on abandonne
+      elseif op.sync and not sync_ready(i, op, q, t, dt) then break   -- arme (*) : attend le point de synchro
+      else
+        local b, a, c, d = op.f(i)
+        if not b then table.remove(q, 1)                      -- rien a faire (deja dans l'etat voulu)
+        elseif slot_free(op.ch, b) then
+          if op.ch == "cmd" then
+            if c ~= nil then wr(b + 49, c) end
+            wr(b + 48, a)
+          elseif op.ch == "param" then
+            wr(b + 181, c); wr(b + 180, a)
+          else
+            if c ~= nil then wr(b + 161, c) end
+            if d ~= nil then wr(b + 162, d) end
+            wr(b + 160, a)
+          end
+          table.remove(q, 1); nextok[i] = t + 0.04
+          break
+        else break end
+      end
+    end
+  end
+end
+
+local function pending()
+  local n = 0
+  for i = 1, NLOOP do n = n + #Q[i] end
+  return n
+end
+
+--------------------------------------------------------------------------
+-- Scenario
+--------------------------------------------------------------------------
+local steps, parsed = {}, {}
+local tab = "scn"                      -- onglet courant : "scn" (scenario) ou "mac" (macros)
+local mac_from_capture, mac_count = nil, function() return 0 end   -- definis avec le bloc MACROS
+local cur, last = 1, 0
+local loop_on = false                     -- boucle : apres le dernier pas, GO repart au pas 1
+local msg, msg_err = "Pret.", false
+local scroll, want_visible = 0, true
+local last_name = ""
+local DIR = reaper.GetResourcePath() .. "/Data/NowUndo_Scenarios/"
+
+local function reparse(i)
+  local items, errs = compile(steps[i])
+  parsed[i] = { items = items, errs = errs, err = errs[1] }
+end
+
+local function persist()
+  reaper.SetExtState(EXT, "steps", table.concat(steps, SEP), true)
+  reaper.SetExtState(EXT, "name", last_name, true)
+end
+
+local function toggle_loop()
+  loop_on = not loop_on
+  reaper.SetExtState(EXT, "loop", loop_on and "1" or "0", true)
+  msg = loop_on and "Boucle ON : apres le dernier pas, GO repart au pas 1." or "Boucle OFF."; msg_err = false
+end
+
+local function reparse_all()
+  parsed = {}
+  for i = 1, #steps do reparse(i) end
+  if cur > #steps then cur = math.max(1, #steps) end
+  persist()
+end
+
+local function split_steps(text)
+  local out = {}
+  text = text:gsub("\r", "")
+  for line in text:gmatch("[^\n]+") do
+    line = trim(line)
+    if line ~= "" and not line:match("^#") and not line:match("^//") then
+      for st in (line .. ";"):gmatch("([^;]*);") do
+        st = trim(st)
+        if st ~= "" then out[#out + 1] = st end
+      end
+    end
+  end
+  return out
+end
+
+-- R(n) / G(n) / e<n> -> commande au Virtual Launchpad (ExtState NowUndo_VLcmd/q : lignes "nom<TAB>temps", lu par VL.ext_cmd_poll)
+local function fire_glob(it)
+  local name
+  if it.glob == "fx" then
+    name = string.format("fx_%d_%d_%s", it.i, it.slot, it.want == nil and "tog" or (it.want and "on" or "off"))
+  elseif it.glob == "sync" then
+    name = "sync_" .. (it.parts_all and "all_" or "") .. (it.on and "on" or "off")
+  else
+    name = string.format("preset_%s_%d", it.glob, it.n)
+  end
+  local q = reaper.GetExtState("NowUndo_VLcmd", "q")
+  reaper.SetExtState("NowUndo_VLcmd", "q", q .. string.format("%s\t%.3f\n", name, reaper.time_precise()), false)
+end
+
+local function go()
+  if #steps == 0 then return end
+  local p = parsed[cur]
+  if not p then reparse(cur); p = parsed[cur] end
+  if p.err then msg = "Pas " .. cur .. " invalide : " .. p.err; msg_err = true; return end
+  reaper.gmem_attach(GMEM)
+  local dead, seen, nsync, nglob = {}, {}, 0, 0
+  grp_counter = grp_counter + 1
+  local t0 = reaper.time_precise()
+  for _, it in ipairs(p.items) do
+    if it.glob then
+      fire_glob(it); nglob = nglob + 1
+    elseif rd(100 + it.i - 1) > 0 then
+      Q[it.i][#Q[it.i] + 1] = { ch = it.ch, f = it.f, t0 = t0, sync = it.sync, grp = grp_counter }
+      if it.sync then nsync = nsync + 1 end
+    elseif not it.all and not seen[it.i] then seen[it.i] = true; dead[#dead + 1] = "L" .. it.i end
+  end
+  last = cur
+  msg_err = #dead > 0
+  msg = "Pas " .. last .. " execute" .. (#dead > 0 and ("  (looper absent : " .. table.concat(dead, ",") .. ")") or "")
+        .. (nsync > 0 and ("  -  " .. nsync .. " action(s) * en attente du point de synchro") or "")
+        .. (nglob > 0 and ("  -  " .. nglob .. " commande(s) envoyee(s) au Launchpad") or "")
+  if cur < #steps then cur = cur + 1 elseif loop_on then cur = 1 end
+  want_visible = true
+end
+
+local function back()
+  if #steps == 0 then return end
+  local base = (last > 0 and last or cur) - 1
+  if base < 1 then base = loop_on and #steps or 1 end
+  cur = base
+  go()
+end
+
+local function cancel_all()
+  for i = 1, NLOOP do Q[i] = {} end
+  msg = "Actions en attente annulees."; msg_err = false
+end
+
+-- GetUserInputs traite la valeur par defaut comme du CSV : les virgules coupent le texte et seule la derniere action restait
+-- affichee. On remplace donc ", " par " | " dans la fenetre, et on remet les virgules au retour.
+local function ui_in(s) return (tostring(s or ""):gsub("%s*,%s*", " | ")) end
+local function ui_out(s) return (tostring(s or ""):gsub("%s*|%s*", ", ")) end
+
+local function edit_step()
+  if not steps[cur] then return end
+  local ok, ret = reaper.GetUserInputs("Modifier le pas " .. cur, 1, "Pas :,extrawidth=520", ui_in(steps[cur]))
+  if ok then
+    local new = split_steps(ui_out(ret))
+    if #new > 0 then
+      steps[cur] = new[1]
+      for k = 2, #new do table.insert(steps, cur + k - 1, new[k]) end
+      reparse_all()
+    end
+  end
+end
+
+local function add_step()
+  local ok, ret = reaper.GetUserInputs("Ajouter un pas apres le " .. cur, 1, "Pas (; pour en mettre plusieurs) :,extrawidth=520", "")
+  if ok then
+    local new = split_steps(ret)
+    local at = (#steps == 0) and 0 or cur
+    for k, s in ipairs(new) do table.insert(steps, at + k, s) end
+    if #new > 0 then cur = at + 1; reparse_all(); want_visible = true end
+  end
+end
+
+local function del_step()
+  if #steps == 0 then return end
+  table.remove(steps, cur); reparse_all()
+end
+
+local function move_step(d)
+  local j = cur + d
+  if j < 1 or j > #steps then return end
+  steps[cur], steps[j] = steps[j], steps[cur]
+  cur = j; reparse_all(); want_visible = true
+end
+
+local function new_scn()
+  steps = {}; cur = 1; last = 0; last_name = ""; reparse_all()
+  msg = "Nouveau scenario."; msg_err = false
+end
+
+local function save_scn()
+  local ok, name = reaper.GetUserInputs("Sauver le scenario", 1, "Nom du fichier :,extrawidth=200", last_name)
+  if not ok or trim(name) == "" then return end
+  name = trim(name):gsub("[\\/:*?\"<>|]", "_")
+  if not name:match("%.%w+$") then name = name .. ".txt" end
+  reaper.RecursiveCreateDirectory(DIR, 0)
+  local f = io.open(DIR .. name, "w")
+  if not f then msg = "Ecriture impossible : " .. DIR .. name; msg_err = true; return end
+  f:write("# NowUndo scenario\n")
+  for _, s in ipairs(steps) do f:write(s, ";\n") end
+  f:close()
+  last_name = name; persist()
+  msg = "Sauve : " .. name; msg_err = false
+end
+
+local function load_scn()
+  reaper.RecursiveCreateDirectory(DIR, 0)
+  local ok, file = reaper.GetUserFileNameForRead(DIR .. last_name, "Charger un scenario", ".txt")
+  if not ok then return end
+  local f = io.open(file, "r")
+  if not f then msg = "Lecture impossible"; msg_err = true; return end
+  local text = f:read("*a"); f:close()
+  steps = split_steps(text); cur = 1; last = 0
+  last_name = file:match("([^/\\]+)$") or ""
+  reparse_all()
+  msg = "Charge : " .. last_name .. "  (" .. #steps .. " pas)"; msg_err = false
+end
+
+--------------------------------------------------------------------------
+-- Init : restaure le dernier scenario (ExtState) ou propose l'exemple
+--------------------------------------------------------------------------
+do
+  local saved = reaper.GetExtState(EXT, "steps")
+  if saved ~= "" then
+    for s in (saved .. SEP):gmatch("(.-)" .. SEP) do if s ~= "" then steps[#steps + 1] = s end end
+  end
+  last_name = reaper.GetExtState(EXT, "name")
+  loop_on = reaper.GetExtState(EXT, "loop") == "1"
+  if #steps == 0 then
+    steps = {
+      "l1/3/6 rev, l2 recoff",
+      "l1/3/6 revoff, l2 rec",
+      "l1 in 0.25 out 0.5",
+      "l1 in/out reset, l1 slicer/cloud off",
+    }
+  end
+  reparse_all()
+end
+
+--------------------------------------------------------------------------
+-- Interface
+--------------------------------------------------------------------------
+local function ld(k, d) return tonumber(reaper.GetExtState(EXT, k)) or d end
+gfx.init("NowUndo Scenario", ld("w", 620), ld("h", 560), ld("dock", 0), ld("x", 120), ld("y", 120))
+
+local was_down, last_click_t, last_click_row = false, 0, 0
+local RH, LIST_Y = 24, 78
+
+local function fit(s, w)
+  if gfx.measurestr(s) <= w then return s end
+  while #s > 1 and gfx.measurestr(s .. "…") > w do
+    s = s:sub(1, (utf8.offset(s, -1) or #s) - 1)
+  end
+  return s .. "…"
+end
+
+local mx, my, click = 0, 0, false
+local function btn(x, y, w, h, label, r, g, b)
+  local hov = mx >= x and mx <= x + w and my >= y and my <= y + h
+  local k = hov and 1.25 or 1
+  gfx.set(math.min(1, r * k), math.min(1, g * k), math.min(1, b * k), 1)
+  gfx.rect(x, y, w, h)
+  gfx.set(1, 1, 1, 0.2); gfx.rect(x, y, w, h, 0)
+  gfx.set(1, 1, 1, 0.95)
+  local tw, th = gfx.measurestr(label)
+  gfx.x = x + (w - tw) / 2; gfx.y = y + (h - th) / 2
+  gfx.drawstr(label)
+  return click and hov
+end
+
+local function save_win()
+  local d, x, y, w, h = gfx.dock(-1)
+  reaper.SetExtState(EXT, "dock", tostring(d), true)
+  reaper.SetExtState(EXT, "x", tostring(math.floor(x)), true)
+  reaper.SetExtState(EXT, "y", tostring(math.floor(y)), true)
+  reaper.SetExtState(EXT, "w", tostring(math.floor(w)), true)
+  reaper.SetExtState(EXT, "h", tostring(math.floor(h)), true)
+end
+
+-- Lexique (popup) : { mot, description } ; description absente = titre de section ; mot vide = ligne vide
+local HELP = {
+  { "SYNTAXE" },
+  { ";", "fin d'un pas (un pas = une ligne dans le fichier)" },
+  { ",", "separe les actions d'un meme pas :  l1 rev, l2 rec" },
+  { ", mot", "cible omise = celle de l'action precedente :  l1 rec off, rev   (= l1 recoff, l1 rev)" },
+  { "/", "plusieurs loopers (l1/3/6) ou plusieurs mots (l1 slicer/cloud off, l1 in/out reset)" },
+  { "-", "plage de loopers (l2-4) ; signe moins d'une valeur (vol -6db, pitch -5)" },
+  { "*", "en fin d'action : ARMEE, part au prochain point de synchro  (l1 rev*)" },
+  { "off", "precise l'arret (rev off, recoff). Sans precision = ON ; deja dans l'etat = rien" },
+  { "a  à  =  :", "mots de liaison ignores  (l1 in 0.25 out à 0.5)" },
+  { ".", "separateur decimal (0.25) : la virgule separe les actions" },
+  { "//", "commentaire jusqu'a la fin de la ligne" },
+  { "R(n)  G(n)", "rappelle le preset de ROUTING (R) / de GROUPE (G) n°1-8 de la page principale du Launchpad  (r(2), g(3))" },
+  { "double-clic", "sur un pas de la liste : l'editer   (GO / Espace : l'executer)" },
+  { "" },
+  { "CIBLES" },
+  { "l1", "un looper" },
+  { "l1/3/6", "plusieurs loopers" },
+  { "l2-4", "une plage (2, 3 et 4)" },
+  { "all", "les 8 loopers" },
+  { "" },
+  { "ON / OFF" },
+  { "rec  (dub)", "enregistrement / overdub  (rec on sur boucle existante = dub)" },
+  { "play  stop", "lecture / arret   (stop = play off)" },
+  { "replace", "mode replace" },
+  { "multiply", "mode multiply" },
+  { "autorep", "auto-repeat" },
+  { "rev", "reverse" },
+  { "pp", "ping-pong" },
+  { "slicer", "mode slicer" },
+  { "sync  unsync", "synchro Master Sync de la part en cours, comme le pad SYNC/UNSYNC  (syncall / unsyncall : les 3 parts)" },
+  { "e1 .. e4", "effet 1-4 du looper (page Effects du Launchpad) : l1 e1 = actif, l1 e1 off = bypass   (e(1) accepte)" },
+  { "cloud", "mode cloud" },
+  { "link", "link pitch/speed" },
+  { "auto", "auto-rec" },
+  { "oneshot", "mode one-shot" },
+  { "" },
+  { "COMMANDES" },
+  { "clear", "efface la part active" },
+  { "clearfull", "efface les 3 parts" },
+  { "clearall / clearallfull", "clear (ou clear complet) sur LES 8 LOOPERS, quelle que soit la cible ou la selection (macro comprise)" },
+  { "undo  redo", "annuler / refaire" },
+  { "restart", "relance la lecture au debut" },
+  { "rerec", "efface la part et relance un REC" },
+  { "fullloop", "remet la boucle entiere (In/Out)" },
+  { "br", "beat repeat : In a la tete de lecture, Out a la fraction quantize suivante (Free = prochaine transitoire). br off desactive" },
+  { "brf", "fraction du beat repeat : 1/2  1/3  1/4  1/6  1/8  1/12  1/16  1/32  1/64  |  free  (ex : l1 brf 1/16, l1 br). Agit aussi sur le bouton Quant" },
+  { "smix", "dry/wet du slicer : 0..1  |  50%  |  reset (= 1). 0 = boucle d'origine seule, 1 = slicer seul (ex : l1 slicer, l1 smix 50%)" },
+  { "brmix", "dry/wet du beat repeat : 0..1  |  50%  |  reset (= 1). 0 = boucle d'origine seule, 1 = beat repeat seul (ex : l1 br, l1 brmix 50%)" },
+  { "quant", "quantise In/Out" },
+  { "reset", "tous les parametres a leur defaut (sauf volume)" },
+  { "" },
+  { "VALEURS" },
+  { "vol", "0..2  |  50%  |  -6db  |  reset (= 1)" },
+  { "speed", "0.01..100  |  reset (= 1)" },
+  { "pitch", "-48..48 demi-tons  |  reset (= 0)" },
+  { "in  out", "fraction de la boucle : 0.25  |  25%  |  reset" },
+  { "part", "1, 2 ou 3 (bascule quantifiee : a mettre seul dans un pas)" },
+  { "fb", "feedback 0..2  |  reset (= 1)" },
+  { "cdens cchaos cspread", "cloud : densite, chaos, spread (0..1)" },
+  { "cpitch cpos", "cloud : pitch spread, position (0..100)" },
+  { "clfo clfodepth clfoshape", "cloud LFO : rate (0.1..4), depth (0..100), shape (0..2)" },
+  { "sattack sdecay ssteps", "slicer : attack (0..100), decay (4..2000), steps (1..32)" },
+  { "srate smode sgrid spreset", "slicer : rate (0..5), mode (0 1 5), grid (0..9), preset (1..4)" },
+  { "smax sdetect sdhold", "slicer : max slices (0..32), detect, detect hold" },
+  { "sroot srelease spitch", "slicer : root (0..127), release (0..3000), pitch (0..100)" },
+  { "" },
+  { "TIMELINE REAPER  (touche T)" },
+  { "principe", "un item nomme S<n> sur la piste choisie lance le pas n quand la lecture l'atteint" },
+  { "nom de l'item", "note de l'item vide (ou nom du take) : S1, S18, s3 intro ..." },
+  { "piste", "bouton PISTE : 1, 2 ... ou TOUTES" },
+  { "inhiber", "bouton TIMELINE ON/OFF (ou T) ; inactive pendant la capture" },
+  { "saut / boucle", "un saut ne declenche que l'item pile sur le nouveau point de depart" },
+  { "glisser un pas", "prends un pas dans la liste, relache-le sur la piste dans REAPER : cree l'item S<n> (SWS requis)" },
+  { "→ ITEM  (touche I)", "pose le pas selectionne au curseur de lecture (si ca joue) ou d'edition" },
+  { "compteur", "le message affiche S<n> lance (xN) : N = nombre de fois depuis le debut de la lecture" },
+  { "" },
+  { "BOUCLE  (touche L)" },
+  { "boucle ON", "apres le dernier pas, GO repart au pas 1 (BACK depuis le pas 1 va au dernier)" },
+  { "pads (hors capture)", "PAS PRECEDENT = BACK ; PAS SUIVANT = GO" },
+  { "" },
+  { "CAPTURE  (C ou appui long Launch)" },
+  { "principe", "tu joues (Launchpad, Twister, souris) : le scenario ecrit le pas" },
+  { "VALIDER", "bouton ou Entree : toutes tes interventions depuis le dernier pas" },
+  { "potards", "derniere valeur de chaque potard (in/out, pitch, speed, vol, fb, cloud, slicer)" },
+  { "pads", "allume = on  (rev) ; eteint = off  (rev off)" },
+  { "pas +/-", "cumules : pitch +5 puis +7  ->  pitch 12" },
+  { "in / out", "enregistres en fractions : marche meme looper vide" },
+  { "Launch + GO", "si tu armes une suite d'actions, le GO valide le pas tout seul" },
+  { "appui long Launch", "demarre / arrete la capture" },
+  { "pads MAIN/CHORUS/BRIDGE", "VALIDER / PAS PRECEDENT / PAS SUIVANT (en capture : choisit ou inserer, sans executer)" },
+  { "Retour arriere", "annule la ligne en cours" },
+  { "SYNC *", "ajoute * a chaque action des pas enregistres" },
+  { "SNAP", "arrondit les valeurs (pitch entier, in/out au centieme ...)" },
+  { "" },
+  { "REORDONNER LES PAS" },
+  { "glisser dans la liste", "prends un pas et relache-le sur un autre pas : il prend sa place (hors fenetre = timeline REAPER)" },
+  { "" },
+  { "MACROS  (onglet MACROS)" },
+  { "principe", "chutier de 64 actions individuelles, meme syntaxe que les pas MAIS sans looper : elles agissent sur le looper / groupe selectionne" },
+  { "exemple", "rev, pitch 12, slicer off   (pas de l1 : la cible est le looper ou groupe choisi au moment de l'appui)" },
+  { "● CAPTURE / VALIDER", "meme bouton (ou touche C / Entree) : 1er appui = capture, 2e = enregistre UNE macro (pas d'incrementation)" },
+  { "ADD / EDIT / NOM", "ecrire la syntaxe, la modifier (double-clic aussi), renommer" },
+  { "T  (case toggle)", "entre la pastille et le titre (ou touche T) : on/off (rec, rev, slicer, cloud, play, br...) s'INVERSENT ; vol, speed, pitch, in/out... basculent valeur enregistree <-> defaut" },
+  { "G  (case gate)", "entre T et A (ou touche G) : le pad Launchpad active la macro a l'appui et la desactive au relachement (ideal pour beat repeat)" },
+  { "libelle du pad", "le nom ; s'il est vide, l'action elle-meme (NOM vide = retour a l'action)" },
+  { "Ctrl+clic sur un pad LP", "page 4 du Launchpad : retire la macro de ce pad (elle reste dans le chutier)" },
+  { "pastille / COULEUR", "clic sur la pastille = couleur suivante ; COULEUR = choisir librement (toute la selection)" },
+  { "DEL  (Suppr)", "supprime la selection (retire aussi les pads du Launchpad)" },
+  { "selection", "clic ; Ctrl/Cmd+clic = ajouter / retirer ; Maj+clic = plage ; Ctrl+A = tout" },
+  { "glisser", "hors de la fenetre sur le Launchpad = pose a la suite (cases libres, rien n'est ecrase) ; sur une autre macro = reordonner" },
+  { "→ LAUNCHPAD", "bouton : meme effet que le glisser vers le Launchpad (utile pour le Launchpad web)" },
+  { "RETIRER DU LP / VIDER", "retire la selection / tout du Launchpad (les macros restent dans le chutier)" },
+  { "▶ TESTER  (Espace)", "execute la selection sur le looper / groupe choisi sur le Launchpad" },
+  { "EXPORT / IMPORT", "fichier .txt dans Data/NowUndo_Macros : macros + disposition Launchpad" },
+  { "Launchpad page 4", "page 4 -> couche 'Action macros' (remplace Tune) : un pad = une macro ; ce script doit tourner" },
+  { "" },
+  { "EXEMPLES" },
+  { "l1/3/6 rev, l2 recoff;", "reverse sur 1, 3, 6 ; stop du rec sur 2" },
+  { "l1 in 0.25 out 0.5;", "In a 25 %, Out a 50 % de la boucle" },
+  { "l1 in/out reset, l1 slicer/cloud off;", "remet In/Out ; coupe slicer et cloud" },
+  { "l2 rec*, l1 vol -6db;", "l1 change tout de suite, l2 entre en rec au point de synchro" },
+}
+local show_help, help_scroll = false, 0
+
+
+--------------------------------------------------------------------------
+-- MODE CAPTURE : le Launchpad et le Twister agissent NORMALEMENT ; tant que ce script publie son heartbeat
+-- (ExtState NowUndo_Scn/hb) ils lui envoient en plus ce qu'ils font (ExtState NowUndo_Scn/q) :
+--   op<TAB>action<TAB>looper<TAB>valeur   (Launchpad : operation reellement executee, par looper ; toggle = on/off voulu)
+--   val<TAB>mot<TAB>looper<TAB>valeur     (Twister : valeur native du potard)      rst<TAB>mot<TAB>looper (push)
+--   go  /  done                           (Launchpad : GO du mode Launch / file d'execution videe)
+-- VALIDER (bouton / Entree) ecrit toutes les interventions depuis le dernier pas (derniere valeur pour les potards) ; un GO du
+-- mode Launch valide aussi automatiquement. Appui long sur le pad Launch : demarre / arrete la capture.
+--------------------------------------------------------------------------
+local CAPEXT = "NowUndo_Scn"
+local capturing = false
+local cap = { ops = {}, touched = {}, tlist = {}, virt = {}, snap = true, star = false, go_t = nil, done = false, last_ev = 0, nop = 0, nval = 0, lastev = "(rien recu)" }
+
+local ACT_TOGGLE = { rec_overdub = "rec", replace = "replace", multiply = "multiply", auto = "auto", stop_play = "play",
+  reverse = "rev", auto_rev = "pp", one_shot = "oneshot", cloud = "cloud", slicer = "slicer", link = "link", auto_rep = "autorep" }
+for s = 1, 4 do ACT_TOGGLE["fx" .. s] = "e" .. s end   -- effets du looper (page Effects du Launchpad)
+local ACT_TRIG = { clear = "clear", clear_part = "clear", clear_full = "clearfull", clear_all = "clearall", clear_all_full = "clearallfull",
+  rerec = "rerec", undo = "undo", redo = "redo", restart = "restart", quantise_inout = "quant", full_loop = "fullloop",
+  reset = "reset", reset_params = "reset" }
+local ACT_RESET = { reset_volume = "vol", reset_pitch = "pitch", reset_speed = "speed", reset_loop_in = "in", reset_loop_out = "out" }
+local STEP = {
+  pitch_step    = function(V, a) return "pitch", V.pitch + a end,
+  speed_step    = function(V, a) return "speed", V.speed * 2 ^ (a / 12) end,
+  volume_step   = function(V, a) return "vol", V.vol * 10 ^ (a / 20) end,
+  volume_pct    = function(V, a) return "vol", V.vol + a / 100 end,
+  loop_in_step  = function(V, a) return "in", V["in"] + a / 100 end,
+  loop_out_step = function(V, a) return "out", V.out + a / 100 end,
+}
+local RANGE = { pitch = { -48, 48 }, speed = { 0.01, 100 }, vol = { 0, 2 }, fb = { 0, 2 }, ["in"] = { 0, 1 }, out = { 0, 1 },
+  cdens = { 0, 1 }, cchaos = { 0, 1 }, cspread = { 0, 1 }, cpitch = { 0, 100 }, cpos = { 0, 100 },
+  clfo = { 0.1, 4 }, clfodepth = { 0, 100 }, clfoshape = { 0, 2 },
+  sattack = { 0, 100 }, sdecay = { 4, 2000 }, ssteps = { 1, 32 }, srate = { 0, 5 }, smode = { 0, 5 }, sgrid = { 0, 9 },
+  spreset = { 1, 4 }, smax = { 0, 32 }, sdetect = { 0.001, 0.8 }, sdhold = { 30, 1000 }, sroot = { 0, 127 },
+  srelease = { 0, 3000 }, spitch = { 0, 100 } }
+local SNAP = { pitch = 1, speed = 0.01, vol = 0.05, fb = 0.05, ["in"] = 0.01, out = 0.01, cdens = 0.01, cchaos = 0.01,
+  cspread = 0.01, cpitch = 1, cpos = 1, clfo = 0.05, clfodepth = 1, clfoshape = 1,
+  sattack = 1, sdecay = 1, ssteps = 1, srate = 1, smode = 1, sgrid = 1, spreset = 1, smax = 1, sdetect = 0.001, sdhold = 10,
+  sroot = 1, srelease = 5, spitch = 1 }
+local RESETV = { pitch = 0, speed = 1, vol = 1, fb = 1, ["in"] = 0, out = 1, cdens = 0.5, cchaos = 0, cspread = 0.1,
+  cpitch = 0, cpos = 50, clfo = 1, clfodepth = 0, clfoshape = 0,
+  sattack = 0, sdecay = 150, ssteps = 8, srate = 3, smode = 5, sgrid = 3, spreset = 1, smax = 16, sdetect = 0.002, sdhold = 120,
+  sroot = 48, srelease = 0, spitch = 0 }
+-- offsets de lecture du feedback (comme le Twister : pitch 4, speed 3, vol 22, fb 19, slicer 14..174)
+VPID = { pitch = 4, speed = 3, vol = 22, fb = 19, cdens = 26, cchaos = 27, cspread = 28, cpitch = 35, cpos = 38,
+  clfo = 40, clfodepth = 41, clfoshape = 39,
+  sattack = 174, sdecay = 16, ssteps = 167, srate = 15, smode = 14, sgrid = 33, spreset = 169, smax = 168, sdetect = 165,
+  sdhold = 166, sroot = 150, srelease = 170, spitch = 34 }
+-- ce qu'on relit sur les loopers au moment de valider (souris, groupes...) ; cloud exclu (offsets non confirmes)
+local SAFE = { "pitch", "speed", "vol", "fb", "sattack", "sdecay", "ssteps", "srate", "smode", "sgrid", "spreset", "smax",
+  "sdetect", "sdhold", "sroot", "srelease", "spitch" }
+local SAFE_ALL = {}
+for _, k in ipairs(SAFE) do SAFE_ALL[#SAFE_ALL + 1] = k end
+SAFE_ALL[#SAFE_ALL + 1] = "in"; SAFE_ALL[#SAFE_ALL + 1] = "out"
+
+local function sorted(set) local t = {}; for i in pairs(set) do t[#t + 1] = i end; table.sort(t); return t end
+local function tgt_text(t) if #t >= NLOOP then return "all" end; return "l" .. table.concat(t, "/") end
+local function num_str(v)
+  local s = string.format("%.4f", v)
+  s = s:gsub("0+$", ""):gsub("%.$", "")
+  if s == "-0" or s == "" then s = "0" end
+  return s
+end
+local function snapv(key, v)
+  local lo, hi = RANGE[key][1], RANGE[key][2]
+  v = math.max(lo, math.min(hi, v))
+  if cap.snap and SNAP[key] then
+    v = math.floor(v / SNAP[key] + 0.5) * SNAP[key]
+    v = math.max(lo, math.min(hi, v))
+  end
+  return v
+end
+
+-- etat memorise de chaque looper (valeurs numeriques) : photo du Launchpad / Twister au debut, puis mis a jour par chaque ligne
+local function snapshot()
+  local V = {}
+  for l = 1, NLOOP do
+    local F = fb(l)
+    V[l] = {}
+    for k, v in pairs(RESETV) do V[l][k] = v end        -- valeurs par defaut = looper vide / absent
+    if F.alive then
+      for key, pid in pairs(VPID) do
+        local x = rd(F.b + pid)
+        if key ~= "speed" or x > 0 then V[l][key] = x end
+      end
+      if F.len > 0 then V[l]["in"] = F.lstart / F.len; V[l].out = (F.lstart + F.lwidth) / F.len end
+    end
+  end
+  return V
+end
+local function copyV(V)
+  local C = {}
+  for l, t in pairs(V) do C[l] = {}; for k, v in pairs(t) do C[l][k] = v end end
+  return C
+end
+
+-- construit le texte de la ligne en cours ; V = etat virtuel (modifie : passer une copie pour un simple apercu)
+local function build(V)
+  local items, idx, unknown = {}, {}, {}
+  local function put(l, key, val, merge)
+    local id = l .. "|" .. key
+    if merge and idx[id] then idx[id].val = val; return end
+    local it = { l = l, key = key, val = val }
+    items[#items + 1] = it
+    if merge then idx[id] = it end
+  end
+  for _, o in ipairs(cap.ops) do
+    local a, l, v = o.a, o.l, o.v
+    local av = tonumber(v)
+    if V[l] then
+      if ACT_TOGGLE[a] then
+        local on = (v == "true")                       -- allume = on (sans suffixe) ; eteint = off
+        put(l, ACT_TOGGLE[a], (not on) and "off" or nil, true)
+      elseif ACT_TRIG[a] then
+        local c = ACT_TRIG[a]
+        put(l, c, nil, false)
+        if c == "clear" or c == "clearfull" or c == "reset" or c == "clearall" or c == "clearallfull" then
+          local ls = (c == "clearall" or c == "clearallfull") and {} or { l }
+          if #ls == 0 then for k = 1, NLOOP do ls[k] = k end end
+          for _, k in ipairs(ls) do
+            if V[k] then
+              V[k].pitch, V[k].speed, V[k]["in"], V[k].out = 0, 1, 0, 1
+              if c ~= "reset" then V[k].vol = 1 end
+            end
+          end
+        end
+      elseif ACT_RESET[a] then
+        local key = ACT_RESET[a]
+        put(l, key, "reset", true); V[l][key] = RESETV[key]
+      elseif a == "part" and av then put(l, "part", tostring(math.floor(av)), true)
+      elseif av and STEP[a] then
+        local key, nv = STEP[a](V[l], av)
+        nv = snapv(key, nv)
+        V[l][key] = nv
+        put(l, key, num_str(nv), true)
+      else unknown[a] = true end
+    end
+  end
+  for _, tk in ipairs(cap.tlist) do
+    local l, key = tk[1], tk[2]
+    local v = cap.touched[l][key]
+    if V[l] then
+      if v == "reset" then
+        if key == "inout" then V[l]["in"], V[l].out = 0, 1; put(l, "in/out", "reset", true)
+        elseif RANGE[key] then V[l][key] = RESETV[key]; put(l, key, "reset", true) end
+      elseif RANGE[key] and type(v) == "number" then
+        local nv = snapv(key, v)
+        V[l][key] = nv                                                  -- potard touche : on garde la DERNIERE valeur, meme si c'est la valeur de depart (in 0, vol 1...)
+        put(l, key, num_str(nv), true)
+      end
+    end
+  end
+  -- filet de securite : ce qui a reellement change sur les loopers (souris, groupes, Twister non patche...) sans avoir ete signale
+  for l = 1, NLOOP do
+    local F = fb(l)
+    if F.alive and V[l] then
+      local real = {}
+      for _, key in ipairs(SAFE) do real[key] = rd(F.b + VPID[key]) end
+      if real.speed <= 0 then real.speed = 1 end
+      if F.len > 0 then real["in"] = F.lstart / F.len; real.out = (F.lstart + F.lwidth) / F.len end
+      for _, key in ipairs(SAFE_ALL) do
+        local rv = real[key]
+        if rv ~= nil and not idx[l .. "|" .. key] and not idx[l .. "|in/out"] then
+          local a = V[l][key] or rv
+          local diff
+          if cap.snap and SNAP[key] then diff = snapv(key, a) ~= snapv(key, rv) else diff = math.abs(a - rv) > 0.002 end
+          if diff then
+            local nv = snapv(key, rv)
+            V[l][key] = nv
+            put(l, key, num_str(nv), true)
+          end
+        end
+      end
+    end
+  end
+  -- regroupe les loopers qui recoivent la meme action (l1/3 rev) sans jamais faire passer une action devant une autre du meme looper
+  local groups, lastpos = {}, {}
+  for _, it in ipairs(items) do
+    local gid = it.key .. "|" .. tostring(it.val)
+    local g
+    for gi, cand in ipairs(groups) do
+      if cand.gid == gid and not cand.ls[it.l] and gi > (lastpos[it.l] or 0) then g = cand; g.pos = gi; break end
+    end
+    if not g then
+      groups[#groups + 1] = { gid = gid, key = it.key, val = it.val, ls = {} }
+      g = groups[#groups]; g.pos = #groups
+    end
+    g.ls[it.l] = true; lastpos[it.l] = g.pos
+  end
+  local out, prevt = {}, nil
+  for _, g in ipairs(groups) do
+    local t = sorted(g.ls)
+    local tk = table.concat(t, ",")
+    local str = g.key .. (g.val and (" " .. g.val) or "") .. (cap.star and "*" or "")
+    if g.key == "clearall" or g.key == "clearallfull" then
+      if not cap.macro then str = "all " .. str end                      -- CLEAR ALL : toujours les 8 loopers
+    elseif tk ~= prevt and not cap.macro then str = tgt_text(t) .. " " .. str end       -- cible identique a l'action precedente : omise
+    prevt = tk
+    out[#out + 1] = str
+  end
+  local text = table.concat(out, ", ")
+  local gl = cap.globs or {}                                   -- R(n) / G(n) captures : en tete de ligne
+  if #gl > 0 then text = table.concat(gl, ", ") .. (text ~= "" and ", " or "") .. text end
+  return text, #groups + #gl, unknown
+end
+
+local function touch(l, key, v)
+  if not l or not key then return end
+  cap.touched[l] = cap.touched[l] or {}
+  if cap.touched[l][key] == nil then cap.tlist[#cap.tlist + 1] = { l, key } end
+  cap.touched[l][key] = v
+end
+
+local function cap_event(line)
+  local f = {}
+  for w in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = w end
+  local kind = f[1]
+  cap.last_ev = reaper.time_precise()
+  if kind == "op" then cap.nop = cap.nop + 1
+  elseif kind == "val" or kind == "rst" then cap.nval = cap.nval + 1 end
+  cap.lastev = (line:gsub("\t", " "))
+  if kind == "op" then
+    local l = tonumber(f[3])
+    if l then
+      cap.ops[#cap.ops + 1] = { a = f[2], l = l, v = f[4] or "" }
+      if ACT_TRIG[f[2]] or ACT_RESET[f[2]] then cap.optime = cap.optime or {}; cap.optime[l] = reaper.time_precise() end
+    end
+  elseif kind == "val" then
+    local v = tonumber(f[4])
+    if RANGE[f[2]] and v then touch(tonumber(f[3]), f[2], v) end
+  elseif kind == "rst" then touch(tonumber(f[3]), f[2], "reset")
+  elseif kind == "glob" then                                   -- R(n) / G(n) : preset de routing / de groupe rappele sur le Launchpad
+    local g = f[2] or ""
+    cap.nop = cap.nop + 1
+    cap.globs = cap.globs or {}
+    if (g:match("^[rg]%(%d+%)$") or SYNC_WORDS[g]) and cap.globs[#cap.globs] ~= g then cap.globs[#cap.globs + 1] = g end
+  elseif kind == "go" then cap.go_t = cap.last_ev; cap.done = false
+  elseif kind == "done" then cap.done = true end
+end
+
+local function cap_reset_line()
+  cap.ops, cap.touched, cap.tlist, cap.go_t, cap.done = {}, {}, {}, nil, false
+  cap.globs = {}
+end
+
+local function cap_finalize()
+  local text, n, unknown = build(cap.virt)
+  cap_reset_line()
+  if n == 0 then msg = "Rien a enregistrer : aucun changement depuis la ligne precedente."; msg_err = true; return end
+  if cap.macro then mac_from_capture(text); return end
+  local at = (#steps == 0) and 0 or cur
+  table.insert(steps, at + 1, text); cur = at + 1
+  reparse_all(); want_visible = true
+  local un = next(unknown) and ("   (ignore : " .. table.concat(sorted(unknown), ",") .. ")") or ""
+  msg = "Ligne " .. cur .. " enregistree : " .. text .. un; msg_err = false
+end
+
+local function cap_start()
+  if tab == "mac" and mac_count() >= 64 then msg = "64 macros maximum : supprime-en une d'abord."; msg_err = true; return end
+  capturing = true
+  cap.macro = (tab == "mac")
+  cap.virt = snapshot()
+  cap.prev, cap.optime = {}, {}
+  cap_reset_line()
+  reaper.SetExtState(CAPEXT, "q", "", false)
+  cap.nop, cap.nval, cap.lastev = 0, 0, "(rien recu)"
+  msg = cap.macro and "CAPTURE MACRO : fais ton action, puis VALIDER (Entree ou meme bouton). Launch + GO valide tout seul."
+        or "CAPTURE : fais tes actions, puis VALIDER (Entree). Launch + GO valide tout seul."
+  msg_err = false
+end
+local function cap_stop()
+  capturing = false
+  reaper.SetExtState(CAPEXT, "hb", "0", false)
+  reaper.SetExtState(CAPEXT, "q", "", false)
+end
+-- SURVEILLANCE : tout parametre qui bouge pendant la capture (Twister, souris, Launchpad...) est enregistre avec sa DERNIERE
+-- valeur, y compris s'il revient a sa valeur par defaut / de depart (pitch 0, speed 1, vol 1, in 0, slicer, cloud...)
+local WATCH = {}
+for k in pairs(VPID) do WATCH[#WATCH + 1] = k end
+table.sort(WATCH)
+WATCH[#WATCH + 1] = "in"; WATCH[#WATCH + 1] = "out"
+local function cap_watch(now)
+  cap.prev, cap.optime = cap.prev or {}, cap.optime or {}
+  for l = 1, NLOOP do
+    local F = fb(l)
+    if F.alive then
+      local P = cap.prev[l]
+      if not P or P.part ~= F.part then P = { part = F.part }; cap.prev[l] = P end   -- changement de part : nouvelle reference
+      local quiet = (cap.optime[l] or -9) + 0.8 > now                               -- juste apres un clear / reset : valeurs remises a zero, pas un geste
+      for _, key in ipairs(WATCH) do
+        local x
+        if key == "in" or key == "out" then
+          if F.len > 0 then x = (key == "in") and (F.lstart / F.len) or ((F.lstart + F.lwidth) / F.len) end
+        else
+          x = rd(F.b + VPID[key])
+          if key == "speed" and x <= 0 then x = 1 end
+        end
+        if x then
+          if P[key] ~= nil and math.abs(x - P[key]) > 1e-4 and not quiet then touch(l, key, x) end
+          P[key] = x
+        end
+      end
+    end
+  end
+end
+local function cap_poll()
+  local now = reaper.time_precise()
+  cap_watch(now)
+  reaper.SetExtState(CAPEXT, "hb", string.format("%.3f", now), false)
+  local q = reaper.GetExtState(CAPEXT, "q")
+  if q ~= "" then
+    reaper.SetExtState(CAPEXT, "q", "", false)
+    for line in q:gmatch("[^\n]+") do
+      local ok, err = pcall(cap_event, line)
+      if not ok then msg = "Capture : " .. tostring(err); msg_err = true end
+    end
+  end
+  -- GO recu : on attend que la file d'execution du Launchpad soit videe (ou 1 s de calme), puis on ecrit la ligne
+  if cap.go_t and ((cap.done and now - cap.last_ev > 0.2) or now - cap.last_ev > 1.0) then
+    local ok, err = pcall(cap_finalize)
+    if not ok then msg = "Capture : " .. tostring(err); msg_err = true; cap_reset_line() end
+  end
+end
+
+-- appui long sur le pad Launch du Launchpad : demande de bascule de la capture (ExtState NowUndo_Scn/cmd)
+local function cap_cmd_poll()
+  local c = reaper.GetExtState(CAPEXT, "cmd")
+  if c == "" then return end
+  reaper.SetExtState(CAPEXT, "cmd", "", false)
+  local now = reaper.time_precise()
+  for line in c:gmatch("[^\n]+") do
+    local what, t = line:match("^(%a+)\t([%d%.]+)")
+    if what and t and now - tonumber(t) < 2 then
+      if what == "toggle" then
+        if capturing then cap_stop() else cap_start() end
+      elseif what == "validate" then
+        if capturing then cap_finalize()                -- capture en cours (scenario ou macro) : on valide la ligne / la macro
+        elseif tab == "mac" then cap_start() end        -- onglet MACROS, capture arretee : VALIDER (pad LP) arme la capture macro
+                                                        -- (en onglet SCENARIO la capture s'active par appui long sur Launch : VALIDER n'ouvre rien)
+      elseif what == "prev" then            -- pads du Launchpad : en capture = on choisit ou inserer ; sinon = BACK
+        if capturing then cur = math.max(1, cur - 1); want_visible = true else back() end
+      elseif what == "next" then            -- en capture = pas suivant (sans executer) ; sinon = GO
+        if capturing then cur = math.min(math.max(1, #steps), cur + 1); want_visible = true else go() end
+      end
+    end
+  end
+end
+
+local function tail_fit(s, w)
+  if gfx.measurestr(s) <= w then return s end
+  s = "…" .. s
+  while #s > 4 and gfx.measurestr(s) > w do s = "…" .. s:sub(utf8.offset(s, 3) or 4) end
+  return s
+end
+
+local function cap_panel(W, Hh)
+  local bx, by, bw, bh = 12, Hh - 96, W - 24, 30
+  gfx.set(0.06, 0.02, 0.03, 1); gfx.rect(bx, by, bw, bh)
+  gfx.set(1, 0.3, 0.3, 0.8); gfx.rect(bx, by, bw, bh, 0)
+  gfx.setfont(2, "Arial", 14, 'b')
+  local text = build(copyV(cap.virt))
+  local lbl = cap.macro and "Macro : " or ("Ligne " .. ((#steps == 0) and 1 or (cur + 1)) .. " : ")
+  if text == "" then
+    gfx.set(1, 1, 1, 0.4); text = "en attente : fais tes actions, puis VALIDER (ou GO si Launch)"
+  else gfx.set(1, 1, 1, 0.95) end
+  gfx.x, gfx.y = bx + 8, by + 8
+  gfx.drawstr(tail_fit(lbl .. text, bw - 16))
+  gfx.setfont(2, "Arial", 11)
+  gfx.set(1, 1, 1, 0.5)
+  gfx.x, gfx.y = bx, Hh - 112
+  gfx.drawstr(tail_fit(string.format("recu : %d op Launchpad | %d val Twister | dernier : %s", cap.nop, cap.nval, cap.lastev), bw))
+  gfx.setfont(2, "Arial", 12, 'b')
+  local specs = {
+    { cap.macro and "✔ VALIDER LA MACRO" or "VALIDER (sans GO)", 1.6, 0.15, 0.50, 0.25, function() cap_finalize() end },
+    { "ANNULER LIGNE", 1.3, 0.45, 0.30, 0.10, function() cap_reset_line(); msg = "Ligne annulee."; msg_err = false end },
+    { cap.star and "SYNC * : ON" or "SYNC * : OFF", 1.2, cap.star and 0.15 or 0.20, cap.star and 0.50 or 0.25, cap.star and 0.30 or 0.35, function() cap.star = not cap.star end },
+    { cap.snap and "SNAP : ON" or "SNAP : OFF", 1, 0.20, 0.25, 0.35, function() cap.snap = not cap.snap end },
+  }
+  local total = 0; for _, sp in ipairs(specs) do total = total + sp[2] end
+  local gap = 4
+  local unit = (bw - gap * (#specs - 1)) / total
+  local x = bx
+  for _, sp in ipairs(specs) do
+    local w = math.floor(unit * sp[2])
+    if btn(x, Hh - 62, w, 26, sp[1], sp[3], sp[4], sp[5]) then sp[6]() end
+    x = x + w + gap
+  end
+  if btn(bx, Hh - 32, bw, 26, cap.macro and "ANNULER LA CAPTURE" or "TERMINER LA CAPTURE", 0.45, 0.15, 0.15) then cap_stop() end
+end
+
+
+--------------------------------------------------------------------------
+-- TIMELINE REAPER : des items (vides) nommes S<n> sur une piste lancent le pas n quand la lecture les atteint.
+-- Nom lu dans la NOTE de l'item (item vide), sinon dans le nom du take. Exemples : S1  S18  s3 intro.
+--------------------------------------------------------------------------
+local tl = { on = reaper.GetExtState(EXT, "tl_on") ~= "0", track = tonumber(reaper.GetExtState(EXT, "tl_track")) or 1,
+             items = {}, sc = -1, last_scan = 0, prev = nil, count = {} }
+
+local function tl_item_name(item)
+  local _, notes = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+  local nm = trim(notes or "")
+  if nm == "" then
+    local take = reaper.GetActiveTake(item)
+    if take then nm = trim(reaper.GetTakeName(take) or "") end
+  end
+  return nm
+end
+
+local function tl_scan()
+  local list = {}
+  local nt = reaper.CountTracks(0)
+  local first, last = tl.track, tl.track
+  if tl.track == 0 or tl.track > nt then first, last = 1, (tl.track == 0) and nt or 0 end
+  for t = first, last do
+    local tr = reaper.GetTrack(0, t - 1)
+    if tr then
+      for k = 0, reaper.CountTrackMediaItems(tr) - 1 do
+        local it = reaper.GetTrackMediaItem(tr, k)
+        local d, rest = tl_item_name(it):match("^[sS](%d+)(.*)$")
+        if d and (rest == "" or rest:match("^[^%w]")) then
+          list[#list + 1] = { pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION"), step = tonumber(d) }
+        end
+      end
+    end
+  end
+  table.sort(list, function(a, b) return a.pos < b.pos end)
+  tl.items = list
+end
+
+local function tl_save()
+  reaper.SetExtState(EXT, "tl_on", tl.on and "1" or "0", true)
+  reaper.SetExtState(EXT, "tl_track", tostring(tl.track), true)
+end
+local function toggle_tl()
+  tl.on = not tl.on; tl.prev = nil; tl_save()
+  if tl.on then tl_scan() end
+  msg = tl.on and ("Timeline ON : " .. #tl.items .. " item(s) S<n> sur " .. (tl.track == 0 and "toutes les pistes" or ("la piste " .. tl.track)) .. ".") or "Timeline OFF (inhibee)."
+  msg_err = false
+end
+local function cycle_tl_track()
+  local nt = math.max(1, reaper.CountTracks(0))
+  tl.track = tl.track + 1
+  if tl.track > nt then tl.track = 0 end          -- 0 = toutes les pistes
+  tl.prev = nil; tl_save(); tl_scan()
+  msg = "Timeline : " .. (tl.track == 0 and "toutes les pistes" or ("piste " .. tl.track)) .. "  (" .. #tl.items .. " item(s))"; msg_err = false
+end
+
+-- appelee a chaque image : declenche les pas dont l'item est atteint par la lecture (position du moteur audio, avec
+-- une petite anticipation pour compenser l'image de rafraichissement)
+local function tl_poll()
+  local now = reaper.time_precise()
+  local sc = reaper.GetProjectStateChangeCount(0)
+  if sc ~= tl.sc or now - tl.last_scan > 2 then tl.sc = sc; tl.last_scan = now; tl_scan() end
+  local ps = reaper.GetPlayState()
+  if (ps & 5) == 0 then tl.prev = nil; return end                 -- ni lecture ni enregistrement
+  local pos = reaper.GetPlayPosition2()
+  local LEAD = 0.03
+  if tl.prev == nil then tl.count = {} end                         -- nouvelle lecture : compteurs a zero
+  local jump = (tl.prev == nil) or pos < tl.prev - 1e-6 or pos - tl.prev > 0.5   -- depart, saut, bouclage
+  local lo = jump and (pos - 0.06) or (tl.prev + LEAD)
+  local hi = pos + LEAD
+  tl.prev = pos
+  for _, it in ipairs(tl.items) do
+    if it.pos > hi then break end
+    if it.pos > lo then
+      if it.step >= 1 and it.step <= #steps then
+        cur = it.step; go()
+        tl.count[it.step] = (tl.count[it.step] or 0) + 1
+        msg = string.format("Timeline : S%d lance (x%d, a %.2f s)", it.step, tl.count[it.step], it.pos)
+      else
+        msg = "Timeline : S" .. it.step .. " n'existe pas."; msg_err = true
+      end
+    end
+  end
+end
+tl_scan()
+
+-- "prendre" un pas et le deposer : cree un item VIDE nomme S<n> (1 mesure) sur la piste timeline
+local drag = nil
+local function tl_track_for(dropped)
+  if tl.track > 0 then return reaper.GetTrack(0, tl.track - 1) end      -- piste timeline choisie
+  return dropped or reaper.GetSelectedTrack(0, 0) or reaper.GetTrack(0, 0)
+end
+local function make_item(stepn, pos, track)
+  if not track then msg = "Aucune piste : cree d'abord une piste dans REAPER."; msg_err = true; return end
+  reaper.Undo_BeginBlock()
+  local it = reaper.AddMediaItemToTrack(track)
+  local _, _, cml = reaper.TimeMap2_timeToBeats(0, pos)
+  local len = (cml or 4) * 60 / math.max(20, reaper.TimeMap_GetDividedBpmAtTime(pos))
+  reaper.SetMediaItemInfo_Value(it, "D_POSITION", pos)
+  reaper.SetMediaItemInfo_Value(it, "D_LENGTH", len)
+  reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "S" .. stepn, true)
+  reaper.SetMediaItemInfo_Value(it, "I_CUSTOMCOLOR", reaper.ColorToNative(230, 190, 40) | 0x1000000)
+  reaper.Undo_EndBlock("NowUndo : item S" .. stepn, -1)
+  reaper.UpdateArrange()
+  tl_scan()
+  msg = string.format("Item S%d cree a %.2f s.", stepn, pos); msg_err = false
+end
+-- bouton / touche I : pose le pas selectionne au curseur de lecture (si ca joue) ou d'edition
+local function stamp_step()
+  if not steps[cur] then return end
+  local playing = (reaper.GetPlayState() & 1) == 1
+  local pos = playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+  make_item(cur, pos, tl_track_for(nil))
+end
+-- relache d'un pas glisse HORS de la fenetre : position / piste sous la souris (extension SWS), sinon curseur
+local function drop_step(row)
+  local pos, tr
+  if reaper.APIExists and reaper.APIExists("BR_GetMouseCursorContext") then
+    local window = reaper.BR_GetMouseCursorContext()
+    if window ~= "arrange" then
+      msg = "Relache le pas sur la zone des pistes de REAPER (fenetre des items)."; msg_err = true; return
+    end
+    pos = reaper.BR_PositionAtMouseCursor(false)
+    tr = reaper.BR_GetMouseCursorContext_Track()
+    if pos and pos >= 0 then
+      if reaper.GetToggleCommandState(1157) == 1 then pos = reaper.SnapToGrid(0, pos) end   -- grille magnetique active
+    else pos = nil end
+  end
+  if not pos then
+    local playing = (reaper.GetPlayState() & 1) == 1
+    pos = playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+    msg = "SWS absent : pas pose au curseur."; msg_err = false
+  end
+  make_item(row, pos, tl_track_for(tr))
+end
+
+local function move_to(from, to)
+  if from == to or not steps[from] then return end
+  local st = table.remove(steps, from)
+  table.insert(steps, to, st)
+  if last == from then last = to
+  elseif last > 0 and from < last and to >= last then last = last - 1
+  elseif last > 0 and from > last and to <= last then last = last + 1 end
+  cur = to
+  reparse_all(); want_visible = true
+  msg = "Pas deplace : " .. from .. " -> " .. to .. ((#tl.items > 0) and "  (attention : les items S<n> de la timeline gardent leur numero)" or "")
+  msg_err = false
+end
+
+--------------------------------------------------------------------------
+-- MACROS : chutier de 64 actions individuelles. Meme syntaxe que les pas du scenario, mais SANS cible
+-- (pas de l1/l2... : l'action s'applique au looper ou au groupe selectionne).
+-- Partage avec le Launchpad (page 4, couche "Action macros") par l'ExtState "NowUndo_Macros" :
+--   set = macros + disposition sur le Launchpad ; rev = numero de version (le Launchpad recharge quand il change).
+--------------------------------------------------------------------------
+local MAC_EXT, MAC_MAX = "NowUndo_Macros", 64
+local MDIR = reaper.GetResourcePath() .. "/Data/NowUndo_Macros/"
+local PALETTE = { 0xFF4040, 0xFF9040, 0xFFD320, 0x99FF66, 0x30E060, 0x40D0D0, 0x66CCFF, 0x3A7BFF, 0x9933FF, 0xE040FF, 0xFF66AA, 0xDDDDDD }
+local macros, layout, mac_next_id = {}, {}, 1
+local msel, mcur, manchor, mscroll, mwant = {}, 0, 0, 0, true     -- selection (ids), curseur (id), ancre (id)
+local last_export = "macros.txt"
+local mac_last_click_t, mac_last_click_id, mac_alive_t = 0, nil, 0
+local OSX = ((reaper.GetOS and reaper.GetOS()) or ""):find("OSX") ~= nil
+
+local function mac_find(id)
+  for i, m in ipairs(macros) do if m.id == id then return m, i end end
+end
+local function mac_clean(s)
+  s = (s or ""):gsub("[\t\r\n]+", " ")
+  return trim(s)
+end
+local mac_my_rev = ""                                  -- derniere version ecrite par ce script (autre = modifie ailleurs, ex. Ctrl+clic sur le Launchpad)
+local function mac_label(m)                            -- libelle affiche : le nom, sinon l'action elle-meme (jamais "Macro 3")
+  local n = m.name or ""
+  if n == "" or n:match("^Macro %d+$") then return m.text end
+  return n
+end
+local function mac_check(m)
+  if trim(m.text) == "" then m.err = "macro vide"; return end
+  local _, errs = compile(m.text, { 1 }, m.toggle)
+  m.err = errs[1]
+end
+local function mac_serialize()
+  local t = { "NOWUNDO_MACROS 1" }
+  for _, m in ipairs(macros) do
+    t[#t + 1] = table.concat({ "M", m.id, m.color, m.name, m.text, m.toggle and 1 or 0, m.all and 1 or 0, m.gate and 1 or 0 }, "\t")
+  end
+  local cells = {}
+  for c in pairs(layout) do cells[#cells + 1] = c end
+  table.sort(cells)
+  for _, c in ipairs(cells) do t[#t + 1] = "L\t" .. c .. "\t" .. layout[c] end
+  return table.concat(t, "\n")
+end
+local function mac_deserialize(txt)
+  local list, lay, seen = {}, {}, {}
+  for line in (txt or ""):gmatch("[^\r\n]+") do
+    local f = {}
+    for w in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = w end
+    if f[1] == "M" and tonumber(f[2]) and #list < MAC_MAX then
+      local id = math.floor(tonumber(f[2]))
+      if not seen[id] then
+        seen[id] = true
+        list[#list + 1] = { id = id, color = math.floor(tonumber(f[3]) or 0xAAAAAA), name = f[4] or "", text = f[5] or "", toggle = (f[6] == "1"), all = (f[7] == "1"), gate = (f[8] == "1") }
+      end
+    elseif f[1] == "L" and tonumber(f[2]) and tonumber(f[3]) then
+      lay[math.floor(tonumber(f[2]))] = math.floor(tonumber(f[3]))
+    end
+  end
+  for c, id in pairs(lay) do                       -- disposition : seulement des macros existantes, 64 cases
+    if c < 1 or c > 64 or not seen[id] then lay[c] = nil end
+  end
+  return list, lay
+end
+local function mac_apply(list, lay)
+  macros, layout, mac_next_id = list, lay, 1
+  for _, m in ipairs(macros) do
+    if m.id >= mac_next_id then mac_next_id = m.id + 1 end
+    mac_check(m)
+  end
+  msel, mcur, manchor = {}, 0, 0
+end
+local function mac_save()
+  local txt = mac_serialize()
+  reaper.SetExtState(MAC_EXT, "set", txt, true)
+  mac_my_rev = string.format("%.4f", reaper.time_precise())
+  reaper.SetExtState(MAC_EXT, "rev", mac_my_rev, false)
+  reaper.RecursiveCreateDirectory(MDIR, 0)         -- copie de secours a cote des exports
+  local f = io.open(MDIR .. "_autosave.txt", "w")
+  if f then f:write(txt); f:close() end
+end
+do                                                  -- chargement au demarrage
+  local txt = reaper.GetExtState(MAC_EXT, "set")
+  if txt == "" then
+    local f = io.open(MDIR .. "_autosave.txt", "r")
+    if f then txt = f:read("*a") or ""; f:close() end
+  end
+  local list, lay = mac_deserialize(txt)
+  mac_apply(list, lay)
+  mac_save()                                        -- publie tout de suite pour le Launchpad
+end
+mac_count = function() return #macros end
+
+local function sel_ids()
+  local t = {}
+  for _, m in ipairs(macros) do if msel[m.id] then t[#t + 1] = m end end
+  return t
+end
+local function sel_count() local n = 0; for _ in pairs(msel) do n = n + 1 end; return n end
+local function lp_count() local n = 0; for _ in pairs(layout) do n = n + 1 end; return n end
+local function lp_cell_of(id) for c, i in pairs(layout) do if i == id then return c end end end
+local function lp_name(c) return string.format("%d.%d", math.ceil(c / 8), (c - 1) % 8 + 1) end
+
+-- pose des macros sur le Launchpad : a la suite, dans les premieres cases libres (rien n'est ecrase)
+local function lp_place(ms)
+  local placed, already, full = 0, 0, false
+  for _, m in ipairs(ms) do
+    if lp_cell_of(m.id) then already = already + 1
+    else
+      local c = 1
+      while c <= 64 and layout[c] do c = c + 1 end
+      if c > 64 then full = true; break end
+      layout[c] = m.id; placed = placed + 1
+    end
+  end
+  if placed > 0 then mac_save() end
+  msg = placed .. " macro(s) posee(s) sur le Launchpad"
+        .. (already > 0 and ("  (" .. already .. " deja presente(s))") or "")
+        .. (full and "  -  Launchpad plein (64 pads)" or "")
+  msg_err = full
+end
+local function lp_remove(ms)
+  local n = 0
+  for _, m in ipairs(ms) do
+    for c, id in pairs(layout) do if id == m.id then layout[c] = nil; n = n + 1 end end
+  end
+  if n > 0 then mac_save() end
+  msg = n .. " pad(s) retire(s) du Launchpad."; msg_err = false
+end
+
+local function mac_add(text, name, color)
+  if #macros >= MAC_MAX then msg = "64 macros maximum : supprime-en une d'abord."; msg_err = true; return nil end
+  local id = mac_next_id; mac_next_id = id + 1
+  local nm = mac_clean(name)
+  local txt = (text or ""):gsub(";", ",")
+  local m = { id = id, name = nm, color = color or PALETTE[(id - 1) % #PALETTE + 1], text = mac_clean(txt) }
+  mac_check(m)
+  macros[#macros + 1] = m
+  msel = { [id] = true }; mcur = id; manchor = id; mwant = true
+  mac_save()
+  return m
+end
+
+local function mac_edit()
+  local m = mac_find(mcur)
+  if not m then msg = "Selectionne une macro."; msg_err = true; return end
+  local ok, ret = reaper.GetUserInputs("Modifier la macro", 1, "Syntaxe (sans looper) :,extrawidth=520", ui_in(m.text))
+  if ok then
+    m.text = mac_clean((ui_out(ret)):gsub(";", ","))
+    mac_check(m); mac_save()
+    msg = m.err and ("Macro invalide : " .. m.err) or "Macro modifiee."; msg_err = m.err ~= nil
+  end
+end
+local function mac_rename()
+  local m = mac_find(mcur)
+  if not m then msg = "Selectionne une macro."; msg_err = true; return end
+  local ok, ret = reaper.GetUserInputs("Nommer la macro", 1, "Nom (vide = afficher l'action) :,extrawidth=240", m.name)
+  if ok then m.name = mac_clean(ret); mac_save(); msg = (m.name == "") and "Nom efface : le pad affichera l'action." or "Macro renommee."; msg_err = false end
+end
+local function mac_new()
+  if #macros >= MAC_MAX then msg = "64 macros maximum."; msg_err = true; return end
+  local ok, ret = reaper.GetUserInputs("Nouvelle macro", 1, "Syntaxe (sans looper) :,extrawidth=520", "")
+  if not ok or trim(ret) == "" then return end
+  local ok2, nm = reaper.GetUserInputs("Nom de la macro", 1, "Nom (vide = afficher l'action) :,extrawidth=240", "")
+  local m = mac_add(ret, ok2 and nm or "", nil)
+  if m then msg = m.err and ("Macro creee mais invalide : " .. m.err) or ("Macro creee : " .. mac_label(m)); msg_err = m.err ~= nil end
+end
+local function mac_recolor()
+  local ms = sel_ids()
+  if #ms == 0 then msg = "Selectionne une macro."; msg_err = true; return end
+  local ok, res, col = pcall(reaper.GR_SelectColor)
+  if ok and res ~= 0 and col then
+    local r, g, b = reaper.ColorFromNative(col)
+    local hex = (r << 16) | (g << 8) | b
+    for _, m in ipairs(ms) do m.color = hex end
+    mac_save()
+  end
+end
+local function mac_delete()
+  local ms = sel_ids()
+  if #ms == 0 then return end
+  if #ms > 1 and reaper.MB("Supprimer " .. #ms .. " macros ?", "NowUndo - macros", 4) ~= 6 then return end
+  local rm = {}
+  for _, m in ipairs(ms) do rm[m.id] = true end
+  local keep = {}
+  for _, m in ipairs(macros) do if not rm[m.id] then keep[#keep + 1] = m end end
+  macros = keep
+  for c, id in pairs(layout) do if rm[id] then layout[c] = nil end end
+  msel, mcur, manchor = {}, 0, 0
+  mac_save()
+  msg = #ms .. " macro(s) supprimee(s)."; msg_err = false
+end
+local function mac_move(d)                           -- decale la selection d'un cran (les blocs se deplacent ensemble)
+  local n = #macros
+  if d < 0 then
+    for i = 2, n do
+      if msel[macros[i].id] and not msel[macros[i - 1].id] then macros[i], macros[i - 1] = macros[i - 1], macros[i] end
+    end
+  else
+    for i = n - 1, 1, -1 do
+      if msel[macros[i].id] and not msel[macros[i + 1].id] then macros[i], macros[i + 1] = macros[i + 1], macros[i] end
+    end
+  end
+  mwant = true; mac_save()
+end
+local function mac_move_sel(set, to_idx)            -- glisser-deposer : la selection va a la place de la macro visee
+  local target = macros[to_idx]
+  if not target or set[target.id] then return end
+  local moving, rest, first = {}, {}, nil
+  for i, m in ipairs(macros) do
+    if set[m.id] then moving[#moving + 1] = m; first = first or i else rest[#rest + 1] = m end
+  end
+  local pos = 0
+  for i, m in ipairs(rest) do if m == target then pos = i; break end end
+  local ins = (to_idx > first) and (pos + 1) or pos
+  for k, m in ipairs(moving) do table.insert(rest, ins + k - 1, m) end
+  macros = rest
+  mac_save()
+end
+
+-- cibles d'un essai depuis cette fenetre : looper / groupe selectionne sur le Launchpad (ExtState publie par le coeur VL)
+local function sel_targets()
+  local sl = math.floor(tonumber(reaper.GetExtState("nowundo_vl", "sel_looper")) or 1)
+  local sg = math.floor(tonumber(reaper.GetExtState("nowundo_vl", "sel_group")) or 0)
+  if sg > 0 then
+    local t = {}
+    for i = 1, NLOOP do if rd(6000 + i) == sg then t[#t + 1] = i end end    -- gmem 6000+i = groupe du looper i (publie par le Launchpad)
+    if #t > 0 then return t end
+  end
+  return { math.max(1, math.min(NLOOP, sl)) }
+end
+
+local function run_macro(m, targets)
+  if m.err then msg = "Macro '" .. mac_label(m) .. "' invalide : " .. m.err; msg_err = true; return end
+  reaper.gmem_attach(GMEM)
+  if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end       -- mode ALL : action collective sur les 8 loopers
+  local items = compile(m.text, targets, m.toggle)
+  grp_counter = grp_counter + 1
+  local t0 = reaper.time_precise()
+  local dead, seen, nsync, nglob = {}, {}, 0, 0
+  for _, it in ipairs(items) do
+    if it.glob then
+      fire_glob(it); nglob = nglob + 1
+    elseif rd(100 + it.i - 1) > 0 then
+      Q[it.i][#Q[it.i] + 1] = { ch = it.ch, f = it.f, t0 = t0, sync = it.sync, grp = grp_counter }
+      if it.sync then nsync = nsync + 1 end
+    elseif not it.all and not m.all and not seen[it.i] then seen[it.i] = true; dead[#dead + 1] = "L" .. it.i end   -- ALL : les loopers absents sont ignores
+  end
+  local tl_ = {}
+  for _, i in ipairs(targets) do tl_[#tl_ + 1] = "L" .. i end
+  msg = "Macro '" .. mac_label(m) .. "' -> " .. (m.all and "ALL" or table.concat(tl_, ",")) .. (m.toggle and " [toggle]" or "") .. (m.gate and " [gate]" or "")
+        .. (#dead > 0 and ("  (looper absent : " .. table.concat(dead, ",") .. ")") or "")
+        .. (nsync > 0 and ("  -  " .. nsync .. " action(s) * en attente du point de synchro") or "")
+        .. (nglob > 0 and ("  -  " .. nglob .. " commande(s) envoyee(s) au Launchpad") or "")
+  msg_err = #dead > 0
+end
+local function mac_test()
+  local ms = sel_ids()
+  if #ms == 0 then msg = "Selectionne une macro a tester."; msg_err = true; return end
+  local tg = sel_targets()
+  for _, m in ipairs(ms) do run_macro(m, tg) end
+end
+
+-- etat ON/OFF d'une macro TOGGLE (pour allumer son pad sur le Launchpad) : on regarde la 1re action de la macro
+-- sur le(s) looper(s) cible(s) ; ON = tous les loopers cibles sont dans l'etat "enregistre" (rev actif, in = valeur, ...)
+local PROBE = {
+  rec = function(F) return F.rec end, replace = function(F) return F.st == 4 end, autorep = function(F) return F.st == 5 end,
+  multiply = function(F) return F.st == 6 end, rev = function(F) return F.rev end, pp = function(F) return F.pp end,
+  slicer = function(F) return F.slicer end, cloud = function(F) return F.cloud end, link = function(F) return F.link end,
+  auto = function(F) return F.auto end, oneshot = function(F) return F.oneshot end, br = function(F) return F.br end, play = function(F) return F.playing end,
+}
+local function mac_active(m, targets)
+  if not m.toggle or m.err then return false end
+  local s = m.text:lower():gsub("à", " "):gsub("[=:]", " ")
+  local act = s:match("^[^,]*") or ""
+  local t = {}
+  for w in act:gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
+  if #t == 0 then return false end
+  local key = split_key(t[1]:match("[^/]+") or "")
+  if not key then return false end
+  local x, kind = nil, nil
+  if t[2] then x, kind = num(t[2]) end
+  local any = false
+  if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end
+  for _, i in ipairs(targets) do
+    local F = fb(i)
+    if F.alive then
+      any = true
+      local ok
+      if PROBE[key] then ok = PROBE[key](F)
+      elseif (key == "in" or key == "out") and x and F.len > 0 then
+        local cur = (key == "in") and (F.lstart / F.len) or ((F.lstart + F.lwidth) / F.len)
+        ok = math.abs(cur - x) <= 0.004
+      elseif VPID and VPID[key] and x then
+        if key == "vol" and kind == "db" then x = 10 ^ (x / 20) end
+        local cur = rd(F.b + VPID[key])
+        if key == "speed" and cur <= 0 then cur = 1 end
+        ok = math.abs(cur - x) <= 1e-3 + 0.003 * math.max(math.abs(cur), math.abs(x))
+      else return false end
+      if not ok then return false end
+    end
+  end
+  return any
+end
+local mac_on_t, mac_on_s = 0, nil
+
+-- declenchements venant du Launchpad (ExtState NowUndo_Scn/mcr : id<TAB>cibles<TAB>temps) + heartbeat "alive"
+local function mac_poll()
+  local t = reaper.time_precise()
+  if t - mac_on_t > 0.12 then                                      -- pads toggle du Launchpad : ON = plein feu, OFF = attenue
+    mac_on_t = t
+    local tg, ids = sel_targets(), {}
+    for _, m in ipairs(macros) do if m.toggle and mac_active(m, tg) then ids[#ids + 1] = m.id end end
+    local s = table.concat(ids, ",")
+    if s ~= mac_on_s then mac_on_s = s; reaper.SetExtState(MAC_EXT, "on", s, false) end
+  end
+  if t - mac_alive_t > 0.3 then
+    mac_alive_t = t
+    reaper.SetExtState(CAPEXT, "alive", string.format("%.3f", t), false)
+  end
+  if reaper.GetExtState(MAC_EXT, "rev") ~= mac_my_rev then       -- modifie ailleurs (Ctrl+clic sur un pad du Launchpad)
+    local list, lay = mac_deserialize(reaper.GetExtState(MAC_EXT, "set"))
+    macros, layout = list, lay
+    mac_next_id = 1
+    for _, m in ipairs(macros) do
+      if m.id >= mac_next_id then mac_next_id = m.id + 1 end
+      mac_check(m)
+    end
+    for id in pairs(msel) do if not mac_find(id) then msel[id] = nil end end
+    if not mac_find(mcur) then mcur = 0 end
+    mac_my_rev = reaper.GetExtState(MAC_EXT, "rev")
+  end
+  local q = reaper.GetExtState(CAPEXT, "mcr")
+  if q == "" then return end
+  reaper.SetExtState(CAPEXT, "mcr", "", false)
+  for line in q:gmatch("[^\n]+") do
+    local id, tg, ts = line:match("^(%d+)\t([%d,]*)\t([%d%.]+)")
+    if id and t - tonumber(ts) < 2 then
+      local m = mac_find(tonumber(id))
+      if m then
+        local targets = {}
+        for n in tg:gmatch("%d+") do
+          local k = tonumber(n)
+          if k >= 1 and k <= NLOOP then targets[#targets + 1] = k end
+        end
+        if #targets > 0 then run_macro(m, targets) end
+      end
+    end
+  end
+end
+
+mac_from_capture = function(text)                    -- capture et validation = un seul bouton : une capture = une macro
+  local m = mac_add(text, "", nil)
+  cap_stop()
+  if m then msg = "Macro enregistree : " .. text; msg_err = false end
+end
+
+local function mac_capture_toggle()
+  if capturing then
+    if cap.macro then cap_finalize() else cap_stop() end
+  else
+    cap_start()
+  end
+end
+
+local function mac_export()
+  local ok, name = reaper.GetUserInputs("Exporter les macros", 1, "Nom du fichier :,extrawidth=200", last_export)
+  if not ok or trim(name) == "" then return end
+  name = trim(name):gsub("[\\/:*?\"<>|]", "_")
+  if not name:match("%.%w+$") then name = name .. ".txt" end
+  reaper.RecursiveCreateDirectory(MDIR, 0)
+  local f = io.open(MDIR .. name, "w")
+  if not f then msg = "Ecriture impossible : " .. MDIR .. name; msg_err = true; return end
+  f:write(mac_serialize(), "\n"); f:close()
+  last_export = name
+  msg = "Exporte : " .. name .. "  (" .. #macros .. " macros + disposition Launchpad)"; msg_err = false
+end
+local function mac_import()
+  reaper.RecursiveCreateDirectory(MDIR, 0)
+  local ok, file = reaper.GetUserFileNameForRead(MDIR .. last_export, "Importer des macros", ".txt")
+  if not ok then return end
+  local f = io.open(file, "r")
+  if not f then msg = "Lecture impossible"; msg_err = true; return end
+  local txt = f:read("*a"); f:close()
+  local list, lay = mac_deserialize(txt)
+  if #list == 0 then msg = "Aucune macro dans ce fichier."; msg_err = true; return end
+  if #macros > 0 and reaper.MB("Remplacer les " .. #macros .. " macros actuelles (et leur disposition) par les " .. #list .. " du fichier ?", "NowUndo - macros", 4) ~= 6 then return end
+  mac_apply(list, lay); mac_save()
+  last_export = file:match("([^/\\]+)$") or last_export
+  msg = "Importe : " .. last_export .. "  (" .. #list .. " macros)"; msg_err = false
+end
+
+local function mac_status()
+  return string.format("%d/%d macros | %d sur le LP%s", #macros, MAC_MAX, lp_count(), msel and (sel_count() > 0 and (" | " .. sel_count() .. " sel.") or "") or "")
+end
+local function set_tab(t)
+  if capturing then msg = "Termine la capture avant de changer d'onglet."; msg_err = true; return end
+  tab = t; drag = nil; show_help = false
+end
+
+-- glisser des macros hors de la fenetre : sur le Launchpad. Si l'extension JS_ReaScriptAPI est installee,
+-- on verifie que le curseur est bien au-dessus d'une fenetre "Virtual Launchpad" ; sinon n'importe quel endroit hors de cette fenetre.
+local function drag_macros(d)
+  if msel[d.id] then return sel_ids() end
+  local m = mac_find(d.id)
+  return m and { m } or {}
+end
+local function mac_drop_outside(d)
+  -- le depot est confie au Launchpad : on lui envoie les macros + la position ECRAN du curseur ; il les pose sur la case
+  -- relachee (ou a la suite si le curseur est sur sa fenetre mais pas sur un pad ; rien si le curseur est hors de sa fenetre)
+  local ms = drag_macros(d)
+  if #ms == 0 then return end
+  local ids = {}
+  for _, m in ipairs(ms) do ids[#ids + 1] = tostring(m.id) end
+  local x, y = reaper.GetMousePosition()
+  reaper.SetExtState(MAC_EXT, "drop", string.format("%s\t%d\t%d\t%.3f", table.concat(ids, ","), x, y, reaper.time_precise()), false)
+  msg = #ms .. " macro(s) deposee(s) sur le Launchpad (case sous le curseur)."; msg_err = false
+end
+
+local function mac_key(c)
+  if c == 63 or c == 104 or c == 72 then show_help = true; help_scroll = 0; return end
+  if c == 99 or c == 67 then mac_capture_toggle(); return end
+  if capturing then
+    if c == 13 then cap_finalize()
+    elseif c == 8 then cap_reset_line(); msg = "Ligne annulee."; msg_err = false end
+    return
+  end
+  if c == 6579564 or c == 127 or c == 8 then mac_delete()                 -- Suppr / Delete / Retour arriere (Mac) : supprime la selection
+  elseif c == 13 or c == 32 then mac_test()
+  elseif c == 101 or c == 69 then mac_edit()
+  elseif c == 110 or c == 78 then mac_rename()
+  elseif c == 103 or c == 71 then                                          -- G : mode GATE de la selection
+    local ms = sel_ids()
+    if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true
+    else
+      local nv = not ms[1].gate
+      for _, o in ipairs(ms) do o.gate = nv end
+      mac_save(); msg = nv and "Mode GATE actif (appui/relachement sur le Launchpad)." or "Mode GATE retire."; msg_err = false
+    end
+  elseif c == 97 or c == 65 then                                           -- A : mode ALL de la selection
+    local ms = sel_ids()
+    if #ms > 0 then
+      local nv = not ms[1].all
+      for _, o in ipairs(ms) do o.all = nv end
+      mac_save(); msg = nv and "Mode ALL actif (8 loopers)." or "Mode ALL retire."; msg_err = false
+    end
+  elseif c == 116 or c == 84 then                                          -- T : mode toggle de la selection
+    local ms = sel_ids()
+    if #ms > 0 then
+      local nv = not ms[1].toggle
+      for _, o in ipairs(ms) do o.toggle = nv; mac_check(o) end
+      mac_save(); msg = nv and "Mode TOGGLE actif." or "Mode TOGGLE retire."; msg_err = false
+    end
+  elseif c == 1 then for _, m in ipairs(macros) do msel[m.id] = true end   -- Ctrl+A
+  elseif c == 30064 or c == 1685026670 then
+    local _, i = mac_find(mcur)
+    i = i or 0
+    local ni = math.max(1, math.min(#macros, i + (c == 30064 and -1 or 1)))
+    if macros[ni] then
+      local id = macros[ni].id
+      if (gfx.mouse_cap & 8) ~= 0 then
+        local _, a = mac_find(manchor); a = a or ni
+        msel = {}
+        for k = math.min(a, ni), math.max(a, ni) do msel[macros[k].id] = true end
+      else msel = { [id] = true }; manchor = id end
+      mcur = id; mwant = true
+    end
+  end
+end
+
+local MPC = 32                                         -- macros par colonne : la 33e repart en haut de la 2e colonne
+local mflash = {}
+local function mac_draw(W, Hh, down)
+  local list_h = Hh - LIST_Y - 134
+  local rows = math.max(1, math.min(MPC, math.floor(list_h / RH)))
+  local cw = math.floor((W - 24 - 6) / 2)
+  local function colx(c) return 12 + c * (cw + 6) end
+  local function idx_at(px, py)                        -- macro sous la souris (liste a 2 colonnes)
+    if py < LIST_Y or py >= LIST_Y + rows * RH then return nil end
+    local c
+    if px >= colx(0) and px < colx(0) + cw then c = 0 elseif px >= colx(1) and px < colx(1) + cw then c = 1 else return nil end
+    local i = c * MPC + mscroll + math.floor((py - LIST_Y) / RH) + 1
+    return macros[i] and i or nil
+  end
+  local _, ci = mac_find(mcur)
+  if mwant then
+    if ci then
+      local r = (ci - 1) % MPC + 1
+      if r - 1 < mscroll then mscroll = r - 1 end
+      if r > mscroll + rows then mscroll = r - rows end
+    end
+    mwant = false
+  end
+  local wheel = gfx.mouse_wheel
+  if wheel ~= 0 and not show_help then
+    mscroll = mscroll - (wheel > 0 and 1 or -1) * 2
+    gfx.mouse_wheel = 0
+  end
+  mscroll = math.max(0, math.min(math.max(0, math.min(MPC, #macros) - rows), mscroll))
+  local cap_mod = gfx.mouse_cap
+  local ctrl = (cap_mod & 4) ~= 0 or (OSX and (cap_mod & 32) ~= 0)
+  local shift = (cap_mod & 8) ~= 0
+
+  gfx.set(0.10, 0.03, 0.04, 1)
+  gfx.rect(colx(0), LIST_Y, cw, rows * RH); gfx.rect(colx(1), LIST_Y, cw, rows * RH)
+  if #macros == 0 then
+    gfx.setfont(2, "Arial", 13); gfx.set(1, 1, 1, 0.45)
+    gfx.x, gfx.y = 24, LIST_Y + 10
+    gfx.drawstr("Aucune macro : ● CAPTURE (fais l'action puis VALIDER) ou ADD (ecris la syntaxe, sans looper).")
+  end
+  local now_t = reaper.time_precise()
+  for c = 0, 1 do
+    local x0 = colx(c)
+    for r = 1, rows do
+      local i = c * MPC + mscroll + r
+      local m = macros[i]
+      if m then
+        local y = LIST_Y + (r - 1) * RH
+        if msel[m.id] then gfx.set(0.40, 0.28, 0.08, 1); gfx.rect(x0, y, cw, RH)
+        elseif r % 2 == 0 then gfx.set(0.13, 0.05, 0.06, 1); gfx.rect(x0, y, cw, RH) end
+        if m.id == mcur then gfx.set(0.9, 0.8, 0.2, 0.9); gfx.rect(x0, y, cw, RH, 0) end
+        gfx.setfont(2, "Arial", 12)
+        gfx.set(1, 1, 1, 0.55); gfx.x, gfx.y = x0 + 4, y + 5
+        gfx.drawstr(string.format("%02d", i))
+        gfx.set(((m.color >> 16) & 255) / 255, ((m.color >> 8) & 255) / 255, (m.color & 255) / 255, 1)
+        gfx.rect(x0 + 26, y + 3, 14, RH - 6)
+        gfx.set(1, 1, 1, 0.35); gfx.rect(x0 + 26, y + 3, 14, RH - 6, 0)
+        if m.toggle then gfx.set(0.10, 0.60, 0.70, 1) else gfx.set(0.20, 0.20, 0.25, 1) end
+        gfx.rect(x0 + 44, y + 3, 18, RH - 6)
+        gfx.set(1, 1, 1, 0.30); gfx.rect(x0 + 44, y + 3, 18, RH - 6, 0)
+        gfx.setfont(2, "Arial", 12, 'b')
+        if m.toggle then gfx.set(1, 1, 1, 1) else gfx.set(1, 1, 1, 0.35) end
+        gfx.x, gfx.y = x0 + 49, y + 5; gfx.drawstr("T")
+        if m.gate then gfx.set(0.55, 0.30, 0.70, 1) else gfx.set(0.20, 0.20, 0.25, 1) end      -- case G : mode GATE (appui/relachement)
+        gfx.rect(x0 + 64, y + 3, 18, RH - 6)
+        gfx.set(1, 1, 1, 0.30); gfx.rect(x0 + 64, y + 3, 18, RH - 6, 0)
+        gfx.setfont(2, "Arial", 12, 'b')
+        if m.gate then gfx.set(1, 1, 1, 1) else gfx.set(1, 1, 1, 0.35) end
+        gfx.x, gfx.y = x0 + 69, y + 5; gfx.drawstr("G")
+        if m.all then gfx.set(0.75, 0.45, 0.10, 1) else gfx.set(0.20, 0.20, 0.25, 1) end      -- case A : mode ALL (les 8 loopers)
+        gfx.rect(x0 + 84, y + 3, 18, RH - 6)
+        gfx.set(1, 1, 1, 0.30); gfx.rect(x0 + 84, y + 3, 18, RH - 6, 0)
+        gfx.setfont(2, "Arial", 12, 'b')
+        if m.all then gfx.set(1, 1, 1, 1) else gfx.set(1, 1, 1, 0.35) end
+        gfx.x, gfx.y = x0 + 89, y + 5; gfx.drawstr("A")
+        -- triangle de lecture : lance cette macro sur le looper / groupe selectionne
+        local px = x0 + 106
+        local hov = mx >= px and mx < px + 20 and my >= y and my < y + RH
+        local fl = (mflash[m.id] or 0) > now_t
+        if fl then gfx.set(0.35, 0.85, 0.45, 1) elseif hov then gfx.set(0.20, 0.60, 0.30, 1) else gfx.set(0.14, 0.34, 0.20, 1) end
+        gfx.rect(px, y + 3, 20, RH - 6)
+        gfx.set(1, 1, 1, fl and 1 or 0.9)
+        gfx.triangle(px + 6, y + 6, px + 6, y + RH - 6, px + 15, y + RH / 2)
+        -- nom (la macro porte son propre label) ; erreur = rouge
+        gfx.setfont(2, "Arial", 13, 'b')
+        if m.err then gfx.set(1, 0.35, 0.35, 1)
+        elseif (m.name or "") == "" or m.name:match("^Macro %d+$") then gfx.set(1, 1, 1, 0.65) else gfx.set(1, 1, 1, 0.97) end
+        gfx.x, gfx.y = x0 + 132, y + 5
+        gfx.drawstr(fit(mac_label(m), cw - 132 - 84))
+        -- case de destination sur le Launchpad (ex. 3.5) a la place de l'ancien label secondaire
+        local lc = lp_cell_of(m.id)
+        if lc then
+          gfx.setfont(2, "Arial", 11, 'b'); gfx.set(0.4, 0.9, 1, 1)
+          gfx.x, gfx.y = x0 + cw - 82, y + 6
+          gfx.drawstr("LP " .. lp_name(lc))
+        end
+        -- suppression de cette macro
+        local dx = x0 + cw - 20
+        local dh = mx >= dx and mx < dx + 16 and my >= y and my < y + RH
+        gfx.setfont(2, "Arial", 14, 'b')
+        if dh then gfx.set(1, 0.4, 0.4, 1) else gfx.set(1, 1, 1, 0.35) end
+        gfx.x, gfx.y = dx + 3, y + 4; gfx.drawstr("×")
+
+        if click and mx >= x0 and mx < x0 + cw and my >= y and my < y + RH then
+          local t = reaper.time_precise()
+          if mx >= x0 + 26 and mx < x0 + 40 then                         -- pastille : couleur suivante de la palette
+            local k = 0
+            for q, col in ipairs(PALETTE) do if col == m.color then k = q end end
+            m.color = PALETTE[k % #PALETTE + 1]; mac_save()
+          elseif mx >= x0 + 44 and mx < x0 + 62 then                     -- case T : mode toggle (toute la selection si la macro en fait partie)
+            local nv = not m.toggle
+            if msel[m.id] then for _, o in ipairs(sel_ids()) do o.toggle = nv; mac_check(o) end else m.toggle = nv; mac_check(m) end
+            mac_save()
+            msg = nv and "Mode TOGGLE : on/off s'inversent, les valeurs basculent enregistree <-> defaut." or "Mode TOGGLE retire."; msg_err = false
+          elseif mx >= x0 + 64 and mx < x0 + 82 then                     -- case G : mode GATE
+            local nv = not m.gate
+            if msel[m.id] then for _, o in ipairs(sel_ids()) do o.gate = nv end else m.gate = nv end
+            mac_save()
+            msg = nv and "Mode GATE : le pad Launchpad active a l'appui et desactive au relachement." or "Mode GATE retire."; msg_err = false
+          elseif mx >= x0 + 84 and mx < x0 + 102 then                    -- case A : mode ALL
+            local nv = not m.all
+            if msel[m.id] then for _, o in ipairs(sel_ids()) do o.all = nv end else m.all = nv end
+            mac_save()
+            msg = nv and "Mode ALL : la macro s'applique aux 8 loopers, pas seulement au looper selectionne." or "Mode ALL retire."; msg_err = false
+          elseif mx >= px and mx < px + 20 then                          -- ▶ : lecture de CETTE macro
+            mflash[m.id] = now_t + 0.25
+            mcur = m.id
+            run_macro(m, sel_targets())
+          elseif mx >= dx and mx < dx + 16 then                          -- × : supprimer cette macro
+            if reaper.MB("Supprimer la macro '" .. mac_label(m) .. "' ?", "NowUndo - macros", 4) == 6 then
+              msel = { [m.id] = true }; mcur = m.id; mac_delete()
+            end
+          elseif mac_last_click_id == m.id and t - mac_last_click_t < 0.35 then
+            mcur = m.id; msel = { [m.id] = true }; drag = nil; mac_edit()
+          else
+            if shift then
+              local _, a = mac_find(manchor); a = a or i
+              if not ctrl then msel = {} end
+              for k = math.min(a, i), math.max(a, i) do msel[macros[k].id] = true end
+              mcur = m.id
+            elseif ctrl then
+              if msel[m.id] then msel[m.id] = nil else msel[m.id] = true end
+              mcur = m.id; manchor = m.id
+            else
+              local collapse = msel[m.id] and sel_count() > 1
+              if not msel[m.id] then msel = { [m.id] = true } end       -- une selection multiple se garde pour pouvoir la glisser
+              mcur = m.id; manchor = m.id
+              if not capturing then
+                drag = { kind = "mac", id = m.id, x = mx, y = my, active = false, collapse = collapse, label = mac_label(m) }
+              elseif collapse then msel = { [m.id] = true } end
+            end
+          end
+          mac_last_click_id, mac_last_click_t = m.id, t
+        end
+      end
+    end
+  end
+
+  -- glisser : hors fenetre = vers le Launchpad ; sur une autre macro = reordonner
+  local over = nil
+  if drag and drag.kind == "mac" then
+    if down then
+      if not drag.active and (math.abs(mx - drag.x) + math.abs(my - drag.y)) > 10 then
+        drag.active = true
+        local n = msel[drag.id] and sel_count() or 1
+        drag.label = n > 1 and (drag.label .. "  +" .. (n - 1)) or drag.label
+        msg = "Relache sur le Launchpad (hors de cette fenetre) ou sur une autre macro pour reordonner."; msg_err = false
+      end
+      if drag.active then over = idx_at(mx, my) end
+    else
+      if drag.active then
+        if mx < 0 or my < 0 or mx > W or my > Hh then mac_drop_outside(drag)
+        else
+          local to = idx_at(mx, my)
+          if to then
+            local set = {}
+            for _, m in ipairs(drag_macros(drag)) do set[m.id] = true end
+            if next(set) then mac_move_sel(set, to) end
+          end
+        end
+      elseif drag.collapse then msel = { [drag.id] = true } end
+      drag = nil
+    end
+  end
+  if over then
+    local oc, orow = math.floor((over - 1) / MPC), (over - 1) % MPC - mscroll
+    gfx.set(1, 1, 1, 0.9); gfx.rect(colx(oc), LIST_Y + orow * RH, cw, RH, 0)
+  end
+
+  -- message
+  local my0 = Hh - 128
+  gfx.setfont(2, "Arial", 12)
+  if msg_err then gfx.set(1, 0.4, 0.4, 1) else gfx.set(0.6, 0.9, 0.6, 1) end
+  gfx.x, gfx.y = 14, my0
+  gfx.drawstr(fit(msg, W - 28))
+  local cm = mac_find(mcur)
+  if cm and cm.err then
+    gfx.set(1, 0.4, 0.4, 1); gfx.x, gfx.y = 14, my0 + 16
+    gfx.drawstr(fit("Macro '" .. mac_label(cm) .. "' : " .. cm.err, W - 28))
+  elseif cm then
+    gfx.set(1, 1, 1, 0.55); gfx.x, gfx.y = 14, my0 + 16
+    gfx.drawstr(fit("Action : " .. cm.text .. (cm.toggle and "   [toggle]" or "") .. (cm.gate and "   [gate]" or "") .. (cm.all and "   [all]" or ""), W - 28))
+  end
+
+  -- boutons
+  if capturing then cap_panel(W, Hh) else
+    gfx.setfont(2, "Arial", 14, 'b')
+    local w2 = math.floor((W - 24 - 4) / 2)
+    if btn(12, Hh - 100, w2, 40, "● CAPTURE / VALIDER", 0.55, 0.15, 0.15) then mac_capture_toggle() end
+    if btn(12 + w2 + 4, Hh - 100, W - 12 - (12 + w2 + 4), 40, "→ LAUNCHPAD", 0.15, 0.35, 0.60) then
+      local ms = sel_ids()
+      if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true else lp_place(ms) end
+    end
+    gfx.setfont(2, "Arial", 12, 'b')
+    local bw = math.floor((W - 24 - 4 * 5) / 6)
+    local labels = { "ADD", "EDIT", "NOM", "COULEUR", "▲", "▼" }
+    local fns = { mac_new, mac_edit, mac_rename, mac_recolor, function() mac_move(-1) end, function() mac_move(1) end }
+    for k = 1, 6 do
+      if btn(12 + (k - 1) * (bw + 4), Hh - 54, bw, 24, labels[k], 0.20, 0.25, 0.35) then fns[k]() end
+    end
+    local w4 = math.floor((W - 24 - 3 * 4) / 4)
+    local function x4(k) return 12 + (k - 1) * (w4 + 4) end
+    if btn(x4(1), Hh - 26, w4, 22, "EXPORT", 0.20, 0.25, 0.35) then mac_export() end
+    if btn(x4(2), Hh - 26, w4, 22, "IMPORT", 0.20, 0.25, 0.35) then mac_import() end
+    if btn(x4(3), Hh - 26, w4, 22, "RETIRER DU LP", 0.35, 0.22, 0.15) then
+      local ms = sel_ids()
+      if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true else lp_remove(ms) end
+    end
+    if btn(x4(4), Hh - 26, w4, 22, "VIDER LE LP", 0.45, 0.15, 0.15) then
+      if lp_count() > 0 and reaper.MB("Retirer les " .. lp_count() .. " macros du Launchpad ? (elles restent dans le chutier)", "NowUndo - macros", 4) == 6 then
+        layout = {}; mac_save(); msg = "Launchpad vide."; msg_err = false
+      end
+    end
+  end
+end
+
+local STC = { [0] = { .25, .25, .28 }, [1] = { .9, .15, .15 }, [2] = { .2, .7, .3 }, [3] = { .95, .55, .1 },
+  [4] = { .3, .6, .9 }, [5] = { .6, .4, .9 }, [6] = { .3, .8, .8 }, [7] = { .95, .85, .2 }, [8] = { .95, .85, .2 } }
+
+local function main()
+  local c = gfx.getchar()
+  if c == -1 then save_win(); return end
+  if c == 27 then
+    if show_help then show_help = false
+    elseif capturing then cap_stop()
+    else save_win(); return end
+  end
+  reaper.gmem_attach(GMEM)
+  pump()
+  cap_cmd_poll()
+  mac_poll()
+  if capturing then cap_poll() end
+  if tl.on and not capturing then tl_poll() end
+
+  mx, my = gfx.mouse_x, gfx.mouse_y
+  local down = (gfx.mouse_cap & 1) == 1
+  click = down and not was_down
+  was_down = down
+  local helpclick = click and show_help
+  if show_help then click = false end
+  local W, Hh = gfx.w, gfx.h
+
+  -- clavier
+  if show_help then
+    if c == 63 or c == 104 or c == 72 or c == 13 or c == 32 then show_help = false
+    elseif c == 30064 then help_scroll = help_scroll - 1
+    elseif c == 1685026670 then help_scroll = help_scroll + 1 end
+  elseif tab == "mac" then mac_key(c)
+  elseif c == 63 or c == 104 or c == 72 then show_help = true
+  elseif c == 99 or c == 67 then if capturing then cap_stop() else cap_start() end
+  elseif c == 108 or c == 76 then toggle_loop()
+  elseif c == 116 or c == 84 then toggle_tl()
+  elseif c == 105 or c == 73 then stamp_step()
+  elseif capturing and c == 13 then cap_finalize()
+  elseif capturing and c == 8 then cap_reset_line(); msg = "Ligne annulee."; msg_err = false
+  elseif capturing and (c == 32 or c == 1919379572 or c == 1818584692) then -- GO / BACK du scenario : desactives pendant la capture
+  elseif c == 32 or c == 13 or c == 1919379572 then go()
+  elseif c == 8 or c == 1818584692 then back()
+  elseif c == 30064 then cur = math.max(1, cur - 1); want_visible = true
+  elseif c == 1685026670 then cur = math.min(math.max(1, #steps), cur + 1); want_visible = true
+  elseif c == 101 or c == 69 then edit_step() end
+
+  gfx.set(0.14, 0.05, 0.06, 1); gfx.rect(0, 0, W, Hh)
+  gfx.setfont(2, "Arial", 12, 'b')
+  local on_scn = (tab == "scn")
+  if btn(12, 6, 92, 22, "SCENARIO", on_scn and 0.55 or 0.20, on_scn and 0.40 or 0.25, on_scn and 0.08 or 0.35) then set_tab("scn") end
+  if btn(108, 6, 84, 22, "MACROS", (not on_scn) and 0.55 or 0.20, (not on_scn) and 0.40 or 0.25, (not on_scn) and 0.08 or 0.35) then set_tab("mac") end
+  gfx.setfont(2, "Arial", 12)
+  if capturing then gfx.set(1, 0.35, 0.35, 1) else gfx.set(1, 1, 1, 0.5) end
+  gfx.x, gfx.y = 202, 11
+  local pn = pending()
+  gfx.drawstr(capturing and "● CAPTURE ACTIVE" or (tab == "mac" and mac_status() or string.format("%d pas | file %d%s%s", #steps, pn, loop_on and " | ↻" or "", tl.on and (" | ⏱ " .. #tl.items) or "")))
+  gfx.setfont(2, "Arial", 12, 'b')
+  if btn(W - 104, 6, 92, 22, "ANNULER *", 0.45, 0.15, 0.15) then cancel_all() end
+  if btn(W - 204, 6, 92, 22, "? LEXIQUE", 0.20, 0.25, 0.35) then show_help = true; help_scroll = 0 end
+  gfx.setfont(2, "Arial", 12)
+
+  -- bandeau d'etat des 8 loopers
+  local cw = math.floor((W - 24 - 7 * 4) / 8)
+  local selset = {}
+  if tab == "mac" then for _, k in ipairs(sel_targets()) do selset[k] = true end end   -- looper / groupe vise par les macros
+  for i = 1, NLOOP do
+    local F = fb(i)
+    local x = 12 + (i - 1) * (cw + 4)
+    local col = F.alive and (STC[F.st] or STC[0]) or { .12, .12, .12 }
+    gfx.set(col[1], col[2], col[3], 1); gfx.rect(x, 34, cw, 30)
+    gfx.set(1, 1, 1, 0.25); gfx.rect(x, 34, cw, 30, 0)
+    gfx.set(1, 1, 1, F.alive and 0.95 or 0.3)
+    gfx.x, gfx.y = x + 6, 38; gfx.drawstr("L" .. i)
+    gfx.setfont(2, "Arial", 10)
+    gfx.x, gfx.y = x + 6, 51
+    gfx.drawstr((F.rev and "R " or "") .. (F.slicer and "S " or "") .. (F.cloud and "C " or ""))
+    if Q[i][1] and Q[i][1].sync then gfx.set(1, 0.9, 0.2, 1); gfx.x = x + cw - 12; gfx.y = 36; gfx.drawstr("*") end
+    if tab == "mac" then
+      if selset[i] then
+        gfx.set(1, 0.85, 0.2, 1); gfx.rect(x, 34, cw, 30, 0); gfx.rect(x + 1, 35, cw - 2, 28, 0); gfx.rect(x + 2, 36, cw - 4, 26, 0)
+        gfx.set(1, 0.85, 0.2, 1); gfx.triangle(x + cw / 2 - 5, 66, x + cw / 2 + 5, 66, x + cw / 2, 72)
+      else
+        gfx.set(0.10, 0.03, 0.04, 0.55); gfx.rect(x, 34, cw, 30)         -- non vises : assombris
+      end
+    end
+    gfx.setfont(2, "Arial", 12)
+  end
+
+  if tab == "mac" then mac_draw(W, Hh, down) else
+  -- liste des pas
+  local list_h = Hh - LIST_Y - 134
+  local rows = math.max(1, math.floor(list_h / RH))
+  if want_visible then
+    if cur - 1 < scroll then scroll = cur - 1 end
+    if cur > scroll + rows then scroll = cur - rows end
+    want_visible = false
+  end
+  local wheel = gfx.mouse_wheel
+  if wheel ~= 0 and not show_help then
+    scroll = scroll - (wheel > 0 and 1 or -1) * 2
+    gfx.mouse_wheel = 0
+  end
+  scroll = math.max(0, math.min(math.max(0, #steps - rows), scroll))
+
+  gfx.set(0.10, 0.03, 0.04, 1); gfx.rect(12, LIST_Y, W - 24, rows * RH)
+  for r = 1, rows do
+    local i = scroll + r
+    if i > #steps then break end
+    local y = LIST_Y + (r - 1) * RH
+    local p = parsed[i]
+    if i == cur then gfx.set(0.55, 0.40, 0.08, 1); gfx.rect(12, y, W - 24, RH)
+    elseif i == last then gfx.set(0.12, 0.30, 0.18, 1); gfx.rect(12, y, W - 24, RH)
+    elseif r % 2 == 0 then gfx.set(0.13, 0.05, 0.06, 1); gfx.rect(12, y, W - 24, RH) end
+    gfx.setfont(2, "Arial", 13)
+    gfx.set(1, 1, 1, 0.55); gfx.x, gfx.y = 18, y + 5
+    gfx.drawstr((i == last and "✓" or "") .. string.format("%02d", i))
+    if p and p.err then gfx.set(1, 0.35, 0.35, 1) else gfx.set(1, 1, 1, 0.95) end
+    gfx.x, gfx.y = 58, y + 5
+    gfx.drawstr(fit(steps[i], W - 90))
+    if click and mx >= 12 and mx <= W - 12 and my >= y and my < y + RH then
+      local t = reaper.time_precise()
+      if last_click_row == i and t - last_click_t < 0.35 then cur = i; drag = nil; edit_step()
+      else
+        cur = i
+        if not capturing then drag = { kind = "step", row = i, x = mx, y = my, active = false } end
+      end
+      last_click_row, last_click_t = i, t
+    end
+  end
+
+  -- glisser un pas hors de la fenetre : cree un item S<n> dans REAPER
+  if drag then
+    if down then
+      if not drag.active and (math.abs(mx - drag.x) + math.abs(my - drag.y)) > 10 then
+        drag.active = true
+        msg = "Glisse le pas S" .. drag.row .. " : sur la piste dans REAPER (timeline) ou sur un autre pas (reordonner)."; msg_err = false
+      end
+      if drag.active and mx >= 12 and mx <= W - 12 and my >= LIST_Y and my < LIST_Y + rows * RH then
+        local to = math.max(1, math.min(#steps, scroll + math.floor((my - LIST_Y) / RH) + 1))
+        gfx.set(1, 1, 1, 0.9); gfx.rect(12, LIST_Y + (to - scroll - 1) * RH, W - 24, RH, 0)
+      end
+    else
+      if drag.active then
+        if mx < 0 or my < 0 or mx > W or my > Hh then drop_step(drag.row)
+        elseif mx >= 12 and mx <= W - 12 and my >= LIST_Y and my < LIST_Y + rows * RH then
+          move_to(drag.row, math.max(1, math.min(#steps, scroll + math.floor((my - LIST_Y) / RH) + 1)))
+        end
+      end
+      drag = nil
+    end
+  end
+
+  -- message
+  local my0 = Hh - 128
+  gfx.setfont(2, "Arial", 12)
+  if msg_err then gfx.set(1, 0.4, 0.4, 1) else gfx.set(0.6, 0.9, 0.6, 1) end
+  gfx.x, gfx.y = 14, my0
+  gfx.drawstr(fit(msg, W - 28))
+  local p = parsed[cur]
+  if p and p.err then
+    gfx.set(1, 0.4, 0.4, 1); gfx.x, gfx.y = 14, my0 + 16
+    gfx.drawstr(fit("Pas " .. cur .. " : " .. p.err, W - 28))
+  end
+
+  -- boutons
+  if capturing then cap_panel(W, Hh) else
+  gfx.setfont(2, "Arial", 14, 'b')
+  local lw = 100
+  local half = math.floor((W - 24 - 8 - lw) / 2)
+  if btn(12, Hh - 100, half, 40, "◀  BACK", 0.30, 0.22, 0.12) then back() end
+  if btn(12 + half + 4, Hh - 100, half, 40, "GO  ▶", 0.15, 0.50, 0.25) then go() end
+  local lx = 12 + 2 * half + 8
+  if btn(lx, Hh - 100, W - 12 - lx, 40, loop_on and "↻ BOUCLE ON" or "↻ BOUCLE", loop_on and 0.15 or 0.20, loop_on and 0.45 or 0.25, loop_on and 0.60 or 0.35) then toggle_loop() end
+  gfx.setfont(2, "Arial", 12, 'b')
+  local bw = math.floor((W - 24 - 4 * 6) / 7)
+  local labels = { "EDIT", "ADD", "DEL", "▲", "▼", "NEW", "→ ITEM" }
+  local fns = { edit_step, add_step, del_step, function() move_step(-1) end, function() move_step(1) end, new_scn, stamp_step }
+  for k = 1, 7 do
+    if btn(12 + (k - 1) * (bw + 4), Hh - 54, bw, 24, labels[k], 0.20, 0.25, 0.35) then fns[k]() end
+  end
+  local w5 = math.floor((W - 24 - 4 * 4) / 5)
+  local function x5(k) return 12 + (k - 1) * (w5 + 4) end
+  if btn(x5(1), Hh - 26, w5, 22, "LOAD", 0.20, 0.25, 0.35) then load_scn() end
+  if btn(x5(2), Hh - 26, w5, 22, "SAVE", 0.20, 0.25, 0.35) then save_scn() end
+  if btn(x5(3), Hh - 26, w5, 22, "● CAPTURE", 0.55, 0.15, 0.15) then cap_start() end
+  if btn(x5(4), Hh - 26, w5, 22, tl.on and "⏱ TIMELINE ON" or "⏱ TIMELINE OFF", tl.on and 0.15 or 0.20, tl.on and 0.50 or 0.25, tl.on and 0.30 or 0.35) then toggle_tl() end
+  if btn(x5(5), Hh - 26, w5, 22, tl.track == 0 and "PISTE : TOUTES" or ("PISTE : " .. tl.track), 0.20, 0.25, 0.35) then cycle_tl_track() end
+  end
+  end
+
+  if drag and drag.active and mx >= 0 and my >= 0 and mx <= W and my <= Hh then   -- etiquette qui suit la souris
+    gfx.setfont(2, "Arial", 13, 'b')
+    local lab = drag.label or ("S" .. drag.row)
+    local tw = gfx.measurestr(lab)
+    gfx.set(0.9, 0.75, 0.15, 0.95); gfx.rect(mx + 10, my + 6, tw + 14, 22)
+    gfx.set(0, 0, 0, 1); gfx.x, gfx.y = mx + 17, my + 10; gfx.drawstr(lab)
+  end
+
+  -- popup lexique
+  if show_help then
+    local px, py, pw, ph = 10, 10, W - 20, Hh - 20
+    gfx.set(0.04, 0.02, 0.03, 0.98); gfx.rect(px, py, pw, ph)
+    gfx.set(0.9, 0.8, 0.2, 1); gfx.rect(px, py, pw, ph, 0)
+    gfx.setfont(1, "Arial", 15, 'b'); gfx.x, gfx.y = px + 12, py + 8
+    gfx.drawstr("LEXIQUE")
+    local cx, cy, cw2, ch2 = px + pw - 90, py + 6, 78, 22
+    local chov = mx >= cx and mx <= cx + cw2 and my >= cy and my <= cy + ch2
+    gfx.set(0.45, 0.15, 0.15, 1); if chov then gfx.set(0.6, 0.2, 0.2, 1) end
+    gfx.rect(cx, cy, cw2, ch2)
+    gfx.setfont(3, "Arial", 12, 'b'); gfx.set(1, 1, 1, 0.95)
+    gfx.x, gfx.y = cx + 14, cy + 5; gfx.drawstr("FERMER")
+    local LH, top = 17, py + 38
+    local vis = math.max(1, math.floor((ph - 38 - 26) / LH))
+    local wh = gfx.mouse_wheel
+    if wh ~= 0 then help_scroll = help_scroll - (wh > 0 and 3 or -3); gfx.mouse_wheel = 0 end
+    help_scroll = math.max(0, math.min(math.max(0, #HELP - vis), help_scroll))
+    for r = 1, vis do
+      local e = HELP[help_scroll + r]
+      if not e then break end
+      local y = top + (r - 1) * LH
+      if e[2] == nil and e[1] ~= "" then
+        gfx.setfont(3, "Arial", 12, 'b'); gfx.set(0.9, 0.8, 0.2, 1)
+        gfx.x, gfx.y = px + 12, y; gfx.drawstr(e[1])
+        gfx.set(0.9, 0.8, 0.2, 0.3); gfx.line(px + 12, y + LH - 2, px + pw - 12, y + LH - 2)
+      elseif e[2] then
+        gfx.setfont(3, "Arial", 12, 'b'); gfx.set(0.55, 0.85, 1, 1)
+        gfx.x, gfx.y = px + 20, y; gfx.drawstr(fit(e[1], 190))
+        gfx.setfont(2, "Arial", 12); gfx.set(1, 1, 1, 0.9)
+        gfx.x, gfx.y = px + 215, y; gfx.drawstr(fit(e[2], pw - 230))
+      end
+    end
+    gfx.setfont(2, "Arial", 11); gfx.set(1, 1, 1, 0.45)
+    gfx.x, gfx.y = px + 12, py + ph - 20
+    gfx.drawstr("molette / haut-bas : defiler   |   ?  ou  Echap : fermer")
+    if helpclick and (chov or mx < px or mx > px + pw or my < py or my > py + ph) then show_help = false end
+  end
+
+  gfx.update()
+  reaper.defer(main)
+end
+
+reaper.atexit(function() cap_stop(); persist() end)
+main()
+
+
+
+
+
+
