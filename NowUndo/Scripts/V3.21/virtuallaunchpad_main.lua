@@ -2294,6 +2294,14 @@ bind(1, 8, 3, act("one_shot"))
 PAD_RGB[1]["7,4"], PAD_RGB[1]["8,3"] = PAD_RGB[1]["8,3"], PAD_RGB[1]["7,4"]
 PAD_LABEL[1]["7,4"], PAD_LABEL[1]["8,3"] = PAD_LABEL[1]["8,3"], PAD_LABEL[1]["7,4"]
 bind(1, 8, 4, act("stop_play")); bind(1, 8, 5, act("multiply")); bind(1, 8, 6, act("replace"))
+-- DOUBLE APPUI = la meme action sur les 8 loopers (comme CLEAR / RESET) : STOP/PLAY -> arrete tous ceux qui jouent,
+-- RESTART -> redemarre toutes les boucles (le 1er appui a deja agi sur le looper / groupe).
+BIND[1]["8,4"].double = fn(function()
+  for i = 1, NLOOP do local L = S.loopers[i]; if L and L.playing then send(i, "stop_play", false) end end
+end)
+BIND[1]["7,3"].double = fn(function()
+  for i = 1, NLOOP do local L = S.loopers[i]; if L and (L.length or 0) > 0 then send(i, "restart", nil) end end
+end)
 -- [REC>DUB] Appui long sur REC.
 -- REC est toujours declenche IMMEDIATEMENT a l'appui (jamais au relachement).
 -- Si le looper etait vide au debut de cet enregistrement, un appui long annule

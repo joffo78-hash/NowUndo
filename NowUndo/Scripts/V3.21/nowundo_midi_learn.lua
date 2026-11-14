@@ -109,6 +109,7 @@ local acts = {
   A("act:rec", "Rec / Overdub", "Transport", "rec_overdub", nil, true),
   A("act:stop_play", "Stop / Play", "Transport", "stop_play", nil, true),
   A("act:replace", "Replace", "Transport", "replace", nil, true),
+  A("act:auto_rep", "Auto-Replace", "Transport", "auto_rep", nil, true),
   A("act:multiply", "Multiply", "Transport", "multiply", nil, true),
   A("act:rerec", "Re-Rec", "Transport", "rerec"),
   A("act:restart", "Restart", "Transport", "restart"),
@@ -123,6 +124,7 @@ local acts = {
   A("act:slicer", "Slicer", "Modes", "slicer", nil, true),
   A("act:cloud", "Cloud", "Modes", "cloud", nil, true),
   A("act:one_shot", "One-Shot", "Modes", "one_shot", nil, true),
+  A("act:beat_rep", "Beat Repeat", "Modes", "beat_repeat", nil, true),
   A("act:link", "Link P/S", "Modes", "link", nil, true),
   A("act:auto", "Auto Rec", "Modes", "auto", nil, true),
   A("act:part1", "Part Main", "Parts", "part", 1),
@@ -390,7 +392,13 @@ local CMD = {
   multiply = 13, undo = 14, redo = 15, restart = 16, rerec = 17,
   one_shot = 18, auto = 19, speed_step = 20, pitch_step = 21,
   full_loop = 22, quantise_inout = 23, clear_all = 2, clear_all_full = 11,
+  reset = 24, reset_all = 24, beat_repeat = 33, restart_all = 16, stop_all = 3,
 }
+-- DOUBLE APPUI (touche clavier ou MIDI, < 0,4 s) : la meme action sur les 8 loopers, comme CLEAR / RESET du Launchpad.
+-- Le 1er appui a deja agi normalement (selection / groupe) ; le 2e lance la version globale.
+local DOUBLE = { clear = "clear_all_full", clear_part = "clear_all_full", clear_full = "clear_all_full",
+                 reset = "reset_all", stop_play = "stop_all", restart = "restart_all" }
+local DOUBLE_S, last_on = 0.40, {}
 
 --------------------------------------------------------------------------
 -- State
@@ -764,8 +772,18 @@ local function fire_action(action, args, looper)
     if alive(looper) then write_cmd(looper, cmd, args) end
     return
   end
-  if action == "clear_all" or action == "clear_all_full" then
+  if action == "clear_all" or action == "clear_all_full" or action == "reset_all" or action == "restart_all" then
     for i = 1, 8 do if alive(i) then write_cmd(i, cmd) end end
+    return
+  end
+  if action == "stop_all" then                       -- arrete les loopers qui jouent (pas de bascule : les arretes restent arretes)
+    reaper.gmem_attach(GMEM)
+    for i = 1, 8 do
+      if alive(i) then
+        local st = reaper.gmem_read(gbase(i, active_part(i)) + 2) or 0
+        if st >= 2 and st <= 6 then write_cmd(i, cmd) end
+      end
+    end
     return
   end
   for _, i in ipairs(targets()) do
@@ -1028,6 +1046,15 @@ local function execute_target(tgt, m, velocity, is_on, is_off)
   -- (avant : "Return" renvoyait 127 a chaque tick de knob => l'anneau sautait a fond).
   if tgt.kind == "tw_knob" or tgt.kind == "tw_btn" then return end
   if tgt.kind == "action" then
+    if is_on and not tgt.looper and DOUBLE[tgt.action] then
+      local tn = reaper.time_precise()
+      if last_on[tgt.id] and tn - last_on[tgt.id] <= DOUBLE_S then
+        last_on[tgt.id] = nil
+        fire_action(DOUBLE[tgt.action], nil, nil)
+        return
+      end
+      last_on[tgt.id] = tn
+    end
     if is_on then auto_twister(tgt.action, tgt.looper, tgt.args) end   -- v2.5 : AVANT l'action (l'etat lu est celui d'avant)
     if m.gate then
       if is_on or is_off then fire_action(tgt.action, tgt.args, tgt.looper) end
