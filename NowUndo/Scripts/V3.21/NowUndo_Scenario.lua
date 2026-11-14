@@ -1604,6 +1604,14 @@ local function mac_edit()
   if not m then msg = "Selectionne une macro."; msg_err = true; return end
   ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, m.id, false, m.text or "", false, false
   ED.cur, ED.sug, ED.si, ED.view = #ED.text, {}, 1, 0
+  ED.refocus()
+end
+-- rend le focus clavier a la fenetre du Scenario (apres un menu ou une boite REAPER, les touches partaient vers REAPER)
+function ED.refocus()
+  if reaper.JS_Window_Find and reaper.JS_Window_SetFocus then
+    local h = reaper.JS_Window_Find("NowUndo Scenario", true)
+    if h then reaper.JS_Window_SetFocus(h) end
+  end
 end
 -- boite REAPER a l'ancienne (Maj+E, ou bouton dans l'editeur)
 function ED.classic(text)
@@ -1617,6 +1625,7 @@ ED.ONOFF = { rec = 1, replace = 1, autorep = 1, multiply = 1, rev = 1, pp = 1, s
              oneshot = 1, br = 1, e1 = 1, e2 = 1, e3 = 1, e4 = 1, play = 1 }
 -- { libelle de categorie, { mot, ... } } ; un mot suivi de "..." ouvre un menu de valeurs
 ED.CATS = {
+  { "Derniere action", { "off", "*" } },          -- off : ajoute / retire "off" ; * : armee au point de synchro
   { "Enregistrement", { "rec", "replace", "autorep", "multiply", "rerec", "auto" } },
   { "Lecture",        { "play", "stop", "restart", "rev", "pp", "oneshot", "fullloop", "part..." } },
   { "Modes",          { "slicer", "cloud", "br", "brf...", "link" } },
@@ -1666,7 +1675,8 @@ function ED.suggest()
   local pre = before:match("([%w%(%)/%.%%%-]*)$") or ""
   local prevw = before:sub(1, #before - #pre):match("(%a+)%s+$")
   local out = {}
-  local vals = prevw and ED.VALS[(ALIAS[prevw] or prevw)]
+  local pk = prevw and (ALIAS[prevw] or prevw)
+  local vals = pk and (ED.VALS[pk] or (ED.ONOFF[pk] and { "off" }))
   if vals and not before:sub(1, #before - #pre):match(",%s*$") then
     for _, v in ipairs(vals) do if v:sub(1, #pre) == pre and v ~= pre then out[#out + 1] = v end end
   elseif #pre >= 1 and pre:match("^%a") and not split_key(pre:lower()) then   -- mot deja complet : rien a proposer
@@ -1687,7 +1697,22 @@ function ED.accept(i)
   ED.si = 1
   return true
 end
-function ED.pick(word)
+-- modifie la DERNIERE action du texte : "off" (ajoute / retire) ou "*" (synchro, ajoute / retire)
+function ED.mod_last(kind)
+  local head, seg = ED.text:match("^(.*,)%s*(.-)%s*$")
+  if not seg then head, seg = "", trim(ED.text) end
+  if seg == "" then msg = "Ajoute d'abord une action."; msg_err = true; return end
+  local star = seg:sub(-1) == "*"
+  if star then seg = trim(seg:sub(1, -2)) end
+  if kind == "*" then star = not star
+  elseif seg:match("%soff$") then seg = trim(seg:sub(1, -5))
+  elseif seg:match("^%a+off$") and split_key(seg) then seg = seg:sub(1, -4)
+  else seg = seg .. " off" end
+  ED.text = head .. ((head ~= "") and " " or "") .. seg .. (star and "*" or "")
+  ED.cur = #ED.text
+end
+function ED.pick(word, as_off)
+  if word == "off" or word == "*" then ED.mod_last(word) return end
   local key = word:gsub("%.%.%.$", "")
   local tok = key
   if word:sub(-3) == "..." then
@@ -1697,18 +1722,19 @@ function ED.pick(word)
     items[#items + 1] = "autre valeur..."
     gfx.x, gfx.y = mx, my
     local k = gfx.showmenu(table.concat(items, "|"))
+    ED.refocus()
     if not k or k < 1 then return end
     local v = vals[k]
     if not v then
       local ok, r = reaper.GetUserInputs("Valeur : " .. key, 1, key .. " =", "")
+      ED.refocus()
       if not ok or trim(r) == "" then return end
       v = trim(r)
     end
     if key == "r(n)" or key == "g(n)" then tok = key:sub(1, 1) .. "(" .. v .. ")" else tok = key .. " " .. v end
-  elseif ED.off and ED.ONOFF[key] then
+  elseif as_off and ED.ONOFF[key] then
     tok = key .. " off"
   end
-  if ED.star and not tok:match("^[rg]%(") and not tok:match("sync") then tok = tok .. "*" end
   ED.add(tok)
 end
 function ED.close(save)
@@ -1780,7 +1806,7 @@ function ED.draw(W, Hh, eclick)
   -- verification en direct
   local _, errs = compile(ED.text, { 1 }, m and m.toggle)
   gfx.setfont(2, "Arial", 12)
-  if ED.text == "" then gfx.set(1, 1, 1, 0.45); gfx.x, gfx.y = tx, ty + th + 6; gfx.drawstr("Cliquez des actions ci-dessous, ou tapez au clavier.")
+  if ED.text == "" then gfx.set(1, 1, 1, 0.45); gfx.x, gfx.y = tx, ty + th + 6; gfx.drawstr("Tapez (l'assistant propose, Tab / Entree accepte) ou cliquez des actions ; clic droit = action en OFF.")
   elseif #errs > 0 then gfx.set(1, 0.4, 0.4, 1); gfx.x, gfx.y = tx, ty + th + 6; gfx.drawstr(fit(errs[1], tw))
   else gfx.set(0.4, 1, 0.5, 1); gfx.x, gfx.y = tx, ty + th + 6; gfx.drawstr("OK") end
   -- commandes
@@ -1790,13 +1816,16 @@ function ED.draw(W, Hh, eclick)
   if btn(tx + 136, by, 130, bh, "ANNULER (Echap)", 0.45, 0.15, 0.15) then ED.close(false) end
   if btn(tx + 272, by, 150, bh, "RETIRER LA DERNIERE", 0.25, 0.25, 0.32) then ED.text = ED.text:match("^(.*),") or "" end
   if btn(tx + 428, by, 80, bh, "EFFACER", 0.25, 0.25, 0.32) then ED.text = "" end
-  if btn(tx + 520, by, 90, bh, ED.off and "OFF : oui" or "OFF : non", ED.off and 0.60 or 0.22, ED.off and 0.25 or 0.22, ED.off and 0.20 or 0.28) then ED.off = not ED.off end
-  if btn(tx + 616, by, 120, bh, ED.star and "* SYNCHRO : oui" or "* SYNCHRO : non", ED.star and 0.20 or 0.22, ED.star and 0.40 or 0.22, ED.star and 0.65 or 0.28) then ED.star = not ED.star end
-  if btn(tx + 742, by, 110, bh, "BOITE REAPER", 0.25, 0.25, 0.32) then
+  if btn(tx + 514, by, 110, bh, "<- RETOUR ARR.", 0.25, 0.25, 0.32) then ED.key(8) end
+  if btn(tx + 630, by, 110, bh, "BOITE REAPER", 0.25, 0.25, 0.32) then
     local r = ED.classic(ED.text)
+    ED.refocus()
     if r then ED.text = r; ED.cur = #r; ED.suggest() end
   end
-  -- palette
+  -- palette (clic droit sur une action on/off = ajoutee en "off")
+  local rdn = (gfx.mouse_cap & 2) == 2
+  local rclick = rdn and not ED.rwas
+  ED.rwas = rdn
   local y = by + bh + 14
   gfx.setfont(2, "Arial", 12)
   for _, cat in ipairs(ED.CATS) do
@@ -1808,8 +1837,9 @@ function ED.draw(W, Hh, eclick)
       local bw = gfx.measurestr(w) + 18
       if x + bw > tx + tw then x = tx + 112; y = y + 28 end
       local key = w:gsub("%.%.%.$", "")
-      local isoff = ED.off and ED.ONOFF[key]
-      if btn(x, y, bw, 24, w, isoff and 0.40 or 0.20, isoff and 0.18 or 0.26, isoff and 0.18 or 0.36) then ED.pick(w); ED.suggest() end
+      local mod = (w == "off" or w == "*")
+      if btn(x, y, bw, 24, w, mod and 0.45 or 0.20, mod and 0.30 or 0.26, mod and 0.10 or 0.36) then ED.pick(w); ED.suggest() end
+      if rclick and ED.ONOFF[key] and mx >= x and mx <= x + bw and my >= y and my <= y + 24 then ED.pick(w, true); ED.suggest() end
       x = x + bw + 5
     end
     y = y + 32
@@ -1842,6 +1872,7 @@ local function mac_new()                    -- ADD : ouvre l'editeur (assistant 
   if #macros >= MAC_MAX then msg = "64 macros maximum."; msg_err = true; return end
   ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, nil, true, "", false, false
   ED.cur, ED.sug, ED.si, ED.view = 0, {}, 1, 0
+  ED.refocus()
 end
 -- validation d'une NOUVELLE macro (appelee par ED.close) : nom demande, puis creation
 function ED.create(text)
