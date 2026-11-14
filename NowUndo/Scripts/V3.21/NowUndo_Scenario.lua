@@ -1607,7 +1607,9 @@ local function mac_edit()
 end
 -- boite REAPER a l'ancienne (Maj+E, ou bouton dans l'editeur)
 function ED.classic(text)
+  reaper.SetExtState("NowUndo_Scn", "typing", string.format("%.3f", reaper.time_precise() + 3600), false)   -- MIDI Learn : clavier en pause
   local ok, ret = reaper.GetUserInputs("Modifier la macro", 1, "Syntaxe (sans looper) :,extrawidth=520", ui_in(text))
+  reaper.SetExtState("NowUndo_Scn", "typing", "0", false)
   if ok then return ui_out(ret) end
 end
 -- mots on / off (le bouton OFF leur ajoute "off")
@@ -2658,7 +2660,13 @@ local function main()
     gfx.drawstr("molette / haut-bas : defiler   |   ?  ou  Echap : fermer")
     if helpclick and (chov or mx < px or mx > px + pw or my < py or my > py + ph) then show_help = false end
   end
-  if ED.on then ED.draw(W, Hh, edclick) end
+  if ED.on then
+    ED.draw(W, Hh, edclick)
+    if reaper.time_precise() - (ED.tt or 0) > 0.2 then             -- signale la saisie au MIDI Learn (raccourcis clavier en pause)
+      ED.tt = reaper.time_precise()
+      reaper.SetExtState("NowUndo_Scn", "typing", string.format("%.3f", ED.tt), false)
+    end
+  end
 
   gfx.update()
   reaper.defer(main)

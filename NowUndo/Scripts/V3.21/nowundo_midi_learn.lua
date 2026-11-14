@@ -1942,6 +1942,22 @@ local function process_keys()
   end
   local st = reaper.JS_VKeys_GetState(0)
   if not st or #st < 254 then return end
+  -- SAISIE DE TEXTE en cours : raccourcis clavier en pause et touches liberees (sinon taper "r" lancerait REC, ou la
+  -- touche bloquee n'arriverait pas au champ). Editeur de macro du Scenario (ExtState NowUndo_Scn/typing) ou champ
+  -- texte Windows (boites de dialogue, renommage...).
+  local typing = reaper.time_precise() - (tonumber(reaper.GetExtState("NowUndo_Scn", "typing")) or 0) < 0.6
+  if not typing and reaper.JS_Window_GetFocus and reaper.JS_Window_GetClassName then
+    local f = reaper.JS_Window_GetFocus()
+    local cls = f and reaper.JS_Window_GetClassName(f) or ""
+    if cls == "Edit" or cls:find("RichEdit", 1, true) then typing = true end
+  end
+  if typing then
+    if not KB.paused then KB.paused = true; KB.release_all(); KB.sig = nil end
+    KB.prev = st
+    return
+  elseif KB.paused then
+    KB.paused = false; KB.sig = nil                    -- fin de saisie : le blocage des touches est remis en place
+  end
   local prev = KB.prev or st
   KB.prev = st
   for vk = 8, 254 do
@@ -1964,7 +1980,7 @@ end
 function KB.sync_intercept()
   if not reaper.JS_VKeys_Intercept then return end
   local want = {}
-  if reaper.GetExtState(EXT, "kbd_intercept") ~= "0" then
+  if reaper.GetExtState(EXT, "kbd_intercept") ~= "0" and not KB.paused then
     for id, code in pairs(KB.k) do
       if code < 256 then want[code] = true end
     end
