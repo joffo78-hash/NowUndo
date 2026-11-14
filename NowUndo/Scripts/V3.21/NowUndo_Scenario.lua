@@ -1602,7 +1602,7 @@ local ED = { on = false }
 local function mac_edit()
   local m = mac_find(mcur)
   if not m then msg = "Selectionne une macro."; msg_err = true; return end
-  ED.on, ED.id, ED.text, ED.off, ED.star = true, m.id, m.text or "", false, false
+  ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, m.id, false, m.text or "", false, false
   ED.cur, ED.sug, ED.si, ED.view = #ED.text, {}, 1, 0
 end
 -- boite REAPER a l'ancienne (Maj+E, ou bouton dans l'editeur)
@@ -1712,6 +1712,11 @@ function ED.pick(word)
   ED.add(tok)
 end
 function ED.close(save)
+  if ED.new then
+    ED.on, ED.new = false, false
+    if save then ED.create(ED.text) end
+    return
+  end
   local m = mac_find(ED.id)
   if save and m then
     m.text = mac_clean((ED.text):gsub(";", ","))
@@ -1752,7 +1757,7 @@ function ED.draw(W, Hh, eclick)
   local m = mac_find(ED.id)
   gfx.setfont(3, "Arial", 13, 'b'); gfx.set(0.9, 0.8, 0.2, 1)
   gfx.x, gfx.y = px + 12, py + 10
-  gfx.drawstr("EDITION DE LA MACRO" .. ((m and m.name ~= "") and ("  -  " .. m.name) or ""))
+  gfx.drawstr(ED.new and "NOUVELLE MACRO" or ("EDITION DE LA MACRO" .. ((m and m.name ~= "") and ("  -  " .. m.name) or "")))
   -- zone de texte
   local tx, ty, tw, th = px + 12, py + 34, pw - 24, 30
   gfx.set(0.04, 0.04, 0.06, 1); gfx.rect(tx, ty, tw, th)
@@ -1833,12 +1838,18 @@ local function mac_rename()
   local ok, ret = reaper.GetUserInputs("Nommer la macro", 1, "Nom (vide = afficher l'action) :,extrawidth=240", m.name)
   if ok then m.name = mac_clean(ret); mac_save(); msg = (m.name == "") and "Nom efface : le pad affichera l'action." or "Macro renommee."; msg_err = false end
 end
-local function mac_new()
+local function mac_new()                    -- ADD : ouvre l'editeur (assistant + palette) sur une macro vide
   if #macros >= MAC_MAX then msg = "64 macros maximum."; msg_err = true; return end
-  local ok, ret = reaper.GetUserInputs("Nouvelle macro", 1, "Syntaxe (sans looper) :,extrawidth=520", "")
-  if not ok or trim(ret) == "" then return end
+  ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, nil, true, "", false, false
+  ED.cur, ED.sug, ED.si, ED.view = 0, {}, 1, 0
+end
+-- validation d'une NOUVELLE macro (appelee par ED.close) : nom demande, puis creation
+function ED.create(text)
+  if trim(text) == "" then return end
+  reaper.SetExtState("NowUndo_Scn", "typing", string.format("%.3f", reaper.time_precise() + 3600), false)
   local ok2, nm = reaper.GetUserInputs("Nom de la macro", 1, "Nom (vide = afficher l'action) :,extrawidth=240", "")
-  local m = mac_add(ret, ok2 and nm or "", nil)
+  reaper.SetExtState("NowUndo_Scn", "typing", "0", false)
+  local m = mac_add(text, ok2 and nm or "", nil)
   if m then msg = m.err and ("Macro creee mais invalide : " .. m.err) or ("Macro creee : " .. mac_label(m)); msg_err = m.err ~= nil end
 end
 local function mac_recolor()
