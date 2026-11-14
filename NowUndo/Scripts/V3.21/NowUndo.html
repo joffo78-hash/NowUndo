@@ -425,8 +425,8 @@ html, body {
   function updateHelp() {
     var sk = stickyKey ? stickyKey.split(",")[0] : null;
     helpEl.textContent = !holdOn ? ""
-      : sk === "6" ? "PAGE 2 maintenue : les boutons du haut = entrees -> looper selectionne (retaper PAGE 2 pour relacher)"
-      : sk === "7" ? "PAGE 3 maintenue : les boutons du haut = loopers -> looper selectionne (retaper PAGE 3 pour relacher)"
+      : sk === "6" ? "PAGE 2 temporaire : retaper PAGE 2 (ou HOLD off) pour revenir a la page de depart"
+      : sk === "7" ? "PAGE 3 temporaire : retaper PAGE 3 (ou HOLD off) pour revenir a la page de depart"
       : sk === "5" ? "PAGE 1 maintenue : cliquez un pad FX pour changer son mode"
       : (meta.holdGroup > 0 ? "EDIT GROUP " + meta.holdGroup : "HOLD : tapez un pad GROUP, ou PAGE 2 / PAGE 3");
   }
@@ -476,7 +476,7 @@ html, body {
   }, 500);
 
   // HOLD + bouton PAGE 1 / 2 / 3 : le bouton reste ENFONCE (comme un maintien au doigt) jusqu'a un 2e tap ou HOLD off.
-  // PAGE 2 maintenue = entrees -> looper selectionne, PAGE 3 = loopers -> looper selectionne (rangee du haut).
+  // PAGE 2 / PAGE 3 maintenue = page temporaire : au relachement on revient a la page de depart.
   var stickyKey = null;
   function isStickyPage(row, col) { return col === 9 && row >= 5 && row <= 7; }
   function releaseSticky() {
