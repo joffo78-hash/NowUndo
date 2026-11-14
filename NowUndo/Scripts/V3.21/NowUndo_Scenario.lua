@@ -699,7 +699,13 @@ local function new_scn()
 end
 
 local function save_scn()
-  local ok, name = reaper.GetUserInputs("Sauver le scenario", 1, "Nom du fichier :,extrawidth=200", last_name)
+  local def = last_name
+  if def == "" and steps[1] then                       -- titre propose : le contenu des premiers pas
+    def = trim(((steps[1] or "") .. (steps[2] and (" ; " .. steps[2]) or "")):gsub("[\\/:*?\"<>|]", ""):gsub("%s*,%s*", " - "):gsub("%s+", " "))
+    def = def:gsub("%.", "_")                            -- "0.25" ne doit pas passer pour une extension
+    if #def > 48 then def = def:sub(1, 48) end
+  end
+  local ok, name = reaper.GetUserInputs("Sauver le scenario", 1, "Nom du fichier :,extrawidth=200", (def:gsub(",", " ")))
   if not ok or trim(name) == "" then return end
   name = trim(name):gsub("[\\/:*?\"<>|]", "_")
   if not name:match("%.%w+$") then name = name .. ".txt" end
@@ -828,7 +834,7 @@ local HELP = {
   { "COMMANDES" },
   { "clear", "efface la part active" },
   { "clearfull", "efface les 3 parts" },
-  { "clearall / clearallfull", "clear (ou clear complet) sur LES 8 LOOPERS, quelle que soit la cible ou la selection (macro comprise)" },
+  { "clearall / clearallfull", "clear (ou clear complet) sur LES 8 LOOPERS, quelle que soit la cible ou la selection (rush compris)" },
   { "undo  redo", "annuler / refaire" },
   { "restart", "relance la lecture au debut" },
   { "rerec", "efface la part et relance un REC" },
@@ -886,25 +892,25 @@ local HELP = {
   { "REORDONNER LES PAS" },
   { "glisser dans la liste", "prends un pas et relache-le sur un autre pas : il prend sa place (hors fenetre = timeline REAPER)" },
   { "" },
-  { "MACROS  (onglet MACROS)" },
+  { "RUSHES  (onglet RUSHES)" },
   { "principe", "chutier de 64 actions individuelles, meme syntaxe que les pas MAIS sans looper : elles agissent sur le looper / groupe selectionne" },
   { "exemple", "rev, pitch 12, slicer off   (pas de l1 : la cible est le looper ou groupe choisi au moment de l'appui)" },
-  { "● CAPTURE / VALIDER", "meme bouton (ou touche C / Entree) : 1er appui = capture, 2e = enregistre UNE macro (pas d'incrementation)" },
+  { "● CAPTURE / VALIDER", "meme bouton (ou touche C / Entree) : 1er appui = capture, 2e = enregistre UN rush (pas d'incrementation)" },
   { "ADD / EDIT / NOM", "ecrire la syntaxe, la modifier (double-clic aussi), renommer" },
   { "T  (case toggle)", "entre la pastille et le titre (ou touche T) : on/off (rec, rev, slicer, cloud, play, br...) s'INVERSENT ; vol, speed, pitch, in/out... basculent valeur enregistree <-> defaut" },
-  { "G  (case gate)", "entre T et A (ou touche G) : APPUI sur le pad = la macro telle qu'ecrite (tout ON), RELACHEMENT = tout OFF (on/off coupes, valeurs par defaut, In/Out en plein ; undo/clear... ne se defont pas). Ideal pour beat repeat" },
-  { "Ctrl+C / X / V / D", "copier / couper / coller (juste apres la selection) / dupliquer les macros selectionnees ; clic droit sur une ligne = menu" },
+  { "G  (case gate)", "entre T et A (ou touche G) : APPUI sur le pad = le rush tel qu'ecrit (tout ON), RELACHEMENT = tout OFF (on/off coupes, valeurs par defaut, In/Out en plein ; undo/clear... ne se defont pas). Ideal pour beat repeat" },
+  { "Ctrl+C / X / V / D", "copier / couper / coller (juste apres la selection) / dupliquer les rushes selectionnes ; clic droit sur une ligne = menu" },
   { "libelle du pad", "le nom ; s'il est vide, l'action elle-meme (NOM vide = retour a l'action)" },
-  { "Ctrl+clic sur un pad LP", "page 4 du Launchpad : retire la macro de ce pad (elle reste dans le chutier)" },
+  { "Ctrl+clic sur un pad LP", "page 4 du Launchpad : retire le rush de ce pad (il reste dans le chutier)" },
   { "pastille / COULEUR", "clic sur la pastille = couleur suivante ; COULEUR = choisir librement (toute la selection)" },
   { "DEL  (Suppr)", "supprime la selection (retire aussi les pads du Launchpad)" },
   { "selection", "clic ; Ctrl/Cmd+clic = ajouter / retirer ; Maj+clic = plage ; Ctrl+A = tout" },
-  { "glisser", "hors de la fenetre sur le Launchpad = pose a la suite (cases libres, rien n'est ecrase) ; sur une autre macro = reordonner" },
+  { "glisser", "hors de la fenetre sur le Launchpad = pose a la suite (cases libres, rien n'est ecrase) ; sur un autre rush = reordonner" },
   { "→ LAUNCHPAD", "bouton : meme effet que le glisser vers le Launchpad (utile pour le Launchpad web)" },
-  { "RETIRER DU LP / VIDER", "retire la selection / tout du Launchpad (les macros restent dans le chutier)" },
+  { "RETIRER DU LP / VIDER", "retire la selection / tout du Launchpad (les rushes restent dans le chutier)" },
   { "▶ TESTER  (Espace)", "execute la selection sur le looper / groupe choisi sur le Launchpad" },
-  { "EXPORT / IMPORT", "fichier .txt dans Data/NowUndo_Macros : macros + disposition Launchpad" },
-  { "Launchpad page 4", "page 4 -> couche 'Action macros' (remplace Tune) : un pad = une macro ; ce script doit tourner" },
+  { "EXPORT / IMPORT", "fichier .txt dans Data/NowUndo_Macros : rushes + disposition Launchpad" },
+  { "Launchpad page 4", "page 4 -> couche 'Rushes' (remplace Tune) : un pad = un rush ; ce script doit tourner" },
   { "" },
   { "EXEMPLES" },
   { "l1/3/6 rev, l2 recoff;", "reverse sur 1, 3, 6 ; stop du rec sur 2" },
@@ -1172,7 +1178,7 @@ local function cap_finalize()
 end
 
 local function cap_start()
-  if tab == "mac" and mac_count() >= 64 then msg = "64 macros maximum : supprime-en une d'abord."; msg_err = true; return end
+  if tab == "mac" and mac_count() >= 64 then msg = "64 rushes maximum : supprimes-en un d'abord."; msg_err = true; return end
   capturing = true
   cap.macro = (tab == "mac")
   cap.virt = snapshot()
@@ -1180,7 +1186,7 @@ local function cap_start()
   cap_reset_line()
   reaper.SetExtState(CAPEXT, "q", "", false)
   cap.nop, cap.nval, cap.lastev = 0, 0, "(rien recu)"
-  msg = cap.macro and "CAPTURE MACRO : fais ton action, puis VALIDER (Entree ou meme bouton). Launch + GO valide tout seul."
+  msg = cap.macro and "CAPTURE RUSH : fais ton action, puis VALIDER (Entree ou meme bouton). Launch + GO valide tout seul."
         or "CAPTURE : fais tes actions, puis VALIDER (Entree). Launch + GO valide tout seul."
   msg_err = false
 end
@@ -1275,7 +1281,7 @@ local function cap_panel(W, Hh)
   gfx.set(1, 0.3, 0.3, 0.8); gfx.rect(bx, by, bw, bh, 0)
   gfx.setfont(2, "Arial", 14, 'b')
   local text = build(copyV(cap.virt))
-  local lbl = cap.macro and "Macro : " or ("Ligne " .. ((#steps == 0) and 1 or (cur + 1)) .. " : ")
+  local lbl = cap.macro and "Rush : " or ("Ligne " .. ((#steps == 0) and 1 or (cur + 1)) .. " : ")
   if text == "" then
     gfx.set(1, 1, 1, 0.4); text = "en attente : fais tes actions, puis VALIDER (ou GO si Launch)"
   else gfx.set(1, 1, 1, 0.95) end
@@ -1287,7 +1293,7 @@ local function cap_panel(W, Hh)
   gfx.drawstr(tail_fit(string.format("recu : %d op Launchpad | %d val Twister | dernier : %s", cap.nop, cap.nval, cap.lastev), bw))
   gfx.setfont(2, "Arial", 12, 'b')
   local specs = {
-    { cap.macro and "✔ VALIDER LA MACRO" or "VALIDER (sans GO)", 1.6, 0.15, 0.50, 0.25, function() cap_finalize() end },
+    { cap.macro and "✔ VALIDER LE RUSH" or "VALIDER (sans GO)", 1.6, 0.15, 0.50, 0.25, function() cap_finalize() end },
     { "ANNULER LIGNE", 1.3, 0.45, 0.30, 0.10, function() cap_reset_line(); msg = "Ligne annulee."; msg_err = false end },
     { cap.star and "SYNC * : ON" or "SYNC * : OFF", 1.2, cap.star and 0.15 or 0.20, cap.star and 0.50 or 0.25, cap.star and 0.30 or 0.35, function() cap.star = not cap.star end },
     { cap.snap and "SNAP : ON" or "SNAP : OFF", 1, 0.20, 0.25, 0.35, function() cap.snap = not cap.snap end },
@@ -1483,7 +1489,7 @@ local function mac_label(m)                            -- libelle affiche : le n
   return n
 end
 local function mac_check(m)
-  if trim(m.text) == "" then m.err = "macro vide"; return end
+  if trim(m.text) == "" then m.err = "rush vide"; return end
   local _, errs = compile(m.text, { 1 }, m.toggle)
   m.err = errs[1]
 end
@@ -1570,7 +1576,7 @@ local function lp_place(ms)
     end
   end
   if placed > 0 then mac_save() end
-  msg = placed .. " macro(s) posee(s) sur le Launchpad"
+  msg = placed .. " rush(es) pose(s) sur le Launchpad"
         .. (already > 0 and ("  (" .. already .. " deja presente(s))") or "")
         .. (full and "  -  Launchpad plein (64 pads)" or "")
   msg_err = full
@@ -1585,7 +1591,7 @@ local function lp_remove(ms)
 end
 
 local function mac_add(text, name, color)
-  if #macros >= MAC_MAX then msg = "64 macros maximum : supprime-en une d'abord."; msg_err = true; return nil end
+  if #macros >= MAC_MAX then msg = "64 rushes maximum : supprimes-en un d'abord."; msg_err = true; return nil end
   local id = mac_next_id; mac_next_id = id + 1
   local nm = mac_clean(name)
   local txt = (text or ""):gsub(";", ",")
@@ -1601,7 +1607,7 @@ end
 local ED = { on = false }
 local function mac_edit()
   local m = mac_find(mcur)
-  if not m then msg = "Selectionne une macro."; msg_err = true; return end
+  if not m then msg = "Selectionne un rush."; msg_err = true; return end
   ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, m.id, false, m.text or "", false, false
   ED.cur, ED.sug, ED.si, ED.view = #ED.text, {}, 1, 0
   ED.refocus()
@@ -1616,7 +1622,7 @@ end
 -- boite REAPER a l'ancienne (Maj+E, ou bouton dans l'editeur)
 function ED.classic(text)
   reaper.SetExtState("NowUndo_Scn", "typing", string.format("%.3f", reaper.time_precise() + 3600), false)   -- MIDI Learn : clavier en pause
-  local ok, ret = reaper.GetUserInputs("Modifier la macro", 1, "Syntaxe (sans looper) :,extrawidth=520", ui_in(text))
+  local ok, ret = reaper.GetUserInputs("Modifier le rush", 1, "Syntaxe (sans looper) :,extrawidth=520", ui_in(text))
   reaper.SetExtState("NowUndo_Scn", "typing", "0", false)
   if ok then return ui_out(ret) end
 end
@@ -1747,7 +1753,7 @@ function ED.close(save)
   if save and m then
     m.text = mac_clean((ED.text):gsub(";", ","))
     mac_check(m); mac_save()
-    msg = m.err and ("Macro invalide : " .. m.err) or "Macro modifiee."; msg_err = m.err ~= nil
+    msg = m.err and ("Rush invalide : " .. m.err) or "Rush modifie."; msg_err = m.err ~= nil
   end
   ED.on = false
 end
@@ -1783,7 +1789,7 @@ function ED.draw(W, Hh, eclick)
   local m = mac_find(ED.id)
   gfx.setfont(3, "Arial", 13, 'b'); gfx.set(0.9, 0.8, 0.2, 1)
   gfx.x, gfx.y = px + 12, py + 10
-  gfx.drawstr(ED.new and "NOUVELLE MACRO" or ("EDITION DE LA MACRO" .. ((m and m.name ~= "") and ("  -  " .. m.name) or "")))
+  gfx.drawstr(ED.new and "NOUVEAU RUSH" or ("EDITION DU RUSH" .. ((m and m.name ~= "") and ("  -  " .. m.name) or "")))
   -- zone de texte
   local tx, ty, tw, th = px + 12, py + 34, pw - 24, 30
   gfx.set(0.04, 0.04, 0.06, 1); gfx.rect(tx, ty, tw, th)
@@ -1864,28 +1870,34 @@ function ED.draw(W, Hh, eclick)
 end
 local function mac_rename()
   local m = mac_find(mcur)
-  if not m then msg = "Selectionne une macro."; msg_err = true; return end
-  local ok, ret = reaper.GetUserInputs("Nommer la macro", 1, "Nom (vide = afficher l'action) :,extrawidth=240", m.name)
-  if ok then m.name = mac_clean(ret); mac_save(); msg = (m.name == "") and "Nom efface : le pad affichera l'action." or "Macro renommee."; msg_err = false end
+  if not m then msg = "Selectionne un rush."; msg_err = true; return end
+  local ok, ret = reaper.GetUserInputs("Nommer le rush", 1, "Nom (vide = afficher l'action) :,extrawidth=240", (m.name ~= "") and m.name or ED.title(m.text))
+  if ok then m.name = mac_clean(ret); mac_save(); msg = (m.name == "") and "Nom efface : le pad affichera l'action." or "Rush renomme."; msg_err = false end
 end
 local function mac_new()                    -- ADD : ouvre l'editeur (assistant + palette) sur une macro vide
-  if #macros >= MAC_MAX then msg = "64 macros maximum."; msg_err = true; return end
+  if #macros >= MAC_MAX then msg = "64 rushes maximum."; msg_err = true; return end
   ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, nil, true, "", false, false
   ED.cur, ED.sug, ED.si, ED.view = 0, {}, 1, 0
   ED.refocus()
 end
--- validation d'une NOUVELLE macro (appelee par ED.close) : nom demande, puis creation
+-- titre propose = le contenu (virgules -> " - ", tronque)
+function ED.title(text)
+  local t = trim((text or ""):gsub("%s*,%s*", " - "):gsub("%s+", " "))
+  if #t > 40 then t = t:sub(1, 40) end
+  return t
+end
+-- validation d'une NOUVELLE macro (appelee par ED.close) : nom demande (contenu propose), puis creation
 function ED.create(text)
   if trim(text) == "" then return end
   reaper.SetExtState("NowUndo_Scn", "typing", string.format("%.3f", reaper.time_precise() + 3600), false)
-  local ok2, nm = reaper.GetUserInputs("Nom de la macro", 1, "Nom (vide = afficher l'action) :,extrawidth=240", "")
+  local ok2, nm = reaper.GetUserInputs("Nom du rush", 1, "Nom (vide = afficher l'action) :,extrawidth=240", ED.title(text))
   reaper.SetExtState("NowUndo_Scn", "typing", "0", false)
   local m = mac_add(text, ok2 and nm or "", nil)
-  if m then msg = m.err and ("Macro creee mais invalide : " .. m.err) or ("Macro creee : " .. mac_label(m)); msg_err = m.err ~= nil end
+  if m then msg = m.err and ("Rush cree mais invalide : " .. m.err) or ("Rush cree : " .. mac_label(m)); msg_err = m.err ~= nil end
 end
 local function mac_recolor()
   local ms = sel_ids()
-  if #ms == 0 then msg = "Selectionne une macro."; msg_err = true; return end
+  if #ms == 0 then msg = "Selectionne un rush."; msg_err = true; return end
   local ok, res, col = pcall(reaper.GR_SelectColor)
   if ok and res ~= 0 and col then
     local r, g, b = reaper.ColorFromNative(col)
@@ -1897,7 +1909,7 @@ end
 local function mac_delete()
   local ms = sel_ids()
   if #ms == 0 then return end
-  if #ms > 1 and reaper.MB("Supprimer " .. #ms .. " macros ?", "NowUndo - macros", 4) ~= 6 then return end
+  if #ms > 1 and reaper.MB("Supprimer " .. #ms .. " rushes ?", "NowUndo - rushes", 4) ~= 6 then return end
   local rm = {}
   for _, m in ipairs(ms) do rm[m.id] = true end
   local keep = {}
@@ -1906,17 +1918,17 @@ local function mac_delete()
   for c, id in pairs(layout) do if rm[id] then layout[c] = nil end end
   msel, mcur, manchor = {}, 0, 0
   mac_save()
-  msg = #ms .. " macro(s) supprimee(s)."; msg_err = false
+  msg = #ms .. " rush(es) supprime(s)."; msg_err = false
 end
 -- COPIER / COUPER / COLLER / DUPLIQUER (Ctrl+C / X / V / D, ou clic droit sur une ligne de la liste)
 function ED.mcopy(quiet)
   local ms = sel_ids()
-  if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true; return false end
+  if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true; return false end
   H._mclip = {}
   for _, o in ipairs(ms) do
     H._mclip[#H._mclip + 1] = { text = o.text, name = o.name, color = o.color, toggle = o.toggle, all = o.all, gate = o.gate }
   end
-  if not quiet then msg = #ms .. " macro(s) copiee(s) : Ctrl+V pour les coller."; msg_err = false end
+  if not quiet then msg = #ms .. " rush(es) copie(s) : Ctrl+V pour les coller."; msg_err = false end
   return true
 end
 function ED.mcut()
@@ -1929,12 +1941,12 @@ function ED.mcut()
   for c, id in pairs(layout) do if rm[id] then layout[c] = nil end end
   msel, mcur, manchor = {}, 0, 0
   mac_save()
-  msg = #H._mclip .. " macro(s) coupee(s) : Ctrl+V pour les coller."; msg_err = false
+  msg = #H._mclip .. " rush(es) coupe(s) : Ctrl+V pour les coller."; msg_err = false
 end
 -- colle des copies JUSTE APRES la derniere macro selectionnee (sinon a la fin)
 function ED.mpaste(src)
   src = src or H._mclip
-  if not src or #src == 0 then msg = "Rien a coller : Ctrl+C ou Ctrl+X sur une ou plusieurs macros d'abord."; msg_err = true; return end
+  if not src or #src == 0 then msg = "Rien a coller : Ctrl+C ou Ctrl+X sur un ou plusieurs rushes d'abord."; msg_err = true; return end
   local after = 0
   for i, m in ipairs(macros) do if msel[m.id] then after = i end end
   if after == 0 then local _, ci = mac_find(mcur); after = ci or #macros end
@@ -1950,7 +1962,7 @@ function ED.mpaste(src)
   for k, m in ipairs(made) do table.insert(macros, math.min(after + k, #macros + 1), m) end
   msel = {}; for _, m in ipairs(made) do msel[m.id] = true end
   mcur = made[1].id; manchor = mcur; mwant = true
-  mac_save(); msg = #made .. " macro(s) collee(s)."; msg_err = false
+  mac_save(); msg = #made .. " rush(es) colle(s)."; msg_err = false
 end
 -- Ctrl+C / X / V / D lus directement (js_ReaScriptAPI) quand la fenetre a le focus : marche meme si le MIDI Learn
 -- bloque C / V (touches apprises sans modificateur) ou si getchar ne renvoie pas les codes de controle.
@@ -1970,7 +1982,7 @@ function ED.vk_poll()
 end
 function ED.mdup()
   local ms = sel_ids()
-  if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true; return end
+  if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true; return end
   local src = {}
   for _, o in ipairs(ms) do src[#src + 1] = { text = o.text, name = o.name, color = o.color, toggle = o.toggle, all = o.all, gate = o.gate } end
   ED.mpaste(src)
@@ -2016,7 +2028,7 @@ local function sel_targets()
 end
 
 local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro GATE (appui / relachement du pad)
-  if m.err then msg = "Macro '" .. mac_label(m) .. "' invalide : " .. m.err; msg_err = true; return end
+  if m.err then msg = "Rush '" .. mac_label(m) .. "' invalide : " .. m.err; msg_err = true; return end
   reaper.gmem_attach(GMEM)
   if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end       -- mode ALL : action collective sur les 8 loopers
   local items
@@ -2038,7 +2050,7 @@ local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro
   end
   local tl_ = {}
   for _, i in ipairs(targets) do tl_[#tl_ + 1] = "L" .. i end
-  msg = "Macro '" .. mac_label(m) .. "' -> " .. (m.all and "ALL" or table.concat(tl_, ",")) .. (m.toggle and " [toggle]" or "") .. (m.gate and " [gate]" or "")
+  msg = "Rush '" .. mac_label(m) .. "' -> " .. (m.all and "ALL" or table.concat(tl_, ",")) .. (m.toggle and " [toggle]" or "") .. (m.gate and " [gate]" or "")
         .. (#dead > 0 and ("  (looper absent : " .. table.concat(dead, ",") .. ")") or "")
         .. (nsync > 0 and ("  -  " .. nsync .. " action(s) * en attente du point de synchro") or "")
         .. (nglob > 0 and ("  -  " .. nglob .. " commande(s) envoyee(s) au Launchpad") or "")
@@ -2046,7 +2058,7 @@ local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro
 end
 local function mac_test()
   local ms = sel_ids()
-  if #ms == 0 then msg = "Selectionne une macro a tester."; msg_err = true; return end
+  if #ms == 0 then msg = "Selectionne un rush a tester."; msg_err = true; return end
   local tg = sel_targets()
   for _, m in ipairs(ms) do run_macro(m, tg) end
 end
@@ -2150,7 +2162,7 @@ end
 mac_from_capture = function(text)                    -- capture et validation = un seul bouton : une capture = une macro
   local m = mac_add(text, "", nil)
   cap_stop()
-  if m then msg = "Macro enregistree : " .. text; msg_err = false end
+  if m then msg = "Rush enregistre : " .. text; msg_err = false end
 end
 
 local function mac_capture_toggle()
@@ -2162,7 +2174,7 @@ local function mac_capture_toggle()
 end
 
 local function mac_export()
-  local ok, name = reaper.GetUserInputs("Exporter les macros", 1, "Nom du fichier :,extrawidth=200", last_export)
+  local ok, name = reaper.GetUserInputs("Exporter les rushes", 1, "Nom du fichier :,extrawidth=200", last_export)
   if not ok or trim(name) == "" then return end
   name = trim(name):gsub("[\\/:*?\"<>|]", "_")
   if not name:match("%.%w+$") then name = name .. ".txt" end
@@ -2175,21 +2187,21 @@ local function mac_export()
 end
 local function mac_import()
   reaper.RecursiveCreateDirectory(MDIR, 0)
-  local ok, file = reaper.GetUserFileNameForRead(MDIR .. last_export, "Importer des macros", ".txt")
+  local ok, file = reaper.GetUserFileNameForRead(MDIR .. last_export, "Importer des rushes", ".txt")
   if not ok then return end
   local f = io.open(file, "r")
   if not f then msg = "Lecture impossible"; msg_err = true; return end
   local txt = f:read("*a"); f:close()
   local list, lay = mac_deserialize(txt)
-  if #list == 0 then msg = "Aucune macro dans ce fichier."; msg_err = true; return end
-  if #macros > 0 and reaper.MB("Remplacer les " .. #macros .. " macros actuelles (et leur disposition) par les " .. #list .. " du fichier ?", "NowUndo - macros", 4) ~= 6 then return end
+  if #list == 0 then msg = "Aucun rush dans ce fichier."; msg_err = true; return end
+  if #macros > 0 and reaper.MB("Remplacer les " .. #macros .. " macros actuelles (et leur disposition) par les " .. #list .. " du fichier ?", "NowUndo - rushes", 4) ~= 6 then return end
   mac_apply(list, lay); mac_save()
   last_export = file:match("([^/\\]+)$") or last_export
-  msg = "Importe : " .. last_export .. "  (" .. #list .. " macros)"; msg_err = false
+  msg = "Importe : " .. last_export .. "  (" .. #list .. " rushes)"; msg_err = false
 end
 
 local function mac_status()
-  return string.format("%d/%d macros | %d sur le LP%s", #macros, MAC_MAX, lp_count(), msel and (sel_count() > 0 and (" | " .. sel_count() .. " sel.") or "") or "")
+  return string.format("%d/%d rushes | %d sur le LP%s", #macros, MAC_MAX, lp_count(), msel and (sel_count() > 0 and (" | " .. sel_count() .. " sel.") or "") or "")
 end
 local function set_tab(t)
   if capturing then msg = "Termine la capture avant de changer d'onglet."; msg_err = true; return end
@@ -2212,7 +2224,7 @@ local function mac_drop_outside(d)
   for _, m in ipairs(ms) do ids[#ids + 1] = tostring(m.id) end
   local x, y = reaper.GetMousePosition()
   reaper.SetExtState(MAC_EXT, "drop", string.format("%s\t%d\t%d\t%.3f", table.concat(ids, ","), x, y, reaper.time_precise()), false)
-  msg = #ms .. " macro(s) deposee(s) sur le Launchpad (case sous le curseur)."; msg_err = false
+  msg = #ms .. " rush(es) depose(s) sur le Launchpad (case sous le curseur)."; msg_err = false
 end
 
 local function mac_key(c)
@@ -2239,18 +2251,18 @@ local function mac_key(c)
   elseif c == 101 then mac_edit()                                          -- E : editeur (assistant + palette)
   elseif c == 69 then                                                      -- Maj+E : boite REAPER a l'ancienne
     local m = mac_find(mcur)
-    if not m then msg = "Selectionne une macro."; msg_err = true
+    if not m then msg = "Selectionne un rush."; msg_err = true
     else
       local t = ED.classic(m.text)
       if t then
         m.text = mac_clean(t:gsub(";", ",")); mac_check(m); mac_save()
-        msg = m.err and ("Macro invalide : " .. m.err) or "Macro modifiee."; msg_err = m.err ~= nil
+        msg = m.err and ("Rush invalide : " .. m.err) or "Rush modifie."; msg_err = m.err ~= nil
       end
     end
   elseif c == 110 or c == 78 then mac_rename()
   elseif c == 103 or c == 71 then                                          -- G : mode GATE de la selection
     local ms = sel_ids()
-    if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true
+    if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true
     else
       local nv = not ms[1].gate
       for _, o in ipairs(ms) do o.gate = nv end
@@ -2348,7 +2360,7 @@ local function mac_draw(W, Hh, down)
   if #macros == 0 then
     gfx.setfont(2, "Arial", 13); gfx.set(1, 1, 1, 0.45)
     gfx.x, gfx.y = 24, LIST_Y + 10
-    gfx.drawstr("Aucune macro : ● CAPTURE (fais l'action puis VALIDER) ou ADD (ecris la syntaxe, sans looper).")
+    gfx.drawstr("Aucun rush : ● CAPTURE (fais l'action puis VALIDER) ou ADD (ecris la syntaxe, sans looper).")
   end
   local now_t = reaper.time_precise()
   for c = 0, 1 do
@@ -2436,13 +2448,13 @@ local function mac_draw(W, Hh, down)
             local nv = not m.all
             if msel[m.id] then for _, o in ipairs(sel_ids()) do o.all = nv end else m.all = nv end
             mac_save()
-            msg = nv and "Mode ALL : la macro s'applique aux 8 loopers, pas seulement au looper selectionne." or "Mode ALL retire."; msg_err = false
+            msg = nv and "Mode ALL : le rush s'applique aux 8 loopers, pas seulement au looper selectionne." or "Mode ALL retire."; msg_err = false
           elseif mx >= px and mx < px + 20 then                          -- ▶ : lecture de CETTE macro
             mflash[m.id] = now_t + 0.25
             mcur = m.id
             run_macro(m, sel_targets())
           elseif mx >= dx and mx < dx + 16 then                          -- × : supprimer cette macro
-            if reaper.MB("Supprimer la macro '" .. mac_label(m) .. "' ?", "NowUndo - macros", 4) == 6 then
+            if reaper.MB("Supprimer le rush '" .. mac_label(m) .. "' ?", "NowUndo - rushes", 4) == 6 then
               msel = { [m.id] = true }; mcur = m.id; mac_delete()
             end
           elseif mac_last_click_id == m.id and t - mac_last_click_t < 0.35 then
@@ -2471,7 +2483,7 @@ local function mac_draw(W, Hh, down)
     end
   end
 
-  -- glisser : hors fenetre = vers le Launchpad ; sur une autre macro = reordonner
+  -- glisser : hors fenetre = vers le Launchpad ; sur un autre rush = reordonner
   local over = nil
   if drag and drag.kind == "mac" then
     if down then
@@ -2479,7 +2491,7 @@ local function mac_draw(W, Hh, down)
         drag.active = true
         local n = msel[drag.id] and sel_count() or 1
         drag.label = n > 1 and (drag.label .. "  +" .. (n - 1)) or drag.label
-        msg = "Relache sur le Launchpad (hors de cette fenetre) ou sur une autre macro pour reordonner."; msg_err = false
+        msg = "Relache sur le Launchpad (hors de cette fenetre) ou sur un autre rush pour reordonner."; msg_err = false
       end
       if drag.active then over = idx_at(mx, my) end
     else
@@ -2511,7 +2523,7 @@ local function mac_draw(W, Hh, down)
   local cm = mac_find(mcur)
   if cm and cm.err then
     gfx.set(1, 0.4, 0.4, 1); gfx.x, gfx.y = 14, my0 + 16
-    gfx.drawstr(fit("Macro '" .. mac_label(cm) .. "' : " .. cm.err, W - 28))
+    gfx.drawstr(fit("Rush '" .. mac_label(cm) .. "' : " .. cm.err, W - 28))
   elseif cm then
     gfx.set(1, 1, 1, 0.55); gfx.x, gfx.y = 14, my0 + 16
     gfx.drawstr(fit("Action : " .. cm.text .. (cm.toggle and "   [toggle]" or "") .. (cm.gate and "   [gate]" or "") .. (cm.all and "   [all]" or ""), W - 28))
@@ -2524,7 +2536,7 @@ local function mac_draw(W, Hh, down)
     if btn(12, Hh - 100, w2, 40, "● CAPTURE / VALIDER", 0.55, 0.15, 0.15) then mac_capture_toggle() end
     if btn(12 + w2 + 4, Hh - 100, W - 12 - (12 + w2 + 4), 40, "→ LAUNCHPAD", 0.15, 0.35, 0.60) then
       local ms = sel_ids()
-      if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true else lp_place(ms) end
+      if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_place(ms) end
     end
     gfx.setfont(2, "Arial", 12, 'b')
     local bw = math.floor((W - 24 - 4 * 5) / 6)
@@ -2539,10 +2551,10 @@ local function mac_draw(W, Hh, down)
     if btn(x4(2), Hh - 26, w4, 22, "IMPORT", 0.20, 0.25, 0.35) then mac_import() end
     if btn(x4(3), Hh - 26, w4, 22, "RETIRER DU LP", 0.35, 0.22, 0.15) then
       local ms = sel_ids()
-      if #ms == 0 then msg = "Selectionne une ou plusieurs macros."; msg_err = true else lp_remove(ms) end
+      if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_remove(ms) end
     end
     if btn(x4(4), Hh - 26, w4, 22, "VIDER LE LP", 0.45, 0.15, 0.15) then
-      if lp_count() > 0 and reaper.MB("Retirer les " .. lp_count() .. " macros du Launchpad ? (elles restent dans le chutier)", "NowUndo - macros", 4) == 6 then
+      if lp_count() > 0 and reaper.MB("Retirer les " .. lp_count() .. " rushes du Launchpad ? (ils restent dans le chutier)", "NowUndo - rushes", 4) == 6 then
         layout = {}; mac_save(); msg = "Launchpad vide."; msg_err = false
       end
     end
@@ -2603,7 +2615,7 @@ local function main()
   gfx.setfont(2, "Arial", 12, 'b')
   local on_scn = (tab == "scn")
   if btn(12, 6, 92, 22, "SCENARIO", on_scn and 0.55 or 0.20, on_scn and 0.40 or 0.25, on_scn and 0.08 or 0.35) then set_tab("scn") end
-  if btn(108, 6, 84, 22, "MACROS", (not on_scn) and 0.55 or 0.20, (not on_scn) and 0.40 or 0.25, (not on_scn) and 0.08 or 0.35) then set_tab("mac") end
+  if btn(108, 6, 84, 22, "RUSHES", (not on_scn) and 0.55 or 0.20, (not on_scn) and 0.40 or 0.25, (not on_scn) and 0.08 or 0.35) then set_tab("mac") end
   gfx.setfont(2, "Arial", 12)
   if capturing then gfx.set(1, 0.35, 0.35, 1) else gfx.set(1, 1, 1, 0.5) end
   gfx.x, gfx.y = 202, 11

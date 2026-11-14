@@ -2910,7 +2910,7 @@ function VL.macro_release(cell)
   if VL.macros.gate_tg then VL.macros.gate_tg[cell] = nil end
   VL.macro_fire(cell, "off", tg)   -- gate : relachement = tout OFF (pas une bascule)
 end
-VL.register_layer({ id = "macros", name = "Action macros", cell = function(row, col)
+VL.register_layer({ id = "macros", name = "Rushes", cell = function(row, col)
   local cell = (row - 1) * 8 + col
   return {
     short = fn(function() VL.macro_press(cell) end),
