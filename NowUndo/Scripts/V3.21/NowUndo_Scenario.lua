@@ -1597,15 +1597,137 @@ local function mac_add(text, name, color)
   return m
 end
 
+-- EDITEUR DE MACRO : texte + palette d'actions par categorie (un clic = l'action ajoutee apres une virgule)
+local ED = { on = false }
 local function mac_edit()
   local m = mac_find(mcur)
   if not m then msg = "Selectionne une macro."; msg_err = true; return end
-  local ok, ret = reaper.GetUserInputs("Modifier la macro", 1, "Syntaxe (sans looper) :,extrawidth=520", ui_in(m.text))
-  if ok then
-    m.text = mac_clean((ui_out(ret)):gsub(";", ","))
+  ED.on, ED.id, ED.text, ED.off, ED.star = true, m.id, m.text or "", false, false
+end
+-- mots on / off (le bouton OFF leur ajoute "off")
+ED.ONOFF = { rec = 1, replace = 1, autorep = 1, multiply = 1, rev = 1, pp = 1, slicer = 1, cloud = 1, link = 1, auto = 1,
+             oneshot = 1, br = 1, e1 = 1, e2 = 1, e3 = 1, e4 = 1, play = 1 }
+-- { libelle de categorie, { mot, ... } } ; un mot suivi de "..." ouvre un menu de valeurs
+ED.CATS = {
+  { "Enregistrement", { "rec", "replace", "autorep", "multiply", "rerec", "auto" } },
+  { "Lecture",        { "play", "stop", "restart", "rev", "pp", "oneshot", "fullloop", "part..." } },
+  { "Modes",          { "slicer", "cloud", "br", "brf...", "link" } },
+  { "Effets",         { "e1", "e2", "e3", "e4" } },
+  { "Niveaux",        { "vol...", "speed...", "pitch...", "fb...", "smix...", "brmix..." } },
+  { "Boucle",         { "in...", "out...", "quant", "undo", "redo", "clear", "clearfull", "reset" } },
+  { "Cloud",          { "cdens...", "cchaos...", "cspread...", "cpitch...", "cpos...", "clfo...", "clfodepth..." } },
+  { "Slicer",         { "ssteps...", "srate...", "sgrid...", "sdecay...", "sattack...", "spitch...", "smax..." } },
+  { "Global",         { "clearall", "clearallfull", "sync", "unsync", "syncall", "unsyncall", "r(n)...", "g(n)..." } },
+}
+ED.VALS = {
+  vol = { "0db", "-3db", "-6db", "-12db", "-24db", "50%", "reset" }, speed = { "0.5", "0.75", "1", "1.5", "2", "reset" },
+  pitch = { "-12", "-7", "-5", "5", "7", "12", "reset" }, fb = { "0", "0.5", "1", "1.5", "reset" },
+  smix = { "0", "25%", "50%", "75%", "1", "reset" }, brmix = { "0", "25%", "50%", "75%", "1", "reset" },
+  ["in"] = { "0", "0.25", "0.5", "0.75", "reset" }, out = { "0.25", "0.5", "0.75", "1", "reset" },
+  brf = { "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16", "1/32", "1/64", "free" }, part = { "1", "2", "3" },
+  cdens = { "0", "0.25", "0.5", "0.75", "1", "reset" }, cchaos = { "0", "0.25", "0.5", "0.75", "1", "reset" },
+  cspread = { "0", "0.25", "0.5", "0.75", "1", "reset" }, cpitch = { "0", "25", "50", "100", "reset" },
+  cpos = { "0", "25", "50", "75", "reset" }, clfo = { "0.25", "0.5", "1", "2", "4", "reset" },
+  clfodepth = { "0", "25", "50", "100", "reset" }, ssteps = { "4", "8", "16", "32", "reset" }, srate = { "0", "1", "2", "3", "4", "5", "reset" },
+  sgrid = { "0", "1", "2", "3", "5", "7", "reset" }, sdecay = { "20", "50", "150", "500", "2000", "reset" },
+  sattack = { "0", "10", "50", "100", "reset" }, spitch = { "0", "25", "50", "100", "reset" }, smax = { "4", "8", "16", "32", "reset" },
+  ["r(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" }, ["g(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" },
+}
+function ED.add(tok)
+  local t = (ED.text:gsub("[%s,]+$", ""))
+  ED.text = (t == "") and tok or (t .. ", " .. tok)
+end
+function ED.pick(word)
+  local key = word:gsub("%.%.%.$", "")
+  local tok = key
+  if word:sub(-3) == "..." then
+    local vals = ED.VALS[key] or {}
+    local items = {}
+    for i, v in ipairs(vals) do items[i] = v end
+    items[#items + 1] = "autre valeur..."
+    gfx.x, gfx.y = mx, my
+    local k = gfx.showmenu(table.concat(items, "|"))
+    if not k or k < 1 then return end
+    local v = vals[k]
+    if not v then
+      local ok, r = reaper.GetUserInputs("Valeur : " .. key, 1, key .. " =", "")
+      if not ok or trim(r) == "" then return end
+      v = trim(r)
+    end
+    if key == "r(n)" or key == "g(n)" then tok = key:sub(1, 1) .. "(" .. v .. ")" else tok = key .. " " .. v end
+  elseif ED.off and ED.ONOFF[key] then
+    tok = key .. " off"
+  end
+  if ED.star and not tok:match("^[rg]%(") and not tok:match("sync") then tok = tok .. "*" end
+  ED.add(tok)
+end
+function ED.close(save)
+  local m = mac_find(ED.id)
+  if save and m then
+    m.text = mac_clean((ED.text):gsub(";", ","))
     mac_check(m); mac_save()
     msg = m.err and ("Macro invalide : " .. m.err) or "Macro modifiee."; msg_err = m.err ~= nil
   end
+  ED.on = false
+end
+function ED.key(c)
+  if c == 13 then ED.close(true)
+  elseif c == 8 then ED.text = ED.text:sub(1, (utf8.offset(ED.text, -1) or (#ED.text + 1)) - 1)
+  elseif c >= 32 and c <= 255 and c ~= 127 then ED.text = ED.text .. utf8.char(c) end
+end
+function ED.draw(W, Hh, eclick)
+  local saved = click
+  click = eclick
+  gfx.set(0, 0, 0, 0.75); gfx.rect(0, 0, W, Hh)
+  local px, py, pw, ph = 14, 14, W - 28, Hh - 28
+  gfx.set(0.10, 0.10, 0.14, 1); gfx.rect(px, py, pw, ph)
+  gfx.set(1, 1, 1, 0.25); gfx.rect(px, py, pw, ph, 0)
+  local m = mac_find(ED.id)
+  gfx.setfont(3, "Arial", 13, 'b'); gfx.set(0.9, 0.8, 0.2, 1)
+  gfx.x, gfx.y = px + 12, py + 10
+  gfx.drawstr("EDITION DE LA MACRO" .. ((m and m.name ~= "") and ("  -  " .. m.name) or ""))
+  -- zone de texte
+  local tx, ty, tw, th = px + 12, py + 34, pw - 24, 30
+  gfx.set(0.04, 0.04, 0.06, 1); gfx.rect(tx, ty, tw, th)
+  gfx.set(0.55, 0.85, 1, 0.6); gfx.rect(tx, ty, tw, th, 0)
+  gfx.setfont(2, "Arial", 14); gfx.set(1, 1, 1, 1)
+  local shown = ED.text .. ((math.floor(reaper.time_precise() * 2) % 2 == 0) and "|" or " ")
+  while #shown > 1 and gfx.measurestr(shown) > tw - 16 do shown = shown:sub((utf8.offset(shown, 2) or 2)) end
+  gfx.x, gfx.y = tx + 8, ty + 7; gfx.drawstr(shown)
+  -- verification en direct
+  local _, errs = compile(ED.text, { 1 }, m and m.toggle)
+  gfx.setfont(2, "Arial", 12)
+  if ED.text == "" then gfx.set(1, 1, 1, 0.45); gfx.x, gfx.y = tx, ty + th + 6; gfx.drawstr("Cliquez des actions ci-dessous, ou tapez au clavier.")
+  elseif #errs > 0 then gfx.set(1, 0.4, 0.4, 1); gfx.x, gfx.y = tx, ty + th + 6; gfx.drawstr(fit(errs[1], tw))
+  else gfx.set(0.4, 1, 0.5, 1); gfx.x, gfx.y = tx, ty + th + 6; gfx.drawstr("OK") end
+  -- commandes
+  local by, bh = ty + th + 26, 26
+  gfx.setfont(2, "Arial", 12, 'b')
+  if btn(tx, by, 130, bh, "VALIDER (Entree)", 0.15, 0.45, 0.20) then ED.close(true) end
+  if btn(tx + 136, by, 130, bh, "ANNULER (Echap)", 0.45, 0.15, 0.15) then ED.close(false) end
+  if btn(tx + 272, by, 150, bh, "RETIRER LA DERNIERE", 0.25, 0.25, 0.32) then ED.text = ED.text:match("^(.*),") or "" end
+  if btn(tx + 428, by, 80, bh, "EFFACER", 0.25, 0.25, 0.32) then ED.text = "" end
+  if btn(tx + 520, by, 90, bh, ED.off and "OFF : oui" or "OFF : non", ED.off and 0.60 or 0.22, ED.off and 0.25 or 0.22, ED.off and 0.20 or 0.28) then ED.off = not ED.off end
+  if btn(tx + 616, by, 120, bh, ED.star and "* SYNCHRO : oui" or "* SYNCHRO : non", ED.star and 0.20 or 0.22, ED.star and 0.40 or 0.22, ED.star and 0.65 or 0.28) then ED.star = not ED.star end
+  -- palette
+  local y = by + bh + 14
+  gfx.setfont(2, "Arial", 12)
+  for _, cat in ipairs(ED.CATS) do
+    gfx.set(0.9, 0.8, 0.2, 1); gfx.setfont(2, "Arial", 12, 'b')
+    gfx.x, gfx.y = tx, y + 6; gfx.drawstr(cat[1])
+    gfx.setfont(2, "Arial", 12)
+    local x = tx + 112
+    for _, w in ipairs(cat[2]) do
+      local bw = gfx.measurestr(w) + 18
+      if x + bw > tx + tw then x = tx + 112; y = y + 28 end
+      local key = w:gsub("%.%.%.$", "")
+      local isoff = ED.off and ED.ONOFF[key]
+      if btn(x, y, bw, 24, w, isoff and 0.40 or 0.20, isoff and 0.18 or 0.26, isoff and 0.18 or 0.36) then ED.pick(w) end
+      x = x + bw + 5
+    end
+    y = y + 32
+  end
+  click = saved
 end
 local function mac_rename()
   local m = mac_find(mcur)
@@ -2197,7 +2319,8 @@ local function main()
   local c = gfx.getchar()
   if c == -1 then save_win(); return end
   if c == 27 then
-    if show_help then show_help = false
+    if ED.on then ED.close(false); c = 0
+    elseif show_help then show_help = false
     elseif capturing then cap_stop()
     else save_win(); return end
   end
@@ -2214,10 +2337,13 @@ local function main()
   was_down = down
   local helpclick = click and show_help
   if show_help then click = false end
+  local edclick = click and ED.on
+  if ED.on then click = false end
   local W, Hh = gfx.w, gfx.h
 
   -- clavier
-  if show_help then
+  if ED.on then ED.key(c)
+  elseif show_help then
     if c == 63 or c == 104 or c == 72 or c == 13 or c == 32 then show_help = false
     elseif c == 30064 then help_scroll = help_scroll - 1
     elseif c == 1685026670 then help_scroll = help_scroll + 1 end
@@ -2426,6 +2552,7 @@ local function main()
     gfx.drawstr("molette / haut-bas : defiler   |   ?  ou  Echap : fermer")
     if helpclick and (chov or mx < px or mx > px + pw or my < py or my > py + ph) then show_help = false end
   end
+  if ED.on then ED.draw(W, Hh, edclick) end
 
   gfx.update()
   reaper.defer(main)
