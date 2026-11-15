@@ -939,7 +939,7 @@ html, body {
   // Rangees B et A du Launchpad (page 1), memes positions et couleurs. {a: action} passe par le Launchpad
   // (meme logique de groupe que le pad, et etats du Launchpad tenus a jour) ; {c: n} = commande directe au JSFX.
   const LV_TR = [["FULL LOOP", { a: "full_loop" }, l => l.len > 0 && l.inN <= 0.001 && l.outN >= 0.999, "#DDDDDD"],
-                 ["QUANTISE", { a: "quantise_inout" }, null, "#99FF66"], ["RESTART", { a: "restart" }, null, "#CCCCCC"],
+                 ["DROP", { a: "drop_group" }, null, "#FF66CC"], ["RESTART", { a: "restart" }, null, "#CCCCCC"],
                  ["REVERSE", { a: "reverse" }, l => l.fl & 1, "#FFD320"], ["CLOUD", { a: "cloud" }, l => l.fl & 8, "#66CCFF"],
                  ["SLICER", { a: "slicer" }, l => l.fl & 4, "#FFD320"], ["REDO", { a: "redo" }, null, "#CCCCCC"],
                  ["UNDO", { a: "undo" }, null, "#CCCCCC"]];

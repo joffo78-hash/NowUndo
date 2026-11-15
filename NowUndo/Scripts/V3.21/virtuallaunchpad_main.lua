@@ -2249,7 +2249,11 @@ PAD_LABEL[1]["5,1"] = "LAUNCH / GO (long = capture scenario)"
 bind(1, 5, 2, fn(function() if pedal_capture_action("sync_toggle") then return end VL.sync_toggle(false) end, function() return VL.sync_is_on() and "on" or "idle" end),
                fn(function() if pedal_capture_action("sync_toggle_all") then return end VL.sync_toggle(true) end), true)
 PAD_LABEL[1]["5,2"] = "SYNC/UNSYNC"; PAD_RGB[1]["5,2"] = 0x40C0FF   -- court = part en cours, long = 3 parts
-bind(1, 5, 7, act("quantise_inout"))
+-- DROP de groupe (remplace QUANTISE IN/OUT ; pad final B2 apres la permutation [LAYOUT]) : le groupe actif est mixe dans
+-- sa boucle la plus longue (voir VL.drop_group). Allume pendant le calcul. Quantise reste dispo par MIDI Learn / Twister.
+bind(1, 5, 7, fn(function() if pedal_capture_action("drop_group") then return end VL.drop_group() end,
+                 function() return VL.DROP.run and "on" or "idle" end))
+PAD_LABEL[1]["5,7"] = "DROP (mixdown du groupe dans la boucle la plus longue)"; PAD_RGB[1]["5,7"] = 0xFF66CC
 bind(1, 5, 8, act("full_loop"))
 -- Miroirs FX : helpers (les binds sont UNIQUEMENT sur D5-D8 = 5,5..5,8 plus bas).
 -- Maintenir PAGE 1 (5,9) puis appuyer sur D5-D8 pour changer le mode Toggle/Gate du slot.
@@ -2530,7 +2534,7 @@ end
 bind(1, 8, 7, act("rerec"));     bind(1, 8, 8, act("rec_overdub"), fn(function() VL.rec_pad_long() end), true) -- REC + sortie REC immediats a l'appui ; long = annule/clear si vide
 
 -- [LAYOUT] page 1 final (notation échiquier, A = bas) — permutation SANS toucher D3-D8 :
---   A1 CLEAR | A2 RESET | B1 FULL LOOP | B2 QUANTISE | C2 EXCLU | C3 SYNC
+--   A1 CLEAR | A2 RESET | B1 FULL LOOP | B2 DROP | C2 EXCLU | C3 SYNC
 --   D2 PAS PRECEDENT | D3 PAS SUIVANT | D4 AUTO | D5-D8 FX (poses explicitement apres)
 do
   local MOVE = {
@@ -2538,7 +2542,7 @@ do
     ["8,2"] = "8,1",  -- CLEAR -> A1
     ["7,2"] = "8,2",  -- RESET -> A2
     ["5,2"] = "6,3",  -- SYNC -> C3
-    ["5,7"] = "7,2",  -- QUANTISE -> B2
+    ["5,7"] = "7,2",  -- DROP (ex QUANTISE) -> B2
     ["5,8"] = "7,1",  -- FULL LOOP -> B1
     ["6,2"] = "5,2",  -- PAS PRECEDENT -> D2
   }
@@ -3946,6 +3950,7 @@ function LPF.pedal_poll_cmd()
   elseif name == "trigger" and arg ~= "" then VL.trigger(arg)
   elseif name == "excl_toggle" then VL.excl_toggle()
   elseif name == "excl_super_toggle" then VL.excl_super_toggle()
+  elseif name == "drop_group" then VL.drop_group()
   elseif name == "sync_toggle" then VL.sync_toggle(false)
   elseif name == "sync_toggle_all" then VL.sync_toggle(true) end
 end
@@ -4227,6 +4232,8 @@ function VL.web_poll_cmd()
     elseif op == "SEL" and tonumber(a) then         -- web v4.0 : appeler un looper (onglet Loopers) le selectionne ici
       local i = math.floor(tonumber(a))
       if i >= 1 and i <= NLOOP and S.sel_looper ~= i then VL.select_looper(i) end
+    elseif op == "ACT" and b == "drop_group" then             -- bouton DROP de l'onglet Loopers : groupe actif
+      VL.drop_group()
     elseif op == "ACT" and tonumber(a) and ACTIONS[b] then   -- ACT,looper,action : bouton de l'onglet Loopers
       local i = math.floor(tonumber(a))                      -- = meme chemin qu'un pad (groupe, etats, page Twister)
       if i >= 1 and i <= NLOOP then

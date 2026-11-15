@@ -104,8 +104,9 @@ propre page Launchpad** (`VL.web_with_page`).
   clic droit = action en off, Maj+E = boîte REAPER ; liste : Ctrl+C/X/V/D + clic droit ; titre par défaut = contenu ;
   « macros » renommées **Rushes** à l'écran.
 
-- **Drop de groupe (V3.24)** : `VL.drop_group()` / `VL.drop_tick()` dans le Launchpad, action MIDI Learn « Drop de groupe »,
-  commande `drop_group` dans `NowUndo_VLcmd/q`. Cible = boucle la plus longue (garde longueur et synchro), mixdown = nouvel
+- **Drop de groupe (V3.24)** : `VL.drop_group()` / `VL.drop_tick()` dans le Launchpad, **pad B2 de la page 1** (à la place de
+  QUANTISE IN/OUT, qui reste dispo par MIDI Learn / Twister), bouton DROP de l'onglet Loopers du web (`ACT,i,drop_group`),
+  pédalier (`drop_group`), action MIDI Learn « Drop de groupe », commande `drop_group` dans `NowUndo_VLcmd/q`. Cible = boucle la plus longue (garde longueur et synchro), mixdown = nouvel
   état d'historique (Undo), sources arrêtées dans le bloc de la bascule. Non rendus (laissés de côté) : Slicer, Cloud, Beat
   Repeat, vitesse/pitch sans Link. Calage exact vérifié par `tools/tdrop.py` (normal, reverse, vitesse ×2 Link).
 
