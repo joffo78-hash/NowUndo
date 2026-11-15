@@ -1,0 +1,47 @@
+desc:NU Drop Capture (NowUndo V3.25 : enregistre le passage du drop de groupe)
+// A poser par le script Launchpad sur la piste cachee "NU Drop" (ne pas le mettre sur une piste de looper).
+// Il recoit les sends post-fader des loopers du groupe et enregistre UN passage de la boucle cible dans gmem,
+// cale sur l'horloge publiee par la cible (gmem[300 + (cible-1)*10 + 1] au debut de chaque bloc).
+//   gmem[393] = jeton (depart) | [381] = cible 1..8 | [395] = gain (1 / volume de la piste cible) | [396] = latence (PDC, samples)
+//   fin : gmem[394] = jeton (jeton + 0.75 = refus) ; abandon : gmem[380] = jeton + 0.75
+// Le raccord est fondu : on enregistre 10 ms de plus et on les melange au debut de l'enregistrement.
+// Sortie muette (le son du groupe passe deja par ses pistes).
+options:gmem=nowundo_sync
+in_pin:left
+in_pin:right
+out_pin:left
+out_pin:right
+
+@init
+DR = 300; LD_BASE = 1000000; LD_MAXN = 3500000;
+st = 0; tok = gmem[393]; j = 0; n = 0; L = 0; X = 1; g = 1;
+
+@block
+(st == 0 && gmem[393] > 0 && gmem[393] != tok) ? (
+  tok = gmem[393];
+  tg = floor(gmem[381] + 0.5); tb = DR + (tg - 1) * 10;
+  L = floor(gmem[tb + 5]); X = max(1, min(floor(srate * 0.01), floor(L / 4)));
+  (tg >= 1 && tg <= 8 && gmem[tb] == tok && L > 256 && L + X <= LD_MAXN) ? (
+    g = gmem[395]; (g <= 0 || g > 100) ? g = 1;
+    j = floor(gmem[tb + 1] - max(0, gmem[396]) + 0.5); j -= L * floor(j / L);
+    n = 0; st = 1;
+  ) : ( gmem[394] = tok + 0.75; );
+);
+(st == 1 && gmem[380] == tok + 0.75) ? st = 0;
+
+@sample
+st == 1 ? (
+  a = LD_BASE + 16 + j;
+  n < L ? (
+    gmem[a] = spl0 * g; gmem[a + LD_MAXN] = spl1 * g;
+  ) : (
+    // raccord : au debut le plus recent (continuite avec la fin), puis retour progressif a l'enregistrement du debut
+    f = (n - L) / X;
+    gmem[a] = spl0 * g * (1 - f) + gmem[a] * f;
+    gmem[a + LD_MAXN] = spl1 * g * (1 - f) + gmem[a + LD_MAXN] * f;
+  );
+  j += 1; j >= L ? j = 0;
+  n += 1;
+  n >= L + X ? ( st = 0; gmem[394] = tok; );
+);
+spl0 = 0; spl1 = 0;

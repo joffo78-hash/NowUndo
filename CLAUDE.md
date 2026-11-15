@@ -7,7 +7,8 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 ## Où est quoi
 
 - Dépôt : `joffo78-hash/NowUndo`, branche de travail `ccr-12a0f3a9-86p9ey` (tout le travail récent y est).
-- `NowUndo/NowUndo_V3.24.jsfx` : **version courante du JSFX** (3.19 → 3.23 gardées pour l'historique).
+- `NowUndo/NowUndo_V3.25.jsfx` : **version courante du JSFX** (3.19 → 3.24 gardées pour l'historique).
+- `NowUndo/NU_DropCapture.jsfx` : capture du drop (posé automatiquement par le Launchpad sur la piste cachée « NU Drop »).
 - `NowUndo/Scripts/V3.21/` : tous les scripts courants (le nom du dossier est historique) :
   | Fichier | Rôle |
   |---|---|
@@ -34,14 +35,14 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `+182..184` sync point / ref / len du maître. Global : `0..24` Master Sync par part (`[o]==1` maître looper, `==2` Host,
 `[o+2]` longueur, `[o+3]` position), `100+i` vivant, `130+i` heartbeat, `950/951` heure de l'appui + adresse cible (V3.22),
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
-(sert aussi d'accumulateur au drop), **drop de groupe (V3.24)** : `300 + k*10` instantané / accusé du looper k (+0 jeton,
-+1 pos, +2 horloge de réf., +3 sa période, +4 début fenêtre, +5 largeur, +6 sens, +7 vitesse, +8 gain, +9 lecture simple),
-`380` signal de la cible, `381` cible, `382` 1re source.
+(sert aussi d'enregistrement au drop), **drop de groupe (V3.25)** : `300 + k*10` accusé du looper k (+0 jeton, +1 horloge
+du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 abandon), `381` cible, `393` départ capture,
+`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Nouveau REC (V3.25)** : `398` heure, `399` id.
 
 **Commandes JSFX (+48)** : 1 rec/dub, 2 clear, 3 stop/play, 4 reverse, 5 ping-pong, 6 slicer, 7 cloud, 8 link,
 9 replace, 10 auto-replace, 11 clear full, 12 part, 13 multiply, 14 undo, 15 redo, 16 restart, 17 re-rec, 18 one-shot,
 19 auto, 20 speed step, 21 pitch step, 22 full loop, 23 quantise, 24 reset, 30 exclu, 31/32 import (copie / requête longueur), 33 beat repeat,
-34/35/36 drop (instantané / ajout d'une source / mixdown dans la cible ; arg = jeton).
+34/35/36 drop (horloge du passage sur la cible / source en attente d'effacement / copie de l'enregistrement ; arg = jeton).
 **Paramètres (+180)** : 3 speed, 4 pitch, 5 mix, 7 fade, 19 fdbk, 20 dégradation, 21 stéréo, 22 out vol, 26-28/35/36/38-41 cloud,
 29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2.
 
@@ -104,11 +105,19 @@ propre page Launchpad** (`VL.web_with_page`).
   clic droit = action en off, Maj+E = boîte REAPER ; liste : Ctrl+C/X/V/D + clic droit ; titre par défaut = contenu ;
   « macros » renommées **Rushes** à l'écran.
 
-- **Drop de groupe (V3.24)** : `VL.drop_group()` / `VL.drop_tick()` dans le Launchpad, **pad B2 de la page 1** (à la place de
-  QUANTISE IN/OUT, qui reste dispo par MIDI Learn / Twister), bouton DROP de l'onglet Loopers du web (`ACT,i,drop_group`),
-  pédalier (`drop_group`), action MIDI Learn « Drop de groupe », commande `drop_group` dans `NowUndo_VLcmd/q`. Cible = boucle la plus longue (garde longueur et synchro), mixdown = nouvel
-  état d'historique (Undo), sources arrêtées dans le bloc de la bascule. Non rendus (laissés de côté) : Slicer, Cloud, Beat
-  Repeat, vitesse/pitch sans Link. Calage exact vérifié par `tools/tdrop.py` (normal, reverse, vitesse ×2 Link).
+- **Drop de groupe (V3.25, refait)** : `VL.drop_group()` / `VL.drop_tick()` dans le Launchpad, **pad B2 de la page 1** (à la
+  place de QUANTISE IN/OUT, qui reste dispo par MIDI Learn / Twister), bouton DROP de l'onglet Loopers du web
+  (`ACT,i,drop_group`), pédalier (`drop_group`), action MIDI Learn « Drop de groupe », `drop_group` dans `NowUndo_VLcmd/q`.
+  Principe : sends post-fader temporaires des loopers du groupe qui jouent vers la piste cachée « NU Drop » (créée au 1er
+  drop, sans envoi au master) où `NU_DropCapture` enregistre **un passage** de la boucle la plus longue (durée entendue =
+  fenêtre / vitesse), effets des pistes et tous les modes compris, raccord fondu sur 10 ms. Puis la cible joue le mixdown
+  à plat (vitesse 1, pitch 0, pas de reverse / slicer / cloud / BR / stereo, mix et out vol 100 %, fade 0), ses slots FX
+  sont coupés, les autres loopers qui jouaient sont **effacés** dans le même bloc et le **groupe est supprimé**. Undo sur
+  la cible = sa boucle d'avant. Les pistes d'effets aux (20-23) ne sont pas incluses (elles mélangent d'autres sources).
+  Vérifié par `tools/tdrop.py` (effet sur la piste source, A en reverse, B granulaire, A vitesse ×2 : recalage de 16
+  samples sur l'horloge, normal).
+- **Nouveau REC (V3.25)** : un looper qui lance un nouvel enregistrement (REC sur vide, Re-Rec) termine le REC en cours
+  d'un autre looper (> 0,3 s), qui attend son point de synchro puis joue (`tools/trec.py`). Un overdub ne le fait pas.
 
 ## Idées en suspens (proposées, pas faites)
 
@@ -123,7 +132,7 @@ propre page Launchpad** (`VL.web_with_page`).
 - `python3 tools/lualoc.py f.lua` (locales au niveau principal) · `python3 tools/luabal.py f.lua` (équilibre des blocs ;
   l'écart de parenthèses peut être un faux positif dû à `"%("` dans un motif).
 - `eel2py.py` + `bench.py` : traduisent le JSFX en Python pour mesurer clics / calage. Copier le JSFX en `v322.jsfx` /
-  `v323.jsfx` dans `tools/`, puis `cd tools && python3 tlat.py .` (REC calé), `tlat2.py .` (latence overdub),
+  `v323.jsfx` / `v325.jsfx` (+ `cap.jsfx` pour `tdrop.py`) dans `tools/`, puis `cd tools && python3 tlat.py .` (REC calé), `tlat2.py .` (latence overdub),
   `tld.py .` (longueur d'import). Lent (plusieurs minutes).
 - Tests de la page web (Playwright, Chromium préinstallé dans le cloud) : `node tools/holdtest.js`, `navtest.js`,
   `lvshot.js`, `lptest.js`, `acktest.js`, `legacy.js`, `realtest.js` (simule le `main.js` de REAPER avec `reaper_main.js`).

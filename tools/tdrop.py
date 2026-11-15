@@ -1,42 +1,57 @@
-"""V3.24 : test du DROP de groupe avec 2 instances qui partagent gmem.
-A (id 1) enregistre ~2 s (maitre), B (id 2) enregistre ~1 s en esclave (+ reverse / vitesse en option).
-Drop : B est mixe dans A. On compare la sortie de A apres le drop a la somme A + B d'avant, a la meme phase.
-Usage : cd tools && cp ../NowUndo/NowUndo_V3.24.jsfx v324.jsfx && python3 tdrop.py . [base|rev|speed]
-(le raccord de la cible est exclu de la mesure : son fondu de 10 ms s'applique aussi au contenu ajoute, comme un overdub)"""
+"""V3.25 : test du DROP de groupe ENREGISTRE (2 loopers + piste "NU Drop" avec NU_DropCapture, gmem partage).
+A (id 1) enregistre ~2 s (maitre), B (id 2) ~1 s en esclave. La piste de B a un "effet" (filtre + saturation) applique
+apres le JSFX. La piste NU Drop recoit A + effet(B) (sends post-fader) et enregistre un passage de A.
+Apres la bascule, A seul (sans effet, B efface) doit sonner comme A + effet(B) d'avant, a la meme phase.
+Usage : cd tools && cp ../NowUndo/NowUndo_V3.25.jsfx v325.jsfx && cp ../NowUndo/NU_DropCapture.jsfx cap.jsfx
+        && python3 tdrop.py . [base|arev|gran|speed]
+  base  : B normal + effet          arev : A en reverse (la cible est remise a plat apres le drop)
+  gran  : B vitesse x2 SANS Link (granulaire)      speed : A vitesse x2 avec Link (passage = moitie de sa boucle)"""
 import sys, math
 sys.path.insert(0, sys.argv[1])
 import bench
 from bench import *
+import eel2py
 
-path = 'v324.jsfx'
+path = 'v325.jsfx'
 A = load(path, 'drA'); bench.jsfx_path_of[A] = path
 B = load(path, 'drB'); bench.jsfx_path_of[B] = path
-B.GM = A.GM; B._clock = A._clock          # gmem et horloge communs
+import importlib.util
+_code, _al = eel2py.translate('cap.jsfx'); open('_gen_drC.py', 'w').write(_code)
+_sp = importlib.util.spec_from_file_location('gen_drC', '_gen_drC.py'); C = importlib.util.module_from_spec(_sp); _sp.loader.exec_module(C)
+bench.jsfx_path_of[C] = 'cap.jsfx'
+B.GM = A.GM; B._clock = A._clock; C.GM = A.GM; C._clock = A._clock
 GM = A.GM
 
 def sigA(n): return 0.25 * math.sin(2 * math.pi * 110 * n / SR)
 def sigB(n): return 0.3 * sig_drums(n)
 
 class R(Run):
-    def __init__(s, m, sig, ident):
+    def __init__(s, m, sig, ident, src):
         s.m = m; s.sig = sig; s.n = 0; s.out = []; s.events = []
         m.v_srate = float(SR); m.v_samplesblock = float(BLK); m.v_tempo = 120.0; m.v_ts_num = 4.0; m.v_play_state = 1.0
         m.v_beat_position = 0.0
         import re
-        src = open(path, encoding='utf-8').read()
-        for mm in re.finditer(r'^slider\d+:([A-Za-z_][A-Za-z_0-9]*)=([-\d.]+)', src, re.M):
+        for mm in re.finditer(r'^slider\d+:([A-Za-z_][A-Za-z_0-9]*)=([-\d.]+)', open(src, encoding='utf-8').read(), re.M):
             setattr(m, 'v_' + mm.group(1), float(mm.group(2)))
         m.v_manual_id = float(ident)
-        m.sec_init(); m.sec_slider()
+        m.sec_init()
+        if hasattr(m, "sec_slider"): m.sec_slider()
 
-ra, rb = R(A, sigA, 1), R(B, sigB, 2)
+ra, rb, rc = R(A, sigA, 1, path), R(B, sigB, 2, path), R(C, lambda n: 0.0, 0, 'cap.jsfx')
 feed = {'A': True, 'B': True}
+fx = {'on': True, 'z': [0.0, 0.0]}
+outB = []          # sortie de la piste B APRES son effet
+
+def fxB(x, ch):
+    if not fx['on']: return x
+    z = fx['z']; z[ch] += 0.15 * (x - z[ch])                 # passe-bas
+    return math.tanh(2.0 * z[ch]) * 0.6                       # saturation
 
 def step(nblk=1):
     for _ in range(nblk):
         n0 = ra.n
         A._clock[0] = n0 / SR
-        for r in (ra, rb):
+        for r in (ra, rb, rc):
             r.m.v_beat_position = n0 / SR * 2.0
             r.m.sec_block()
         for r, k in ((ra, 'A'), (rb, 'B')):
@@ -47,8 +62,16 @@ def step(nblk=1):
                 x = r.sig(n) if feed[k] else 0.0
                 m.v_spl0 = x; m.v_spl1 = x * 0.9
                 m.sec_sample()
-                r.out.append((m.v_spl0, m.v_spl1))
+                o = (m.v_spl0, m.v_spl1)
+                if k == 'B': o = (fxB(o[0], 0), fxB(o[1], 1)); outB.append(o)
+                r.out.append(o)
             r.n = n0 + BLK
+        m = C
+        for i in range(BLK):
+            A._clock[0] = (n0 + i) / SR
+            m.v_spl0 = ra.out[n0 + i][0] + outB[n0 + i][0]; m.v_spl1 = ra.out[n0 + i][1] + outB[n0 + i][1]
+            m.sec_sample()
+        rc.n = n0 + BLK
         A._clock[0] = ra.n / SR
 
 def base(m): return 1000 + int(m.v_inst_idx) * 600 + (int(m.v_active_part) - 1) * 200
@@ -56,72 +79,99 @@ def cmd(m, c, arg=None):
     b = base(m)
     if arg is not None: GM[b + 49] = arg
     GM[b + 48] = c
-
 def secs(t): return int(t * SR / BLK)
+def wait(cond, maxblk=4000):
+    k = 0
+    while not cond() and k < maxblk: step(1); k += 1
+    return k
 
-def scenario(revB=False, speedB=1.0):
-    # A : REC 2 s
+def scenario(which):
     cmd(A, 1); step(secs(2.0)); cmd(A, 1); step(2)
-    print('A length', A.v_length, 'state', A.v_state, 'master', GM[0], GM[1], GM[2])
-    # B : REC ~0.9 s en esclave (arrondi par la synchro)
     feed['A'] = False
     cmd(B, 1); step(secs(0.9)); cmd(B, 1); step(secs(1.2))
     feed['B'] = False
-    print('B length', B.v_length, 'state', B.v_state)
-    if revB: cmd(B, 4); step(2)
-    if speedB != 1.0: B.v_speed = speedB; B.v_link_on = 1.0; B.sec_slider()
-    step(secs(1.0))
-    LA = int(A.v_length)
-    # reference : sortie A + B sur le dernier cycle de A avant le drop
+    print('A length', A.v_length, '| B length', B.v_length, 'state', B.v_state)
+    if which == 'arev': cmd(A, 4); step(2)
+    if which == 'gran': B.v_speed = 2.0; B.sec_slider()
+    if which == 'speed': A.v_speed = 2.0; A.v_link_on = 1.0; A.sec_slider()
+    step(secs(1.5))
+    LA = int(round(A.v_length / (2.0 if which == 'speed' else 1.0)))
     nref = ra.n
     step(int(math.ceil(LA / BLK)) + 1)
-    # DROP (comme le script) : instantane -> ajout de B -> commit dans A
-    tok = 7
-    nsnap = ra.n
-    cmd(A, 34, tok); cmd(B, 34, tok); step(1)
-    assert GM[300] == tok and GM[310] == tok, (GM[300], GM[310])
-    print('lecture simple A %d B %d' % (GM[309], GM[319]))
-    print('snap A pos %.0f mref %.0f w %.0f | B pos %.0f mref %.0f w %.0f' % (GM[301], GM[302], GM[305], GM[311], GM[312], GM[315]))
-    GM[381] = 1; GM[382] = 1; cmd(B, 35, tok)
-    k = 0
-    while GM[310] != tok + 0.25 and k < 2000: step(1); k += 1
-    print('add B : %d blocs, ack %s' % (k, GM[310]))
+    step(int(math.ceil(LA / BLK)) + 1)
+    print('reference periodique ? A %.5f  B %.5f' % (max(abs(ra.out[n][0] - ra.out[n - LA][0]) for n in range(nref + LA, nref + 2 * LA)), max(abs(rb.out[n][0] - rb.out[n - LA][0]) for n in range(nref + LA, nref + 2 * LA))))
+    # ---- DROP (comme le script) ----
+    tok = 11
+    GM[380] = 0; GM[381] = 1; GM[395] = 1.0; GM[396] = 0
+    cmd(A, 34, tok); cmd(B, 35, tok); step(1)
+    print('arm : A', GM[300], 'L', GM[305], '| B', GM[310])
+    GM[393] = tok
+    print('debut de capture : instant', GM[301])
+    k = wait(lambda: GM[394] == tok); print('capture : %d blocs (%.2f s), fin %s' % (k, k * BLK / SR, GM[394]))
     cmd(A, 36, tok)
-    k = 0
-    while GM[380] != tok + 0.5 and k < 2000: step(1); k += 1
-    ndrop = ra.n
-    print('commit A : %d blocs, signal %s ; A undo %d' % (k, GM[380], A.v_hist_undo))
-    step(3)
-    print('B state apres drop', B.v_state)
+    k = wait(lambda: GM[300] == tok + 0.25); print('copie : %d blocs' % k)
+    fx['on'] = False                      # le script coupe les effets de la piste cible (ici : B n'a plus rien a filtrer)
+    GM[380] = tok + 0.5
+    nsw = ra.n
+    A_pos_sw = None
+    step(1); A_pos_sw = A.v_pos - BLK; step(1)
+    if which == 'speed':
+        for _ in range(6):
+            print('   pos %.1f master_pos %.1f len %d base %d sm_speed %.3f gmem2 %.0f gmem3 %.0f' % (A.v_pos, A.v_master_pos, A.v_length, A.v_base_loop_length, A.v_sm_speed, GM[2], GM[3]))
+            step(40)
+    print('apres bascule : A state %d length %d speed %.2f rev %d fade %.1f undo %d | B state %d length %d' % (
+        A.v_state, A.v_length, A.v_speed, A.v_rev_on, A.v_fade_ms, A.v_hist_undo, B.v_state, B.v_length))
     step(int(math.ceil(LA / BLK)) * 2 + 4)
-    # comparaison : apres le drop (B arrete apres ~8 ms de fondu), A seul doit valoir A + B d'avant (meme phase, periode LA)
-    err = 0.0; ref = 0.0; at = 0
-    s0 = ndrop + 4 * BLK
+    err = 0.0; ref = 0.0; at = 0; s0 = nsw + 2 * BLK
     for n in range(s0, s0 + LA):
-        c = (n - nref) // LA
-        nb = n - (c + 1) * LA if n - c * LA >= nref + LA else n - c * LA
         nb = n - ((n - nref) // LA) * LA
-        pa = (GM[301] + (n - nsnap)) % LA          # position de A : on saute son propre raccord (fondu de 10 ms de la cible)
-        if min(pa, LA - pa) < 0.0105 * SR + 64: continue
         for ch in (0, 1):
             want = ra.out[nb][ch] + rb.out[nb][ch]
-            got = ra.out[n][ch]
-            d = abs(got - want)
+            d = abs(ra.out[n][ch] - want)
             if d > err: err = d; at = n
             ref = max(ref, abs(want))
-    print('ecart max A(apres) - (A+B)(avant) = %.5f (crete %.3f) a n=%d' % (err, ref, at))
-    # Undo : A revient a sa boucle d'origine
-    cmd(A, 14); step(2)
-    e2 = 0.0
-    s1 = ra.n + 2 * BLK
-    step(int(math.ceil(LA / BLK)) + 4)
-    for n in range(s1, s1 + LA // 2):
+    cl = []; prev = None
+    for n in range(s0, s0 + LA):
         nb = n - ((n - nref) // LA) * LA
-        e2 = max(e2, abs(ra.out[n][0] - ra.out[nb][0]))
-    print('apres Undo : ecart A / A d\'origine = %.5f' % e2)
+        if abs(ra.out[n][0] - ra.out[nb][0] - rb.out[nb][0]) > 0.002:
+            if prev is None or n - prev > 64: cl.append([n, n])
+            cl[-1][1] = n; prev = n
+    print('zones d\'ecart (debut, longueur, index de A) :', [(c[0] - s0, c[1] - c[0], int((A_pos_sw + c[0] - nsw) % LA)) for c in cl][:3], 'nb zones', len(cl), 'derniere', (cl[-1][0]-s0, cl[-1][1]-cl[-1][0]) if cl else None)
+    LAGS = list(range(-3, 4))
+    if which == 'speed':
+        def ce(lag):
+            e = 0.0
+            for n in range(s0 + 2000, s0 + 12000, 7):
+                nb = n - ((n - nref) // LA) * LA + lag
+                e += abs(ra.out[n][0] - ra.out[nb][0] - rb.out[nb][0])
+            return e
+        bl = min(range(-40, 41), key=ce); print('  recalage sur l\'horloge apres la bascule : %d samples' % bl); LAGS = [bl]
+    for lag in LAGS:
+        e = 0.0
+        for n in range(s0 + 2000, s0 + LA - 2000):
+            nb = n - ((n - nref) // LA) * LA + lag
+            e = max(e, abs(ra.out[n][0] - ra.out[nb][0] - rb.out[nb][0]))
+        print('  lag', lag, 'ecart %.5f' % e)
+    if which == 'speed':
+        LD = 1000000; T0 = int(round(GM[301]))
+        # contenu enregistre vs reference : l'instant tau(n) = (A_pos_sw + 1 + n - nsw) mod LA
+        e1 = 0.0; e2 = 0.0
+        for n in range(s0, s0 + 20000, 3):
+            tau = int((A_pos_sw + 1 + n - nsw) % LA)
+            nb = n - ((n - nref) // LA) * LA
+            e1 = max(e1, abs(GM[LD + 16 + tau] - ra.out[nb][0] - rb.out[nb][0]))
+            e2 = max(e2, abs(GM[LD + 16 + tau] - ra.out[n][0]))
+        def co(o):
+            e = 0.0
+            for n in range(s0, s0 + 6000, 5):
+                tau = int((A_pos_sw + 1 + n - nsw + o) % LA); nb = n - ((n - nref) // LA) * LA
+                e += abs(GM[LD + 16 + tau] - ra.out[nb][0] - rb.out[nb][0])
+            return e
+        bo = min(range(-24000, 24000, 20), key=co); bo = min(range(bo - 25, bo + 26), key=co); print('  decalage capture', bo, co(bo))
+        print('  capture vs reference %.5f | capture vs A apres %.5f' % (e1, e2))
+    print('ecart max A(apres) - (A + effet(B))(avant) = %.5f (crete %.3f) a n=%d' % (err, ref, at))
+    cmd(A, 14); step(3)
+    print('apres Undo : A length %d' % A.v_length)
     return err
 
-which = sys.argv[2] if len(sys.argv) > 2 else 'base'
-if which == 'rev': scenario(revB=True)
-elif which == 'speed': scenario(speedB=2.0)
-else: scenario()
+scenario(sys.argv[2] if len(sys.argv) > 2 else 'base')

@@ -2374,97 +2374,192 @@ function VL.rec_dub_tick()
     end
   end
 end
--- ===================== DROP DE GROUPE (JSFX V3.24, cmd 34 / 35 / 36) =====================
--- Les loopers du groupe actif qui jouent sont mixes dans le membre dont la boucle (fenetre In/Out) est la plus longue :
--- elle garde sa longueur et sa synchro, le mixdown est un nouvel etat d'historique (UNDO sur elle = retour avant le drop),
--- les autres s'arretent (leur boucle reste intacte) au moment exact ou la cible bascule sur le mixdown.
--- Pas rendus (ces loopers sont laisses de cote et continuent de jouer) : Slicer, Cloud, Beat Repeat, vitesse / pitch sans Link.
--- Echanges gmem : 300 + (i-1)*10 = instantane / accuse du looper i, 380 = signal de la cible, 381 = cible, 382 = 1re source.
-VL.DROP = { BASE = 300, CAP = 3500000, run = nil, msg = nil, msg_t = 0, tok = 0 }
+-- ===================== DROP DE GROUPE (JSFX V3.25 + NU_DropCapture) =====================
+-- Les loopers du groupe actif qui jouent sont envoyes (sends post-fader, temporaires) vers la piste cachee "NU Drop"
+-- (creee au 1er drop, JSFX NU_DropCapture) qui enregistre UN passage de la boucle la plus longue, tel qu'on l'entend :
+-- effets des pistes (slots FX), Slicer, Cloud, Beat Repeat, vitesse / pitch, In/Out, volumes, faders.
+-- A la fin du passage : la cible joue le mixdown "a plat" (ses effets sont coupes, ils sont dans l'enregistrement ;
+-- UNDO sur elle = sa boucle d'avant), les autres loopers qui jouaient sont EFFACES dans le meme bloc, le groupe est supprime.
+-- Echanges gmem : 300 + (i-1)*10 = accuse du looper i (+1 horloge, +5 duree), 380 signal final, 381 cible,
+-- 393 depart de la capture, 394 fin de capture, 395 gain (1 / volume de la piste cible), 396 latence des effets (PDC).
+VL.DROP = { BASE = 300, CAP = 3500000, run = nil, msg = nil, msg_t = 0, tok = 0, BUS = "NU Drop" }
 function VL.drop_note(fmt, ...)
   local ok, m = pcall(string.format, fmt, ...)
   VL.DROP.msg = ok and m or tostring(fmt); VL.DROP.msg_t = now()
   log("info", "DROP : %s", VL.DROP.msg)
 end
 function VL.drop_rd(i, k) return reaper.gmem_read(VL.DROP.BASE + (i - 1) * 10 + k) or 0 end
+-- piste "NU Drop" : cachee, pas d'envoi au master, JSFX NU_DropCapture (ajoute s'il manque). Retourne piste, fx
+function VL.drop_bus()
+  local D, tr = VL.DROP, nil
+  for t = 0, reaper.CountTracks(0) - 1 do
+    local x = reaper.GetTrack(0, t)
+    local _, nm = reaper.GetSetMediaTrackInfo_String(x, "P_NAME", "", false)
+    if nm == D.BUS then tr = x break end
+  end
+  if not tr then
+    local n = reaper.CountTracks(0)
+    reaper.InsertTrackAtIndex(n, false)
+    tr = reaper.GetTrack(0, n)
+    if not tr then return nil end
+    reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", D.BUS, true)
+    reaper.SetMediaTrackInfo_Value(tr, "B_MAINSEND", 0)
+    reaper.SetMediaTrackInfo_Value(tr, "B_SHOWINTCP", 0)
+    reaper.SetMediaTrackInfo_Value(tr, "B_SHOWINMIXER", 0)
+    if reaper.TrackList_AdjustWindows then reaper.TrackList_AdjustWindows(false) end
+    log("info", "DROP : piste '%s' creee (cachee, sans envoi au master)", D.BUS)
+  end
+  local function find()
+    for fx = 0, reaper.TrackFX_GetCount(tr) - 1 do
+      local _, nm = reaper.TrackFX_GetFXName(tr, fx, "")
+      if (nm or ""):lower():find("drop capture", 1, true) then return fx end
+    end
+  end
+  local fx = find()
+  if not fx then
+    for _, name in ipairs({ "JS:NU_DropCapture.jsfx", "JS:NU_DropCapture", "NU Drop Capture", "NU_DropCapture" }) do
+      local r = reaper.TrackFX_AddByName(tr, name, false, -1)
+      if r and r >= 0 then break end
+    end
+    fx = find()
+  end
+  if fx then reaper.TrackFX_SetEnabled(tr, fx, true) end
+  return tr, fx
+end
+function VL.drop_unsend(R)
+  if not (R and R.sends and R.bus) then return end
+  for _, src in ipairs(R.sends) do
+    local idx = LPF.find_send(src, R.bus)
+    if idx then reaper.RemoveTrackSend(src, 0, idx) end
+  end
+  R.sends = nil
+end
+function VL.drop_abort(R, fmt, ...)
+  reaper.gmem_attach(GMEM_NAME)
+  reaper.gmem_write(VL.DROP.BASE + 80, VL.DROP.tok + 0.75)
+  VL.drop_unsend(R)
+  VL.DROP.run = nil
+  VL.drop_note(fmt, ...)
+end
+-- duree entendue d'une boucle (samples) : fenetre In/Out / vitesse de lecture
+function VL.drop_period(i)
+  local L = S.loopers[i] or {}
+  local w = (L.loop_width or 0) > 0 and L.loop_width or (L.length or 0)
+  local r = L.speed or 1
+  if L.link or L.slicer or L.cloud then r = r * 2 ^ ((L.pitch or 0) / 12) end
+  return w / math.max(0.01, r)
+end
 function VL.drop_group()
   local D = VL.DROP
   if VL.mirror_mode or not (reaper and reaper.gmem_attach and reaper.gmem_read and reaper.gmem_write) then return end
   if D.run then VL.drop_note("deja en cours") return end
   local g = S.sel_group or 0
   if g == 0 or (VL.group_inhibit and VL.group_inhibit()) then VL.drop_note("selectionne un groupe d'abord") return end
-  local cand = {}
+  local cand, tgt, tp = {}, nil, -1
   for _, i in ipairs(VL.group_members(g)) do
     local L = S.loopers[i]
-    if L and L.playing and (L.length or 0) > 0 then cand[#cand + 1] = i end
+    if L and L.playing and (L.length or 0) > 0 then
+      cand[#cand + 1] = i
+      local p = VL.drop_period(i)
+      if p > tp + 0.5 or (math.abs(p - tp) <= 0.5 and i == S.sel_looper) then tgt, tp = i, p end
+    end
   end
   if #cand < 2 then VL.drop_note("il faut au moins 2 loopers qui jouent dans le groupe %d", g) return end
+  if tp > D.CAP - 4800 then VL.drop_note("boucle trop longue pour le drop (max %.0f s)", D.CAP / 48000) return end
+  local tracks = VL.resolve_tracks(true)
+  for _, i in ipairs(cand) do
+    if not tracks.loopers[i] then VL.drop_note("piste du looper %d introuvable", i) return end
+  end
+  local bus, cfx = VL.drop_bus()
+  if not bus or not cfx then
+    VL.drop_note("JSFX 'NU_DropCapture.jsfx' introuvable : copie-le dans le dossier Effects de REAPER")
+    return
+  end
+  local R = { phase = "arm", g = g, tgt = tgt, cand = cand, src = {}, bus = bus, sends = {}, t0 = now() }
+  for _, i in ipairs(cand) do if i ~= tgt then R.src[#R.src + 1] = i end end
+  -- sends post-fader temporaires vers NU Drop ; latence des effets (PDC) : la plus grande des pistes du groupe
+  local pdc = 0
+  for _, i in ipairs(cand) do
+    local tr = tracks.loopers[i]
+    local idx = reaper.CreateTrackSend(tr, bus)
+    if idx and idx >= 0 then
+      reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_SENDMODE", 0)
+      reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_SRCCHAN", 0)
+      reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_DSTCHAN", 0)
+      reaper.SetTrackSendInfo_Value(tr, 0, idx, "D_VOL", 1)
+      reaper.SetTrackSendInfo_Value(tr, 0, idx, "B_MUTE", 0)
+      R.sends[#R.sends + 1] = tr
+    end
+    if reaper.TrackFX_GetNamedConfigParm and reaper.TrackFX_GetCount(tr) > 0 then
+      local ok, okv, v = pcall(reaper.TrackFX_GetNamedConfigParm, tr, 0, "chain_pdc_actual")
+      v = ok and okv and tonumber(v) or 0
+      if v and v > pdc and v < 16384 then pdc = v end
+    end
+  end
+  local tv = reaper.GetMediaTrackInfo_Value(tracks.loopers[tgt], "D_VOL") or 1
   D.tok = (math.floor(now() * 10) % 1000000) + 1
   if D.tok == D.last_tok then D.tok = D.tok + 1 end
   D.last_tok = D.tok
   reaper.gmem_attach(GMEM_NAME)
-  reaper.gmem_write(D.BASE + 80, 0)
-  for _, i in ipairs(cand) do gmem_write_cmd(i, 34, D.tok) end   -- meme cycle : instantane commun
-  D.run = { phase = "snap", cand = cand, t0 = now(), g = g }
+  reaper.gmem_write(D.BASE + 80, 0); reaper.gmem_write(D.BASE + 94, 0)
+  reaper.gmem_write(D.BASE + 81, tgt)
+  reaper.gmem_write(D.BASE + 95, tv > 0.01 and 1 / tv or 1)
+  reaper.gmem_write(D.BASE + 96, pdc)
+  gmem_write_cmd(tgt, 34, D.tok)
+  for _, i in ipairs(R.src) do gmem_write_cmd(i, 35, D.tok) end
+  D.run = R
 end
 function VL.drop_tick(t)
   local D, R = VL.DROP, VL.DROP.run
   if not R then return end
   reaper.gmem_attach(GMEM_NAME)
   local tok = D.tok
-  if R.phase == "snap" then
-    local all = true
-    for _, i in ipairs(R.cand) do if VL.drop_rd(i, 0) ~= tok then all = false end end
+  if R.phase == "arm" then
+    local a = VL.drop_rd(R.tgt, 0)
+    if a == tok + 0.75 then VL.drop_abort(R, "le looper %d ne peut pas servir de cible (etat change ?)", R.tgt) return end
+    local all = (a == tok)
+    for _, i in ipairs(R.src) do if VL.drop_rd(i, 0) ~= tok then all = false end end
     if not all then
-      if t - R.t0 > 1.5 then D.run = nil; VL.drop_note("un looper ne repond pas (JSFX V3.24 charge ?)") end
+      if t - R.t0 > 1.5 then VL.drop_abort(R, "un looper ne repond pas (JSFX V3.25 charge partout ?)") end
       return
     end
-    -- cible = boucle la plus longue parmi les loopers en lecture simple (a egalite : le looper selectionne, sinon le 1er)
-    local ok, skip, tgt, tw = {}, {}, nil, -1
-    for _, i in ipairs(R.cand) do
-      local w = VL.drop_rd(i, 5)
-      if w > 0 and VL.drop_rd(i, 9) > 0.5 then
-        ok[#ok + 1] = i
-        if w > tw + 0.5 or (math.abs(w - tw) <= 0.5 and i == S.sel_looper) then tgt, tw = i, w end
-      else skip[#skip + 1] = i end
-    end
-    if #skip > 0 then R.skipped = table.concat(skip, ",") end
-    if not tgt or #ok < 2 then D.run = nil; VL.drop_note("rien a mixer (Slicer / Cloud / Beat Repeat / vitesse sans Link : non rendus)") return end
-    if tw > D.CAP then D.run = nil; VL.drop_note("boucle trop longue pour le drop (max %.0f s)", D.CAP / 48000) return end
-    R.tgt, R.src, R.k, R.done, R.first = tgt, {}, 0, 0, true
-    for _, i in ipairs(ok) do if i ~= tgt then R.src[#R.src + 1] = i end end
-    R.phase = "add"
-  end
-  if R.phase == "add" then
-    local cur = R.src[R.k]
-    if cur then
-      local a = VL.drop_rd(cur, 0)
-      if a == tok + 0.25 then R.done = R.done + 1; R.first = false
-      elseif a == tok + 0.75 then log("warn", "DROP : looper %d refuse (etat change ?)", cur)
-      elseif t - R.t1 < 8 then return
-      else log("warn", "DROP : looper %d trop long a repondre", cur) end
-    end
-    R.k = R.k + 1
-    local nxt = R.src[R.k]
-    if nxt then
-      reaper.gmem_write(D.BASE + 81, R.tgt); reaper.gmem_write(D.BASE + 82, R.first and 1 or 0)
-      gmem_write_cmd(nxt, 35, tok); R.t1 = t
-      return
-    end
-    if R.done == 0 then reaper.gmem_write(D.BASE + 80, tok + 0.75); D.run = nil; VL.drop_note("echec : aucune boucle ajoutee") return end
-    gmem_write_cmd(R.tgt, 36, tok); R.t1 = t; R.phase = "commit"
+    if t - R.t0 < 0.15 then return end                       -- laisse aux sends le temps d'etre actifs
+    local sr = reaper.gmem_read(1000 + (R.tgt - 1) * 600 + ((S.loopers[R.tgt].part or 1) - 1) * 200 + 186) or 0
+    if sr < 8000 then sr = 48000 end
+    R.limit = t + VL.drop_rd(R.tgt, 5) / sr + 3
+    reaper.gmem_write(D.BASE + 93, tok)
+    R.phase = "cap"
     return
   end
-  if R.phase == "commit" then
-    local s = reaper.gmem_read(D.BASE + 80) or 0
-    if s == tok + 0.5 then
-      D.run = nil
-      VL.drop_note("groupe %d : %d boucle(s) mixee(s) dans le looper %d (UNDO sur lui pour annuler)%s",
-        R.g, R.done, R.tgt, R.skipped and (" ; laisses de cote : " .. R.skipped) or "")
-    elseif s == tok + 0.75 or t - R.t1 > 8 then
-      reaper.gmem_write(D.BASE + 80, tok + 0.75)
-      D.run = nil; VL.drop_note("echec du mixdown dans le looper %d (rien n'a change)", R.tgt)
-    end
+  if R.phase == "cap" then
+    local c = reaper.gmem_read(D.BASE + 94) or 0
+    if c == tok then
+      gmem_write_cmd(R.tgt, 36, tok); R.phase = "copy"; R.t1 = t
+    elseif c == tok + 0.75 then VL.drop_abort(R, "la capture a refuse le passage (piste NU Drop)")
+    elseif t > R.limit then VL.drop_abort(R, "capture trop longue : la piste NU Drop ne recoit rien ?") end
+    return
+  end
+  if R.phase == "copy" then
+    local a = VL.drop_rd(R.tgt, 0)
+    if a == tok + 0.25 then
+      -- les effets de la cible sont dans l'enregistrement : on les coupe AVANT le signal de bascule (meme instant)
+      for slot = 1, NSLOT do
+        if S.fx.looper[R.tgt][slot] then VL.set_fx("looper", R.tgt, slot, false) end
+      end
+      if VL.apply_fx then VL.apply_fx() end
+      reaper.gmem_write(D.BASE + 80, tok + 0.5)
+      R.phase = "done"; R.t1 = t
+    elseif a == tok + 0.75 or t - R.t1 > 4 then VL.drop_abort(R, "echec de la copie dans le looper %d (rien n'a change)", R.tgt) end
+    return
+  end
+  if R.phase == "done" then
+    if VL.drop_rd(R.tgt, 0) ~= tok + 0.5 and t - R.t1 < 1 then return end
+    VL.drop_unsend(R)
+    for _, i in ipairs(VL.group_members(R.g)) do VL.assign_group(i, 0) end   -- le groupe est supprime
+    VL._chord_group[R.g] = nil
+    D.run = nil
+    VL.drop_note("%d boucle(s) enregistree(s) dans le looper %d, les autres sont effacees, groupe %d supprime (UNDO sur le looper %d = sa boucle d'avant)",
+      #R.cand, R.tgt, R.g, R.tgt)
   end
 end
 
