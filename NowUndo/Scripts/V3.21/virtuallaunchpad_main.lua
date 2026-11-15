@@ -2370,6 +2370,100 @@ function VL.rec_dub_tick()
     end
   end
 end
+-- ===================== DROP DE GROUPE (JSFX V3.24, cmd 34 / 35 / 36) =====================
+-- Les loopers du groupe actif qui jouent sont mixes dans le membre dont la boucle (fenetre In/Out) est la plus longue :
+-- elle garde sa longueur et sa synchro, le mixdown est un nouvel etat d'historique (UNDO sur elle = retour avant le drop),
+-- les autres s'arretent (leur boucle reste intacte) au moment exact ou la cible bascule sur le mixdown.
+-- Pas rendus (ces loopers sont laisses de cote et continuent de jouer) : Slicer, Cloud, Beat Repeat, vitesse / pitch sans Link.
+-- Echanges gmem : 300 + (i-1)*10 = instantane / accuse du looper i, 380 = signal de la cible, 381 = cible, 382 = 1re source.
+VL.DROP = { BASE = 300, CAP = 3500000, run = nil, msg = nil, msg_t = 0, tok = 0 }
+function VL.drop_note(fmt, ...)
+  local ok, m = pcall(string.format, fmt, ...)
+  VL.DROP.msg = ok and m or tostring(fmt); VL.DROP.msg_t = now()
+  log("info", "DROP : %s", VL.DROP.msg)
+end
+function VL.drop_rd(i, k) return reaper.gmem_read(VL.DROP.BASE + (i - 1) * 10 + k) or 0 end
+function VL.drop_group()
+  local D = VL.DROP
+  if VL.mirror_mode or not (reaper and reaper.gmem_attach and reaper.gmem_read and reaper.gmem_write) then return end
+  if D.run then VL.drop_note("deja en cours") return end
+  local g = S.sel_group or 0
+  if g == 0 or (VL.group_inhibit and VL.group_inhibit()) then VL.drop_note("selectionne un groupe d'abord") return end
+  local cand = {}
+  for _, i in ipairs(VL.group_members(g)) do
+    local L = S.loopers[i]
+    if L and L.playing and (L.length or 0) > 0 then cand[#cand + 1] = i end
+  end
+  if #cand < 2 then VL.drop_note("il faut au moins 2 loopers qui jouent dans le groupe %d", g) return end
+  D.tok = (math.floor(now() * 10) % 1000000) + 1
+  if D.tok == D.last_tok then D.tok = D.tok + 1 end
+  D.last_tok = D.tok
+  reaper.gmem_attach(GMEM_NAME)
+  reaper.gmem_write(D.BASE + 80, 0)
+  for _, i in ipairs(cand) do gmem_write_cmd(i, 34, D.tok) end   -- meme cycle : instantane commun
+  D.run = { phase = "snap", cand = cand, t0 = now(), g = g }
+end
+function VL.drop_tick(t)
+  local D, R = VL.DROP, VL.DROP.run
+  if not R then return end
+  reaper.gmem_attach(GMEM_NAME)
+  local tok = D.tok
+  if R.phase == "snap" then
+    local all = true
+    for _, i in ipairs(R.cand) do if VL.drop_rd(i, 0) ~= tok then all = false end end
+    if not all then
+      if t - R.t0 > 1.5 then D.run = nil; VL.drop_note("un looper ne repond pas (JSFX V3.24 charge ?)") end
+      return
+    end
+    -- cible = boucle la plus longue parmi les loopers en lecture simple (a egalite : le looper selectionne, sinon le 1er)
+    local ok, skip, tgt, tw = {}, {}, nil, -1
+    for _, i in ipairs(R.cand) do
+      local w = VL.drop_rd(i, 5)
+      if w > 0 and VL.drop_rd(i, 9) > 0.5 then
+        ok[#ok + 1] = i
+        if w > tw + 0.5 or (math.abs(w - tw) <= 0.5 and i == S.sel_looper) then tgt, tw = i, w end
+      else skip[#skip + 1] = i end
+    end
+    if #skip > 0 then R.skipped = table.concat(skip, ",") end
+    if not tgt or #ok < 2 then D.run = nil; VL.drop_note("rien a mixer (Slicer / Cloud / Beat Repeat / vitesse sans Link : non rendus)") return end
+    if tw > D.CAP then D.run = nil; VL.drop_note("boucle trop longue pour le drop (max %.0f s)", D.CAP / 48000) return end
+    R.tgt, R.src, R.k, R.done, R.first = tgt, {}, 0, 0, true
+    for _, i in ipairs(ok) do if i ~= tgt then R.src[#R.src + 1] = i end end
+    R.phase = "add"
+  end
+  if R.phase == "add" then
+    local cur = R.src[R.k]
+    if cur then
+      local a = VL.drop_rd(cur, 0)
+      if a == tok + 0.25 then R.done = R.done + 1; R.first = false
+      elseif a == tok + 0.75 then log("warn", "DROP : looper %d refuse (etat change ?)", cur)
+      elseif t - R.t1 < 8 then return
+      else log("warn", "DROP : looper %d trop long a repondre", cur) end
+    end
+    R.k = R.k + 1
+    local nxt = R.src[R.k]
+    if nxt then
+      reaper.gmem_write(D.BASE + 81, R.tgt); reaper.gmem_write(D.BASE + 82, R.first and 1 or 0)
+      gmem_write_cmd(nxt, 35, tok); R.t1 = t
+      return
+    end
+    if R.done == 0 then reaper.gmem_write(D.BASE + 80, tok + 0.75); D.run = nil; VL.drop_note("echec : aucune boucle ajoutee") return end
+    gmem_write_cmd(R.tgt, 36, tok); R.t1 = t; R.phase = "commit"
+    return
+  end
+  if R.phase == "commit" then
+    local s = reaper.gmem_read(D.BASE + 80) or 0
+    if s == tok + 0.5 then
+      D.run = nil
+      VL.drop_note("groupe %d : %d boucle(s) mixee(s) dans le looper %d (UNDO sur lui pour annuler)%s",
+        R.g, R.done, R.tgt, R.skipped and (" ; laisses de cote : " .. R.skipped) or "")
+    elseif s == tok + 0.75 or t - R.t1 > 8 then
+      reaper.gmem_write(D.BASE + 80, tok + 0.75)
+      D.run = nil; VL.drop_note("echec du mixdown dans le looper %d (rien n'a change)", R.tgt)
+    end
+  end
+end
+
 -- commandes externes (script MIDI learn) : ExtState NowUndo_VLcmd/q = lignes "nom<TAB>temps"
 function VL.ext_cmd_poll()
   if VL.mirror_mode or not (reaper and reaper.GetExtState) then return end
@@ -2380,6 +2474,7 @@ function VL.ext_cmd_poll()
   for line in c:gmatch("[^\n]+") do
     local name, ts = line:match("^(%a[%w_]*)\t([%d%.]+)")
     if name == "rec_dub_toggle" and ts and t - tonumber(ts) < 2 then VL.rec_dub_toggle() end
+    if name == "drop_group" and ts and t - tonumber(ts) < 2 then VL.drop_group() end   -- MIDI Learn / Scenario / web
     if name and ts and t - tonumber(ts) < 2 then
       -- fxg_<looper>_<slot>_tog (boutons d'effet du web) : comme le pad d'effet, le groupe du looper suit
       local gi, gs = name:match("^fxg_(%d+)_(%d+)_tog$")
@@ -3237,6 +3332,7 @@ function VL.tick(t)
   t = t or now()
   if VL.poll_looper_feedback then VL.poll_looper_feedback() end
   VL.rec_dub_tick(); VL.ext_cmd_poll()   -- [REC>DUB]
+  VL.drop_tick(t)                         -- drop de groupe (V3.24)
   VL.excl_poll(t)
   if VL.macros_poll then VL.macros_poll(t) end
   VL.fire_pump(t)
@@ -4240,6 +4336,7 @@ function VL.status()
   return string.format("page %d | looper %d | group %d | launch %s | armed [%s] | fighter p%d%s",
     S.page, S.sel_looper, S.sel_group, S.launch and "ON" or "off", table.concat(arm, " ; "), S.fighter_page,
     hg and (" | EDIT GROUP " .. hg) or "") .. (S.page == 4 and (" | layer " .. cur_layer().name) or "")
+    .. ((VL.DROP.run and " | DROP en cours...") or ((VL.DROP.msg and now() - VL.DROP.msg_t < 8) and (" | DROP : " .. VL.DROP.msg)) or "")
 end
 
 -- ===== NowUndo : persistance du dock / position (ajout) =====

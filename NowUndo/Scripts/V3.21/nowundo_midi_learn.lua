@@ -146,6 +146,7 @@ local acts = {
   A("act:scn_next", "Scenario : Pas suivant", "Scenario", "scn_next"),
   A("act:scn_capture", "Scenario : Capture on/off", "Scenario", "scn_capture"),
   A("act:rec_dub", "Rec -> Overdub (mode, sortie du 1er rec)", "Transport", "rec_dub_toggle"),
+  A("act:drop_group", "Drop de groupe (mixdown dans la boucle la plus longue)", "Transport", "drop_group"),
 }
 for _, a in ipairs(acts) do TARGETS[#TARGETS + 1] = a end
 
@@ -753,9 +754,9 @@ end
 
 local SCN_CMD = { scn_validate = "validate", scn_prev = "prev", scn_next = "next", scn_capture = "toggle" }
 local function fire_action(action, args, looper)
-  if action == "rec_dub_toggle" then   -- [REC>DUB] file de commandes lue par le Launchpad
+  if action == "rec_dub_toggle" or action == "drop_group" then   -- [REC>DUB] / drop : file de commandes lue par le Launchpad
     local cur = reaper.GetExtState("NowUndo_VLcmd", "q")
-    reaper.SetExtState("NowUndo_VLcmd", "q", cur .. string.format("rec_dub_toggle\t%.3f\n", reaper.time_precise()), false)
+    reaper.SetExtState("NowUndo_VLcmd", "q", cur .. string.format("%s\t%.3f\n", action, reaper.time_precise()), false)
     return
   end
   if SCN_CMD[action] then          -- [SCN] file de commandes lue par NowUndo_Scenario.lua

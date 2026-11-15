@@ -7,7 +7,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 ## Où est quoi
 
 - Dépôt : `joffo78-hash/NowUndo`, branche de travail `ccr-12a0f3a9-86p9ey` (tout le travail récent y est).
-- `NowUndo/NowUndo_V3.23.jsfx` : **version courante du JSFX** (3.19 → 3.23 gardées pour l'historique).
+- `NowUndo/NowUndo_V3.24.jsfx` : **version courante du JSFX** (3.19 → 3.23 gardées pour l'historique).
 - `NowUndo/Scripts/V3.21/` : tous les scripts courants (le nom du dossier est historique) :
   | Fichier | Rôle |
   |---|---|
@@ -33,17 +33,21 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `+180` id de paramètre à écrire, `+181` valeur · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
 `+182..184` sync point / ref / len du maître. Global : `0..24` Master Sync par part (`[o]==1` maître looper, `==2` Host,
 `[o+2]` longueur, `[o+3]` position), `100+i` vivant, `130+i` heartbeat, `950/951` heure de l'appui + adresse cible (V3.22),
-`955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers.
+`955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
+(sert aussi d'accumulateur au drop), **drop de groupe (V3.24)** : `300 + k*10` instantané / accusé du looper k (+0 jeton,
++1 pos, +2 horloge de réf., +3 sa période, +4 début fenêtre, +5 largeur, +6 sens, +7 vitesse, +8 gain, +9 lecture simple),
+`380` signal de la cible, `381` cible, `382` 1re source.
 
 **Commandes JSFX (+48)** : 1 rec/dub, 2 clear, 3 stop/play, 4 reverse, 5 ping-pong, 6 slicer, 7 cloud, 8 link,
 9 replace, 10 auto-replace, 11 clear full, 12 part, 13 multiply, 14 undo, 15 redo, 16 restart, 17 re-rec, 18 one-shot,
-19 auto, 20 speed step, 21 pitch step, 22 full loop, 23 quantise, 24 reset, 30 exclu, 31/32 import (copie / requête longueur), 33 beat repeat.
+19 auto, 20 speed step, 21 pitch step, 22 full loop, 23 quantise, 24 reset, 30 exclu, 31/32 import (copie / requête longueur), 33 beat repeat,
+34/35/36 drop (instantané / ajout d'une source / mixdown dans la cible ; arg = jeton).
 **Paramètres (+180)** : 3 speed, 4 pitch, 5 mix, 7 fade, 19 fdbk, 20 dégradation, 21 stéréo, 22 out vol, 26-28/35/36/38-41 cloud,
 29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2.
 
 **ExtState** : `nowundo_vl` (état partagé du Launchpad : `state` + `rev`, `web_cmd`/`web_ack`, `web_frame/labels/meta`,
 `fx_source`, `fx_slot`, `sel_looper`, `fighter_page`, `active_page`) · `NowUndo_VLcmd/q` (file de commandes externes vers le
-Launchpad : lignes `nom\ttemps`, ex. `fxg_<looper>_<slot>_tog`, `fx_…`, `fxin_…`, `preset_…`, `sync_on`, `rec_dub_toggle`) ·
+Launchpad : lignes `nom\ttemps`, ex. `fxg_<looper>_<slot>_tog`, `fx_…`, `fxin_…`, `preset_…`, `sync_on`, `rec_dub_toggle`, `drop_group`) ·
 `nowundo_tw` (Twister + web : `tw_*`, `lv_fast`, `lv_wave`, `web_cmd`) · `NowUndo_MIDILearn` (maps, `custom`, `maps_kbd`,
 `kbd_intercept`) · `NowUndo_Scn` (`mcr` déclenchements de rushes `id\tcibles\ttemps\ton|off`, `alive`, `typing`) ·
 `NowUndo_Macros` (rushes partagés : `set`, `rev`, `on`, `pend`) · `NowUndo_Latency` (`on`, `offset_ms`) · `NowUndo_Clock/align`.
@@ -100,6 +104,11 @@ propre page Launchpad** (`VL.web_with_page`).
   clic droit = action en off, Maj+E = boîte REAPER ; liste : Ctrl+C/X/V/D + clic droit ; titre par défaut = contenu ;
   « macros » renommées **Rushes** à l'écran.
 
+- **Drop de groupe (V3.24)** : `VL.drop_group()` / `VL.drop_tick()` dans le Launchpad, action MIDI Learn « Drop de groupe »,
+  commande `drop_group` dans `NowUndo_VLcmd/q`. Cible = boucle la plus longue (garde longueur et synchro), mixdown = nouvel
+  état d'historique (Undo), sources arrêtées dans le bloc de la bascule. Non rendus (laissés de côté) : Slicer, Cloud, Beat
+  Repeat, vitesse/pitch sans Link. Calage exact vérifié par `tools/tdrop.py` (normal, reverse, vitesse ×2 Link).
+
 ## Idées en suspens (proposées, pas faites)
 
 - MIDI direct au JSFX via un JSFX « Clock » sur une piste Contrôle (horodatage à l'échantillon des appuis).
@@ -117,4 +126,5 @@ propre page Launchpad** (`VL.web_with_page`).
   `tld.py .` (longueur d'import). Lent (plusieurs minutes).
 - Tests de la page web (Playwright, Chromium préinstallé dans le cloud) : `node tools/holdtest.js`, `navtest.js`,
   `lvshot.js`, `lptest.js`, `acktest.js`, `legacy.js`, `realtest.js` (simule le `main.js` de REAPER avec `reaper_main.js`).
-- Pas d'interpréteur Lua disponible dans le cloud : les scripts Lua ne sont vérifiés que structurellement.
+- Lua : `pip install lupa` donne un vrai Lua 5.4 (`import lupa.lua54`) : vérifier la syntaxe avec `load()`, et le Launchpad se
+  charge sans GUI avec `VL_TEST = true` + un faux `reaper` (le script renvoie `VL`).
