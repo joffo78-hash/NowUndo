@@ -80,6 +80,7 @@ local CMDID = {
   link = 8, replace = 9, auto_rep = 10, clear_full = 11, part = 12, multiply = 13, undo = 14, redo = 15,
   restart = 16, rerec = 17, one_shot = 18, auto = 19, speed_step = 20, pitch_step = 21, full_loop = 22,
   quantise_inout = 23, reset_params = 24, reset = 24,
+  mute = 37,                                   -- V3.25 : mute du looper
 }
 local CMD_LIST = {
   { grp = "Selection looper", items = {
@@ -96,11 +97,13 @@ local CMD_LIST = {
     { "reverse", nil, "Reverse" }, { "auto_rev", nil, "Auto Rev (ping-pong)" }, { "one_shot", nil, "One-Shot" },
     { "slicer", nil, "Slicer on/off" }, { "cloud", nil, "Cloud on/off" }, { "link", nil, "Link Pitch/Speed" },
     { "full_loop", nil, "Full loop" }, { "quantise_inout", nil, "Quantise In/Out" },
+    { "mute", nil, "Mute (looper)" },
   } },
   { grp = "Synchro / Exclu", items = {
     { "excl_toggle", nil, "Mode EXCLU on/off" },
     { "excl_super_toggle", nil, "SUPER EXCLU (loopers seuls = groupes)" },
     { "sync_toggle", nil, "Sync / Unsync (part en cours)" }, { "sync_toggle_all", nil, "Sync / Unsync (3 parts)" },
+    { "drop_group", nil, "DROP du groupe (mixdown)" },
   } },
   { grp = "Clear / Reset", items = {
     { "clear", nil, "Clear (part active)" }, { "clear_full", nil, "Clear (3 parts)" },
@@ -218,6 +221,7 @@ local STATE = {
   cloud = function(l) return fb(l, 24) > 0.5 end,
   link = function(l) return fb(l, 9) > 0.5 end,
   auto = function(l) return fb(l, 43) > 0.5 end,
+  mute = function(l) return fb(l, 199) > 0.5 end,     -- V3.25
 }
 
 local function all_alive()
@@ -230,7 +234,7 @@ local function exec_cmd(act, mode, on)
   local name, args = act.name, act.args
   -- selection du looper : la selection appartient au Launchpad, on lui passe la commande (ExtState lp_cmd)
   -- EXCLU et SYNC/UNSYNC appartiennent aussi au Launchpad (groupes, module Master Sync) : meme canal lp_cmd
-  if name == "excl_toggle" or name == "excl_super_toggle" or name == "sync_toggle" or name == "sync_toggle_all" then
+  if name == "excl_toggle" or name == "excl_super_toggle" or name == "sync_toggle" or name == "sync_toggle_all" or name == "drop_group" then
     if on == false then return end
     r.SetExtState(EXT, "lp_cmd", string.format("%.6f\t%s\t", now(), name), false)
     return

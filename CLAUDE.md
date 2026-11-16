@@ -20,6 +20,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
   | `NowUndo_Scenario.lua` | Séquenceur de scénarios + **Rushes** (ex « macros ») : éditeur, assistant, palette. |
   | `NowUndo_Twister_Web.lua` | Pont gmem ↔ ExtState pour l'onglet Twister In/Out et l'onglet **Loopers** du web. |
   | `NowUndo_Latency.lua` | Réglage global de la compensation de latence (V3.23). |
+  | `NowUndo_VirtualPedalBoard.lua` | Pédalier virtuel (G-Board / FCB1010 / M-Vave). Learn : **PROG** → clic sur un switch (armé, contour jaune) → appui sur la vraie pédale (MIDI) + clic sur un pad du Launchpad ou un knob du Twister (action, via `NowUndo_Pedal/capture`) ou clic droit > liste ; Échap = annuler. Modes Gate / Toggle / Absolu, cible = sélection ou looper n. Actions Launchpad (Exclu, Sync, Drop, sélection) via `NowUndo_Pedal/lp_cmd`. V3.25 : + Mute, + Drop. |
   | `NowUndo.html` | Télécommande web v4.0 (onglets Launchpad / Twister / Loopers), à copier dans `reaper_www_root`. |
   | `virtual_launchpad_web.lua` | **Obsolète, ne pas lancer** (doublon qui volait les commandes web). |
 - `FX_Router_v2.lua` (ReaImGui) n'est pas dans le dépôt : l'utilisateur l'a fourni en pièce jointe (lib JSFX `Effects/MonRig`, 4 containers par piste, source suivie depuis `nowundo_vl/fx_source`).
