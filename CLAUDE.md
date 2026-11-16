@@ -136,6 +136,9 @@ propre page Launchpad** (`VL.web_with_page`).
 - **Co-enregistrement (V3.25)** : plusieurs loopers en REC sans synchro, sortie ensemble : le 1er qui sort devient maître ;
   un autre qui voit ce maître apparaître avec la même durée (±0,3 s) sort **avec lui** (même longueur, sync point 0,
   repart avancé du temps écoulé) au lieu d'attendre le tour suivant (`try_finish_rec`, `co_rec`, `tools/tcorec.py`).
+- **Enregistrement en Slicer (V3.25)** : en Slicer, Overdub / Replace / Auto-Replace écrivent à la **tête de fond**
+  (`slx_pos`, horloge, `slw_move`, `sl_rec`) et plus à la tête du slicer qui saute de tranche en tranche (la note jouée
+  était éparpillée dans d'autres tranches → « effacée » à l'écoute) ; la porte du slicer ne coupe plus l'écriture.
 - **Nouveau REC (V3.25)** : un looper qui lance un nouvel enregistrement (REC sur vide, Re-Rec) termine le REC en cours
   d'un autre looper (> 0,3 s), qui attend son point de synchro puis joue (`tools/trec.py`). Un overdub ne le fait pas.
 
