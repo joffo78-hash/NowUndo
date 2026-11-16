@@ -230,7 +230,7 @@ i = 0; loop(st_nb + 1,
   i += 1;
 );
 i = 0; loop((st_lag + 1) * st_nb, st_ring[i] = 0; i += 1; );
-lp_mute = 0; mute_g = 1; co_rec = 0; co_p = 0; slw_last = -1; sl_rec = 0;   // V3.25 : mute du looper (la boucle tourne, sans son)
+lp_mute = 0; mute_g = 1; co_rec = 0; co_p = 0; slw_last = -1; sl_rec = 0; sw_on = 0; sw_pos = 0;   // V3.25 : mute du looper (la boucle tourne, sans son)
 DR_BASE = 300; dr_mode = 0; dr_tok = 0; dr_j = 0; dr_t0 = 0; dr_t1 = 0; dr_cnt = 0; dr_blk = 0; dr_L = 0; rx_seen = gmem[398];
 det_cap = 32; LD_BASE = 1000000; LD_MAXN = 3500000; ld_active = 0; ld_i = 0; ld_n = 0; ld_ref = 0; ld_qid = 0; ld_part = 1; rec_force_free = 0; x_free = 0; xarm = 0; x_part = 1; x_ph_prev = -1; x_event = 0; x_mode = 0; x_ms = 0; x_per = 0; an_keep = 0; ana_mode = 0; sel_n = 0; cand_n = 0; an_N = 0; an_nr = 0; an_ne = 0; an_done = 0; an_dmin = 1; an_ns = 0;
 an_gap = max(1, ceil(0.06 * srate / odf_hop));
@@ -969,7 +969,22 @@ function tws(a, b, m) local(a2, b2) (
   );
 );
 function write_move(o, n, wrapped, rev, wmode) ( wrapped ? ( pingpong_on ? ( rev ? ( tws(eff_start, o, wmode); tws(eff_start, n, wmode); ) : ( tws(o, eff_end - 0.0001, wmode); tws(n, eff_end - 0.0001, wmode); ); ) : ( rev ? ( tws(n, eff_end - 0.0001, wmode); tws(eff_start, o, wmode); ) : ( tws(o, eff_end - 0.0001, wmode); tws(eff_start, n, wmode); ); ); ) : ( rev ? tws(max(n, eff_start), min(o, eff_end - 0.0001), wmode) : tws(max(o, eff_start), min(n, eff_end - 0.0001), wmode); ); );
-// V3.25 : en SLICER, l'enregistrement (dub / replace / auto-replace) suit la tete de FOND (slx_pos, calee sur l'horloge,
+// V3.25 : en SLICER, REPLACE / AUTO-REPLACE remplacent la TRANCHE ENTENDUE : au debut du remplacement, l'ecriture part
+// de la position de la tete du slicer (la tranche qu'on entend), puis avance d'un bloc dans la boucle (vitesse de lecture)
+// sans suivre les sauts du slicer -> la note n'est pas reecrasee par les repetitions de la tranche (avant : il ne restait
+// que sa queue). sw_on retombe a la fin du remplacement.
+function slc_move(wmode) local(o, n, dir, sg, adv) (
+  dir = effective_rev ? -1 : 1; adv = max(0.01, link_eff ? varispeed : sm_speed);
+  !sw_on ? ( sw_on = 1; sw_pos = max(eff_start, min(eff_end - 1, pos)); );
+  o = sw_pos; n = o + dir * adv;
+  sg = sl_gate; sl_gate = 1;
+  (dir > 0 ? n >= eff_end : n < eff_start) ? (
+    n = dir > 0 ? n - eff_len : n + eff_len;
+    write_move(o, n, 1, effective_rev, wmode);
+  ) : write_move(o, n, 0, effective_rev, wmode);
+  sl_gate = sg; sw_pos = n;
+);
+// V3.25 : en SLICER, l'OVERDUB suit la tete de FOND (slx_pos, calee sur l'horloge,
 // avance reguliere) et non la tete du slicer qui saute de tranche en tranche ; la porte du slicer ne coupe pas l'ecriture.
 // Ce qu'on joue est donc pose dans la boucle a sa vraie place dans le temps, puis le slicer le redecoupe.
 function slw_move(wmode) local(o, n, d, sg) (
@@ -2849,20 +2864,20 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       );
     );
     sl_rec = (play_mode == 1 && !dub_gran && (state == 3 || state == 4 || state == 5));   // V3.25 : enregistrement en slicer
-    !sl_rec ? slw_last = -1;
+    !sl_rec ? ( slw_last = -1; sw_on = 0; );
     wr_off = (lat_samps > 0 && !pingpong_on && !dub_gran && ((state >= 3 && state <= 6) || rp_tail_on))
              ? min(lat_samps * abs(pos_step), eff_len * 0.25) * (effective_rev ? 1 : -1) : 0;
     state == 3 ? (
       dub_gran ? (
         wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); dub_pan = rand(2.0) - 1.0; )
                : ( !effective_rev ? dub_merge_behind(pos) : 0 );
-      ) : ( sl_rec ? slw_move(1) : write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; );
+      ) : ( sw_on = 0; sl_rec ? slw_move(1) : write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; );
       (rp_tail_on && replace_fade > 0 && !dub_gran && !sl_rec) ? write_move(old_pos, pos, wrapped, effective_rev, 2) : rp_tail_on = 0;   // V3.20 : queue de replace
       replace_fade = max(0, replace_fade - replace_fade_coeff);
       wet_s0 = s0; wet_s1 = s1;
     ) : state == 4 ? (
       dub_gran ? ( wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); dub_pan = rand(2.0) - 1.0; ) : 0 )
-               : ( sl_rec ? slw_move(2) : write_move(old_pos, pos, wrapped, effective_rev, 2); wrapped ? dub_pan = rand(2.0) - 1.0; );
+               : ( sl_rec ? slc_move(2) : write_move(old_pos, pos, wrapped, effective_rev, 2); wrapped ? dub_pan = rand(2.0) - 1.0; );
       replace_fade = min(1.0, replace_fade + replace_fade_coeff); rp_tail_on = 1;
       wet_s0 = s0; wet_s1 = s1;
     ) : state == 5 ? (
@@ -2871,7 +2886,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       // confirmation a la fermeture evitent que le gate "tousse". Ouverture en 3 ms, fermeture en 25 ms, et l'ecriture
       // continue pendant la fermeture -> la couche se raccorde en fondu, sans marche dans le buffer.
       ar_in += (curr_peak > ar_in ? ar_att : ar_rel) * (curr_peak - ar_in);
-      ar_k = (sl_rec ? slx_pos : pos) + wr_off; ar_k < eff_start ? ( ar_k += eff_len; ) : ( ar_k >= eff_end ? ( ar_k -= eff_len; ); );
+      ar_k = (sl_rec && sw_on ? sw_pos : pos) + wr_off; ar_k < eff_start ? ( ar_k += eff_len; ) : ( ar_k >= eff_end ? ( ar_k -= eff_len; ); );
       ar_k = floor(max(0, min(length - 1, ar_k)));
       ar_x = max(abs(left_buf[ar_k]), abs(right_buf[ar_k]));
       ar_lp += (ar_x > ar_lp ? ar_att : ar_rel) * (ar_x - ar_lp);
@@ -2882,7 +2897,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       );
       dub_gran && wrapped ? dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0)));
       replace_fade = auto_rep_active ? min(1.0, replace_fade + ar_up) : max(0, replace_fade - ar_dn);
-      (!dub_gran && replace_fade > 0) ? ( sl_rec ? slw_move(2) : write_move(old_pos, pos, wrapped, effective_rev, 2); ) : ( sl_rec ? slw_last = slx_pos; );
+      (!dub_gran && replace_fade > 0) ? ( sl_rec ? slc_move(2) : write_move(old_pos, pos, wrapped, effective_rev, 2); ) : ( sw_on = 0; );
       rp_tail_on = !sl_rec;
       wet_s0 = s0; wet_s1 = s1;
     ) : state == 6 ? ( write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; (rp_tail_on && replace_fade > 0 && !dub_gran) ? write_move(old_pos, pos, wrapped, effective_rev, 2) : rp_tail_on = 0; replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0; wet_s1 = s1;
