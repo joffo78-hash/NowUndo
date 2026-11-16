@@ -2,10 +2,11 @@
 -- Pedalier virtuel : iCON G-Board / Behringer FCB1010 / M-Vave Chocolate.
 --   * MIDI learn par switch / pedale d'expression
 --   * Modes de switch : Gate, Toggle (note off ignoree) ou Absolu (note on = ON, note off = OFF)
---   * Mode PROG : les appuis n'executent rien ; clic sur un switch = armement, puis
---       - appui sur le pedalier = MIDI learn
---       - clic sur un pad du Launchpad virtuel / un knob du Fighter (Twister) = action
---       - ou clic droit > liste d'actions
+--   * Deux reglages SEPARES (les appuis n'executent rien pendant un reglage) :
+--       - LEARN PEDALE : clic sur un switch virtuel, puis appui sur la vraie pedale = son MIDI (l'action ne change pas)
+--       - ACTION : clic sur un switch virtuel (ou appui sur sa vraie pedale), puis clic sur un pad du Launchpad / un knob
+--         du Twister, ou clic droit > liste = son action (le MIDI ne change pas)
+--   * Temoin d'activite MIDI en bas (dernier message recu et ce qu'il a declenche) ; le switch s'allume a chaque appui
 --   * Import / export des reglages (fichier .nupb)
 --   * V3.10 : actions Mode EXCLU et Sync/Unsync (verrouille sur le looper selectionne), Max slices detectes 0..32 ;
 --       en mode EXCLU le REC est transmis au Launchpad (regles groupes / synchro)
@@ -295,7 +296,8 @@ end
 --------------------------------------------------------------------------
 local CFG = {}     -- "modele:ctrl" -> { status, ch, d1, dev, mode, inv, act }
 local RT = {}      -- etat runtime : lit_until, tog, pressed, last_exp, flash
-local S = { model = 1, prog = false, armed = nil, arm_t = 0, sel = nil, dev = "", msg = "", msg_t = 0, last_cap = 0 }
+local S = { model = 1, prog = false, armed = nil, arm_t = 0, sel = nil, dev = "", msg = "", msg_t = 0, last_cap = 0,
+            mi_txt = nil, mi_t = 0, mi_res = "", mi_ok = true }   -- dernier message MIDI recu (temoin d'activite)
 
 local function rt(key) local x = RT[key]; if not x then x = { lit_until = 0, tog = false, pressed = false, last_exp = -1, flash = 0 }; RT[key] = x end return x end
 local function cfg_of(key, create)
@@ -414,8 +416,9 @@ end
 
 local function fire(key, c, on)
   local a = c.act
-  if not a then return end
   local x = rt(key)
+  x.lit_until = now() + 0.3            -- temoin : le switch s'allume des que sa pedale envoie quelque chose
+  if not a then return end
   if a.t == "cmd" then
     exec_cmd(a, c.mode, on)
   elseif a.t == "par" then
@@ -496,7 +499,12 @@ local function handle_midi(ev)
   local st, ch = b1 & 0xF0, b1 & 0x0F
   b2, b3 = b2 or 0, b3 or 0
   if st ~= 0x90 and st ~= 0x80 and st ~= 0xB0 and st ~= 0xC0 then return end
-  if S.dev ~= "" and ev.dev ~= S.dev then return end
+  do   -- temoin : tout message recu est affiche, meme s'il n'est affecte a rien
+    local nm = ({ [0x90] = "Note", [0x80] = "Note off", [0xB0] = "CC", [0xC0] = "PC" })[st] or "?"
+    S.mi_txt = string.format("%s %d%s  ch%d  [%s]", nm, b2 or 0, (st == 0xC0) and "" or ("  = " .. tostring(b3 or 0)), ch + 1, ev.dev ~= "" and ev.dev or "?")
+    S.mi_t = now(); S.mi_res = ""; S.mi_ok = true
+  end
+  if S.dev ~= "" and ev.dev ~= S.dev then S.mi_res = "ignore : le menu Entree filtre une autre entree MIDI"; S.mi_ok = false; return end
   local on, val
   if st == 0xB0 then on = b3 >= 64; val = b3
   elseif st == 0xC0 then on = true; val = 127
@@ -506,8 +514,8 @@ local function handle_midi(ev)
     st = 0x90
   end
   local model = MODELS[S.model]
-  -- MIDI learn du controle arme
-  if S.armed then
+  -- LEARN PEDALE : le MIDI du switch arme (l'action ne change pas)
+  if S.armed and S.prog == "midi" then
     local ctrl
     for _, cc in ipairs(model.ctrls) do if model.id .. ":" .. cc.id == S.armed then ctrl = cc end end
     if ctrl and not (ctrl.kind == "exp" and st ~= 0xB0) then
@@ -518,23 +526,32 @@ local function handle_midi(ev)
       local c = cfg_of(S.armed, true)
       c.status, c.ch, c.d1, c.dev = st, ch, b2, ev.dev
       save_all()
-      say("MIDI appris : " .. bind_str(c))
-      if c.act then S.armed = nil end
+      rt(S.armed).learned = now() + 0.8
+      S.mi_res = "-> appris sur le switch arme"
+      say("MIDI appris : " .. bind_str(c) .. "   (cliquez un autre switch pour continuer)")
+      S.armed = nil
     end
     return
   end
+  local hit_any = false
   for _, ctrl in ipairs(model.ctrls) do
     local key = model.id .. ":" .. ctrl.id
     local c = CFG[key]
     if matches(c, st, ch, b2) then
+      hit_any = true
+      S.mi_res = "-> " .. (ctrl.label or ctrl.id) .. ((c.act and (" : " .. (c.act.label or c.act.name))) or " (aucune action : bouton ACTION)")
       local x = rt(key)
       if S.prog then
-        S.sel = key; x.flash = now() + 0.4
+        S.sel = key; x.flash = now() + 0.4; x.lit_until = now() + 0.3
+        if S.prog == "act" then S.armed = key; S.arm_t = now(); S.mi_res = "-> " .. (ctrl.label or ctrl.id) .. " arme : cliquez son action" end
       else
         x.pressed = (ctrl.kind == "sw") and on or false
         trigger(key, c, ctrl, on, val)
       end
     end
+  end
+  if not hit_any then
+    S.mi_res = "-> affecte a aucun switch : bouton LEARN PEDALE, clic sur un switch, puis appui sur la pedale"; S.mi_ok = false
   end
 end
 
@@ -545,8 +562,9 @@ local function apply_action(key, act)
   local c = cfg_of(key, true)
   c.act = act
   save_all()
-  say("Action : " .. (act.label or act.name or "?"))
-  if c.d1 then S.armed = nil end
+  rt(key).learned = now() + 0.8
+  say("Action : " .. (act.label or act.name or "?") .. (c.d1 and "" or "   (pas encore de pedale : LEARN PEDALE)"))
+  S.armed = nil
 end
 local function make_par_act(id, label)
   local p = PARAM_BY_ID[id]
@@ -558,7 +576,7 @@ local function make_cmd_act(name, args)
   return { t = "cmd", name = name, args = args, label = cmd_label(name, args), tgt = 0 }
 end
 local function poll_capture()
-  if not S.armed then return end
+  if not S.armed or S.prog ~= "act" then return end   -- capture d'action seulement en mode ACTION
   r.SetExtState(EXT, "armed_hb", string.format("%.4f", now()), false)
   local s = r.GetExtState(EXT, "capture")
   if s == "" then return end
@@ -677,7 +695,7 @@ end
 -- Dessin
 --------------------------------------------------------------------------
 local W, H = 860, 560
-local TOP, BOT = 40, 96
+local TOP, BOT = 40, 118
 local function setc(rr, g, b, a) gfx.set(rr, g, b, a or 1) end
 local function txt(x, y, s, size, rr, g, b, a, align, maxw)
   gfx.setfont(1, "Arial", size)
@@ -758,7 +776,10 @@ local function draw_ctrl(m, c, sc, ox, oy, blink)
     end
   end
   -- contour d'etat
-  if armed then
+  if (rt(key).learned or 0) > now() then
+    setc(0.3, 1, 0.4, 1)
+    gfx.rect(x - 3, y - 3, w + 6, h + 6, 0); gfx.rect(x - 4, y - 4, w + 8, h + 8, 0); gfx.rect(x - 5, y - 5, w + 10, h + 10, 0)
+  elseif armed then
     setc(1, 0.85, 0.1, blink and 1 or 0.25)
     gfx.rect(x - 2, y - 2, w + 4, h + 4, 0); gfx.rect(x - 3, y - 3, w + 6, h + 6, 0)
   elseif S.sel == key then
@@ -793,16 +814,21 @@ local function draw_all()
   local dl = (S.dev == "" and "Entree : toutes" or ("Entree : " .. S.dev))
   if button(bx, 6, 210, 26, dl .. "  v", false) then dev_menu() end
   bx = bx + 216
-  if button(bx, 6, 90, 26, S.prog and "PROG ON" or "PROG", S.prog, 0.85, 0.2, 0.2) then
-    S.prog = not S.prog; S.armed = nil
-    say(S.prog and "Mode PROG : les appuis n'executent rien" or "Mode PROG termine")
+  if button(bx, 6, 112, 26, "LEARN PEDALE", S.prog == "midi", 0.2, 0.65, 0.3) then
+    S.prog = (S.prog ~= "midi") and "midi" or false; S.armed = nil
+    say(S.prog and "LEARN PEDALE : cliquez un switch virtuel, puis appuyez sur la vraie pedale" or "Reglage termine")
   end
-  bx = bx + 96
-  if button(bx, 6, 70, 26, "Export", false) then do_export() end
-  bx = bx + 76
-  if button(bx, 6, 70, 26, "Import", false) then do_import() end
-  bx = bx + 76
-  if button(bx, 6, 90, 26, "Tout effacer", false) then
+  bx = bx + 118
+  if button(bx, 6, 80, 26, "ACTION", S.prog == "act", 0.25, 0.45, 0.9) then
+    S.prog = (S.prog ~= "act") and "act" or false; S.armed = nil
+    say(S.prog and "ACTION : cliquez un switch (ou appuyez sur sa pedale), puis un pad du Launchpad / un knob du Twister" or "Reglage termine")
+  end
+  bx = bx + 86
+  if button(bx, 6, 60, 26, "Export", false) then do_export() end
+  bx = bx + 64
+  if button(bx, 6, 60, 26, "Import", false) then do_import() end
+  bx = bx + 64
+  if button(bx, 6, 86, 26, "Tout effacer", false) then
     local ok = r.ShowMessageBox("Effacer tous les reglages du pedalier " .. MODELS[S.model].name .. " ?", "Pedalier", 4)
     if ok == 6 then
       for _, c in ipairs(MODELS[S.model].ctrls) do CFG[MODELS[S.model].id .. ":" .. c.id] = nil end
@@ -843,8 +869,13 @@ local function draw_all()
   local line1, line2
   if S.armed then
     local cfa = CFG[S.armed]
-    line1 = "ARME : appuyez sur le pedalier (MIDI learn) et cliquez un pad du Launchpad / un knob du Fighter (ou clic droit > liste).  Echap = annuler."
-    line2 = string.format("%s    Action : %s", bind_str(cfa), cfa and cfa.act and (cfa.act.label or cfa.act.name) or "-")
+    local id = S.armed:match(":(.*)$") or S.armed
+    if S.prog == "midi" then
+      line1 = "LEARN PEDALE - switch " .. id .. " arme : appuyez sur la vraie pedale.   Echap = annuler"
+    else
+      line1 = "ACTION - switch " .. id .. " arme : cliquez un pad du Launchpad / un knob du Twister (ou clic droit > liste).   Echap = annuler"
+    end
+    line2 = string.format("Actuellement : %s   |   Action : %s", bind_str(cfa), cfa and cfa.act and (cfa.act.label or cfa.act.name) or "-")
   elseif key then
     local cf = CFG[key]
     local id = key:match(":(.*)$") or key
@@ -855,14 +886,29 @@ local function draw_all()
       if a.t == "par" then line2 = line2 .. string.format("   |   ON=%g OFF=%g", a.von, a.voff) end
     else line2 = "Aucune action  (clic droit pour choisir)" end
   else
-    line1 = S.prog and "Mode PROG : cliquez un switch pour l'armer." or "Cliquez un switch pour le tester ; clic droit = reglages ; PROG pour programmer."
+    line1 = (S.prog == "midi" and "LEARN PEDALE : cliquez un switch virtuel pour l'armer.")
+         or (S.prog == "act" and "ACTION : cliquez un switch virtuel (ou appuyez sur sa pedale) pour l'armer.")
+         or "Jeu : cliquez un switch pour le tester ; clic droit = reglages ; LEARN PEDALE / ACTION pour programmer."
     line2 = "Pastille verte = MIDI appris, bleue = action assignee."
   end
   txt(10, iy + 8, line1, 12, 0.92, 0.92, 0.96, 1, "l", W - 20)
   txt(10, iy + 28, line2, 12, 0.75, 0.85, 1, 1, "l", W - 20)
   if now() - S.msg_t < 5 then txt(10, iy + 54, S.msg, 12, 1, 0.85, 0.35, 1, "l", W - 20) end
+  -- temoin d'activite MIDI (derniere ligne) : diode + dernier message recu + ce qu'il a declenche
+  do
+    local age = now() - (S.mi_t or 0)
+    local ly = iy + BOT - 22
+    setc(0.30, 0.31, 0.36, 1); gfx.line(0, ly - 4, W, ly - 4)
+    if S.mi_txt and age < 0.25 then setc(S.mi_ok and 0.3 or 1, S.mi_ok and 1 or 0.6, S.mi_ok and 0.4 or 0.2, 1) else setc(0.25, 0.25, 0.28, 1) end
+    gfx.circle(16, ly + 7, 6, 1, 1)
+    local t1 = S.mi_txt and ("MIDI recu : " .. S.mi_txt .. "   " .. S.mi_res)
+               or "Aucun MIDI recu depuis l'ouverture (pedalier active dans Preferences > Audio > MIDI Devices ?)"
+    local ok = (not S.mi_txt) or S.mi_ok
+    txt(28, ly, t1, 12, ok and 0.75 or 1, ok and 0.95 or 0.7, ok and 0.75 or 0.3, (S.mi_txt and age > 5) and 0.55 or 1, "l", W - 40)
+  end
   if S.prog then
-    setc(0.85, 0.2, 0.2, 1); gfx.rect(0, 0, W, 3, 1); gfx.rect(0, H - 3, W, 3, 1)
+    if S.prog == "midi" then setc(0.2, 0.65, 0.3, 1) else setc(0.25, 0.45, 0.9, 1) end
+    gfx.rect(0, 0, W, 3, 1); gfx.rect(0, H - 3, W, 3, 1)
   end
   return m, sc, ox, oy
 end
