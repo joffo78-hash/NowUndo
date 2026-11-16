@@ -128,6 +128,9 @@ propre page Launchpad** (`VL.web_with_page`).
   plus) ; action Launchpad `mute` (bascule, groupe), MIDI Learn « Mute », mot de rush `mute` / `mute off`, bouton MUTE
   (modes) de l'onglet Loopers du web. Pas de pad sur la page 1 (pleine).
 - **Page 4 : couche Loop remplacée par « Rushes 2 »** (cases 65-128) ; 128 rushes max dans le Scenario.
+- **Co-enregistrement (V3.25)** : plusieurs loopers en REC sans synchro, sortie ensemble : le 1er qui sort devient maître ;
+  un autre qui voit ce maître apparaître avec la même durée (±0,3 s) sort **avec lui** (même longueur, sync point 0,
+  repart avancé du temps écoulé) au lieu d'attendre le tour suivant (`try_finish_rec`, `co_rec`, `tools/tcorec.py`).
 - **Nouveau REC (V3.25)** : un looper qui lance un nouvel enregistrement (REC sur vide, Re-Rec) termine le REC en cours
   d'un autre looper (> 0,3 s), qui attend son point de synchro puis joue (`tools/trec.py`). Un overdub ne le fait pas.
 

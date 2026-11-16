@@ -230,7 +230,7 @@ i = 0; loop(st_nb + 1,
   i += 1;
 );
 i = 0; loop((st_lag + 1) * st_nb, st_ring[i] = 0; i += 1; );
-lp_mute = 0; mute_g = 1;   // V3.25 : mute du looper (la boucle tourne, sans son)
+lp_mute = 0; mute_g = 1; co_rec = 0; co_p = 0;   // V3.25 : mute du looper (la boucle tourne, sans son)
 DR_BASE = 300; dr_mode = 0; dr_tok = 0; dr_j = 0; dr_t0 = 0; dr_t1 = 0; dr_cnt = 0; dr_blk = 0; dr_L = 0; rx_seen = gmem[398];
 det_cap = 32; LD_BASE = 1000000; LD_MAXN = 3500000; ld_active = 0; ld_i = 0; ld_n = 0; ld_ref = 0; ld_qid = 0; ld_part = 1; rec_force_free = 0; x_free = 0; xarm = 0; x_part = 1; x_ph_prev = -1; x_event = 0; x_mode = 0; x_ms = 0; x_per = 0; an_keep = 0; ana_mode = 0; sel_n = 0; cand_n = 0; an_N = 0; an_nr = 0; an_ne = 0; an_done = 0; an_dmin = 1; an_ns = 0;
 an_gap = max(1, ceil(0.06 * srate / odf_hop));
@@ -824,7 +824,16 @@ function try_finish_rec(target, from_auto) local(ms_off, locked, mid, is_self, i
              : (locked == 1 && !is_self && gmem[ms_off + 2] > 0) ? gmem[ms_off + 2] 
              : 0;
   has_ref = master_len > 0;
-  
+  // V3.25 : CO-ENREGISTREMENT. REC demarre sans reference et un autre looper vient de devenir maitre en sortant d'un REC
+  // de la meme duree (groupe en REC, sortie ensemble : les commandes arrivent a quelques blocs d'ecart) : on sort AVEC
+  // lui, a la meme longueur, cale sur sa phase 0 (avant : on attendait son point de synchro = un tour de plus).
+  (rec_ref_kind == 0 && locked == 1 && !is_self && master_len > 0 && abs(pos - master_len) < srate * 0.3) ? (
+    k = sy_master_blk(active_part - 1);
+    rec_ref_kind = 1; rec_ref_id = (k >= 0 && gmem[k + 183] > 0) ? gmem[k + 183] : mid;
+    rec_ref_len = master_len; rec_ref_ph = 0;
+    has_ref = 1; sg = 0; unit = 0; target_sync_len = master_len; state = 8; pending_next_state = target;
+    rec_stop_lag = 0; co_rec = 1;
+  ) : (
   // V3.7: grille de sortie (gmem[99], reglee dans Master Sync) : 0 Bar (defaut) | 1 Beat | 2 1/8 | 3 Triolet (1/3 de temps) | 4 1/16
   sg = max(0, min(4, floor(gmem[99] + 0.5))); unit = 0;
   has_ref && sg > 0 ? (
@@ -852,6 +861,7 @@ function try_finish_rec(target, from_auto) local(ms_off, locked, mid, is_self, i
         k = floor(k); pos = k; master_pos = k;
         active_part == 1 ? master_pos1 = k : (active_part == 2 ? master_pos2 = k : master_pos3 = k);
       );
+  );
   );
 );
 function switch_part(new_part) local(target_len, target_base_len, idx_old, idx_new) (
@@ -2531,8 +2541,17 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
   old_pos = pos; pos += rec_speed; dirty_len = max(dirty_len, pos);
   pos >= target_sync_len ? (
       tape_write_span(old_pos, target_sync_len - 0.0001, 1); 
+      co_p = pos - target_sync_len;      // V3.25 : avance prise sur la longueur commune (co-enregistrement)
       pos = target_sync_len;
       finish_rec(pending_next_state); state_target = pending_next_state; last_state_target = pending_next_state;
+      // V3.25 : co-enregistrement -> la boucle repart deja avancee du temps ecoule depuis la longueur commune
+      // (= la phase du maitre, qui joue deja depuis quelques blocs : meme depart, meme longueur)
+      co_rec ? (
+        co_p = max(0, co_p); co_p -= length * floor(co_p / length);
+        pos = co_p; master_pos = co_p;
+        active_part == 1 ? master_pos1 = co_p : (active_part == 2 ? master_pos2 = co_p : master_pos3 = co_p);
+        co_rec = 0;
+      );
   ) : ( tape_write_span(old_pos, pos, 1); );
   wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - replace_fade_coeff);
 ) : state >= 2 && length > 0 ? (
