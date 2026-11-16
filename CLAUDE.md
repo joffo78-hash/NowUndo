@@ -6,7 +6,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 
 ## Où est quoi
 
-- Dépôt : `joffo78-hash/NowUndo`, branche de travail `ccr-12a0f3a9-86p9ey` (tout le travail récent y est).
+- Dépôt : `joffo78-hash/NowUndo`, branche de travail **`nowundo-v3.26`** (créée depuis `ccr-12a0f3a9-86p9ey`, qui contient tout le travail jusqu'au 16 nov. 2026).
 - `NowUndo/NowUndo_V3.25.jsfx` : **version courante du JSFX** (3.19 → 3.24 gardées pour l'historique).
 - `NowUndo/NU_DropCapture.jsfx` : capture du drop (posée temporairement par le Launchpad en bout de chaîne de la piste du looper cible).
 - `NowUndo/Scripts/V3.21/` : tous les scripts courants (le nom du dossier est historique) :
