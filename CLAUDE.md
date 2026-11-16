@@ -157,6 +157,9 @@ propre page Launchpad** (`VL.web_with_page`).
   un **looper ciblé** ou **la sélection** (looper / groupe). Pistes : un état `qz` par looper dans le JSFX + une file
   d'actions en attente déclenchées au prochain point de grille (comme `*` / exclu), effets FX déclenchés par le
   Launchpad au même moment ; LED qui clignote en attente.
+  **Contrainte (demandée)** : activer le quantize global ne doit **jamais modifier une boucle déjà calée** : In / Out
+  existants et l'écart (largeur) restent tels quels (contrairement au bouton Quant actuel qui recale In / Out au
+  changement) ; seules les actions **à venir** sont quantisées.
 - MIDI direct au JSFX via un JSFX « Clock » sur une piste Contrôle (horodatage à l'échantillon des appuis).
 - Conflit possible entre les touches à une lettre du Scenario et les raccourcis du MIDI Learn quand sa fenêtre a le focus
   (options proposées : laisser, pause quand focus, pause seulement pour les touches du Scenario).
