@@ -99,6 +99,7 @@ propre page Launchpad** (`VL.web_with_page`).
   Full, Reset, Stop, Restart), modificateurs lus en état réel (plus de faux Alt), raccourcis **en pause pendant toute
   saisie de texte**, cumul clavier + MIDI.
 - **Twister** : boutons d'effets du web = looper sélectionné + son groupe ; page 7 Custom : « Effet du slot (type) ».
+  Page 4 Slicer réorganisée : C = Detect | Detect Hold | Pitch | Link ; D = Root | Release | - | **Dry/Wet**.
 - **8 Panel** : import Adapter/Étirer dès qu'une référence existe ; étirement fait dans le script (Hermite) ; le 1er
   fichier fixe le tempo du projet (A2).
 - **Scenario / Rushes** : rushes gate (appui = tel qu'écrit, relâchement = tout défait) ; éditeur avec champ texte,

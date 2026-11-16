@@ -403,9 +403,9 @@ end
 -- PAGE 4 SLICER (Twister) : lignes A(haut) B C D(bas), colonnes 1..4 de gauche a droite
 --   A : Attack | Decay | Steps | Rate
 --   B : Mode | Grid (fractions) | Preset | Max slices
---   C : Detect | Detect Hold | Root note | Release
---   D : - | - | Link Rate (push seulement) | Pitch
--- Push : remet la valeur d'init, sauf B2 (bascule Trans/Grid), B3 (Regen), C3 (Tape/Pitch si moteur arrete).
+--   C : Detect | Detect Hold | Pitch | Link Rate (push seulement)
+--   D : Root note | Release | - | Dry/Wet
+-- Push : remet la valeur d'init, sauf B2 (bascule Trans/Grid), B3 (Regen), D1 (Tape/Pitch si moteur arrete).
 local function make_slicer_page()
   local cells = {}
   local function put(r, c, spec) cells[r .. "," .. c] = spec end
@@ -547,7 +547,7 @@ local function make_slicer_page()
       return string.format("%.0fms", v)
     end,
     is_grid_src)
-  put(2, 2, {                                              -- Root (init C3 = 48) ; push = Tape/Pitch si moteur arrete
+  put(3, 0, {                                              -- Root (init C3 = 48) ; push = Tape/Pitch si moteur arrete
     label = "Root", pid = 42,
     get = function() return tgt_get(150) end,
     set = function(_, v) tgt_set_param(42, clamp(v, 0, 127)) end,
@@ -563,7 +563,7 @@ local function make_slicer_page()
     end,
     disp = function(v) return note_name(v) end,
   })
-  put(2, 3, {                                              -- Release 0..3000 ms (courbe quadratique)
+  put(3, 1, {                                              -- Release 0..3000 ms (courbe quadratique)
     label = "Release", pid = 44,
     get = function() return tgt_get(170) end,
     set = function(_, v) tgt_set_param(44, clamp(v, 0, 3000)) end,
@@ -583,7 +583,7 @@ local function make_slicer_page()
   })
 
   -- ===== Ligne D : D1-D2 libres, D3 = Link Rate (push), D4 = Pitch spread =====
-  put(3, 2, {                                              -- Link Rate : slice = duree boucle / subdivision Grid
+  put(2, 3, {                                              -- Link Rate : slice = duree boucle / subdivision Grid
     label = "Link", pid = 58,
     get = function() return tgt_get(177) end,
     set = function() end,                                  -- le knob ne fait rien : seul le push bascule
@@ -593,8 +593,10 @@ local function make_slicer_page()
     push = function() tgt_set_param(PID.slicer_link, tgt_get(177) > 0.5 and 0 or 1) end,
     disp = function(v) return v > 0.5 and "ON" or "OFF" end,
   })
-  cell_lin(3, 3, "Pitch", 34, 34, 0, 100, 0, 1,
+  cell_lin(2, 2, "Pitch", 34, 34, 0, 100, 0, 1,
     function(v) return string.format("%.0fst", v) end)
+  cell_lin(3, 3, "Dry/Wet", 193, 61, 0, 1, 1, 0.01,             -- Slicer Dry/Wet : 0 = boucle d'origine, 1 = slicer
+    function(v) return string.format("%.0f%%", v * 100) end)
   return cells
 end
 
