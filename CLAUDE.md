@@ -99,7 +99,8 @@ propre page Launchpad** (`VL.web_with_page`).
   looper le sélectionne sur le Launchpad, envoi fiable numéroté, HOLD pour PAGE 1/2/3.
 - **MIDI Learn** : Beat Repeat, Auto-Replace, Reset corrigé, double appui = action sur les 8 loopers (Clear → Clear All
   Full, Reset, Stop, Restart), modificateurs lus en état réel (plus de faux Alt), raccourcis **en pause pendant toute
-  saisie de texte**, cumul clavier + MIDI.
+  saisie de texte**, cumul clavier + MIDI. V3.25 : saisie détectée aussi dans l'éditeur de code JSFX / ReaScript
+  (`KB.text_focus` : classe contenant « edit », ou fenêtre « Development Environment » / titre .jsfx .lua .eel).
 - **Twister** : boutons d'effets du web = looper sélectionné + son groupe ; page 7 Custom : « Effet du slot (type) ».
   Page 4 Slicer réorganisée : C = Detect | Detect Hold | Pitch | Link ; D = Root | Release | - | **Dry/Wet**.
 - **8 Panel** : import Adapter/Étirer dès qu'une référence existe ; étirement fait dans le script (Hermite) ; le 1er

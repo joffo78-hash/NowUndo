@@ -1994,11 +1994,7 @@ local function process_keys()
   -- touche bloquee n'arriverait pas au champ). Editeur de macro du Scenario (ExtState NowUndo_Scn/typing) ou champ
   -- texte Windows (boites de dialogue, renommage...).
   local typing = reaper.time_precise() - (tonumber(reaper.GetExtState("NowUndo_Scn", "typing")) or 0) < 0.6
-  if not typing and reaper.JS_Window_GetFocus and reaper.JS_Window_GetClassName then
-    local f = reaper.JS_Window_GetFocus()
-    local cls = f and reaper.JS_Window_GetClassName(f) or ""
-    if cls == "Edit" or cls:find("RichEdit", 1, true) then typing = true end
-  end
+  if not typing then typing = KB.text_focus() end
   if typing then
     if not KB.paused then KB.paused = true; KB.release_all(); KB.sig = nil end
     KB.prev = st
@@ -2035,6 +2031,25 @@ function KB.sync_intercept()
   end
   for vk in pairs(KB.icpt) do if not want[vk] then reaper.JS_VKeys_Intercept(vk, -1); KB.icpt[vk] = nil end end
   for vk in pairs(want) do if not KB.icpt[vk] then reaper.JS_VKeys_Intercept(vk, 1); KB.icpt[vk] = true end end
+end
+-- V3.25 : le focus est-il dans un endroit ou l'on tape du texte ? Champ dont la classe contient "edit" (Edit, RichEdit,
+-- editeurs de code), ou fenetre d'edition de code (environnement de developpement JSFX / ReaScript de REAPER, fenetre
+-- dont le titre contient .jsfx / .lua / .eel). Avant : seuls Edit / RichEdit -> l'editeur JSFX gardait les touches apprises.
+function KB.text_focus()
+  if not (reaper.JS_Window_GetFocus and reaper.JS_Window_GetClassName) then return false end
+  local w = reaper.JS_Window_GetFocus()
+  local depth = 0
+  while w and depth < 12 do
+    local cls = (reaper.JS_Window_GetClassName(w) or ""):lower()
+    if cls:find("edit", 1, true) then return true end
+    if reaper.JS_Window_GetTitle then
+      local t = (reaper.JS_Window_GetTitle(w) or ""):lower()
+      if t:find("development environment", 1, true) or t:find("%.jsfx") or t:find("%.lua") or t:find("%.eel") then return true end
+    end
+    w = reaper.JS_Window_GetParent and reaper.JS_Window_GetParent(w) or nil
+    depth = depth + 1
+  end
+  return false
 end
 function KB.release_all()
   if not reaper.JS_VKeys_Intercept then return end
