@@ -92,7 +92,8 @@ propre page Launchpad** (`VL.web_with_page`).
   relâchement, HOLD à la souris pareil) ; Ctrl/HOLD + clic = geste de groupe (1er looper libre → nouveau groupe, groupé →
   édite son groupe) ; ligne de statut sensible aux groupes ; doubles appuis Stop/Play (tout arrêter) et Restart (tout) ;
   pad D5–D8 sur slot vide = le sélectionne ; au Play de REAPER le curseur se cale sur l'horloge du maître (B2) ; rushes
-  gate ON/OFF ; pads de rush qui clignotent en attente de synchro.
+  gate ON/OFF ; pads de rush qui clignotent en attente de synchro. Ports MIDI du Launchpad mémorisés par **nom** (`nowundo_vl/lp_in_name`,
+  `lp_out_name`, choix du menu ; « Aucun » = détection auto ; port absent au démarrage = détection auto).
 - **Web v4.0** : onglet Loopers (forme d'onde, In/Out au doigt, rangées B/A du Launchpad, modes, sliders Feedback /
   Dégradation / Output / Stereo, VU), navigation commune 8 pages Twister + 8 loopers sur tous les onglets, appeler un
   looper le sélectionne sur le Launchpad, envoi fiable numéroté, HOLD pour PAGE 1/2/3.

@@ -4511,8 +4511,19 @@ function LPF.find_launchpad_device(is_output)
   return nil, table.concat(names, "\n")
 end
 
-local LP_OUT, LP_OUT_NAME = LPF.find_launchpad_device(true)
-local LP_IN, LP_IN_NAME = LPF.find_launchpad_device(false)
+-- Ports MIDI : le dernier choix fait dans le menu est memorise PAR NOM (les numeros changent au rebranchement) ;
+-- s'il n'est pas branche au demarrage, detection automatique d'un port "Launchpad".
+function LPF.pick_port(is_output)
+  local saved = reaper.GetExtState and reaper.GetExtState("nowundo_vl", is_output and "lp_out_name" or "lp_in_name") or ""
+  if saved ~= "" then
+    for _, d in ipairs(LPF.list_active_ports(is_output)) do
+      if d.name == saved then return d.index, d.name end
+    end
+  end
+  return LPF.find_launchpad_device(is_output)
+end
+local LP_OUT, LP_OUT_NAME = LPF.pick_port(true)
+local LP_IN, LP_IN_NAME = LPF.pick_port(false)
 local LP_LAST_SEQ = 0
 local LP_HELD = {}
 local LP_IN_ACTIVITY = 0
@@ -4695,11 +4706,13 @@ function LPF.lp_choose_device(is_output)
   local pick = gfx.showmenu(table.concat(menu, "|"))
   if pick == 2 then
     if is_output then LP_OUT, LP_OUT_NAME = nil, nil else LP_IN, LP_IN_NAME, LP_LAST_SEQ = nil, nil, 0 end
+    reaper.SetExtState("nowundo_vl", is_output and "lp_out_name" or "lp_in_name", "", true)   -- Aucun : retour a la detection auto
   elseif pick and pick > 2 and indexes[pick] ~= nil then
     local idx = indexes[pick]
     if is_output then
       LP_OUT = idx
       LP_OUT_NAME = LPF.midi_device_name(true, idx)
+      reaper.SetExtState("nowundo_vl", "lp_out_name", LP_OUT_NAME or "", true)   -- memorise pour les prochains demarrages
       lp_set_mode(true)
       -- Renvoyer les couleurs actuelles vers le nouveau port.
       for key, c in pairs(VL._hw_colors or {}) do
@@ -4709,6 +4722,7 @@ function LPF.lp_choose_device(is_output)
     else
       LP_IN = idx
       LP_IN_NAME = LPF.midi_device_name(false, idx)
+      reaper.SetExtState("nowundo_vl", "lp_in_name", LP_IN_NAME or "", true)     -- memorise pour les prochains demarrages
       LP_LAST_SEQ = 0
       if reaper.MIDI_GetRecentInputEvent then LP_LAST_SEQ = reaper.MIDI_GetRecentInputEvent(0) or 0 end
       LP_HELD = {}
