@@ -23,7 +23,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
   | `NowUndo_VirtualPedalBoard.lua` | Pédalier virtuel (G-Board / FCB1010 / M-Vave). Deux réglages **séparés** : **LEARN PÉDALE** (clic sur un switch → appui sur la vraie pédale = son MIDI) et **ACTION** (clic sur un switch ou appui sur sa pédale → clic sur un pad du Launchpad / knob du Twister via `NowUndo_Pedal/capture`, ou clic droit > liste) ; Échap = annuler. Témoin MIDI en bas (dernier message reçu + ce qu'il déclenche), le switch s'allume à chaque appui. Modes Gate / Toggle / Absolu, cible = sélection ou looper n. Actions Launchpad (Exclu, Sync, Drop, sélection) via `NowUndo_Pedal/lp_cmd`. V3.25 : + Mute, + Drop. |
   | `NowUndo.html` | Télécommande web v4.0 (onglets Launchpad / Twister / Loopers), à copier dans `reaper_www_root`. |
   | `virtual_launchpad_web.lua` | **Obsolète, ne pas lancer** (doublon qui volait les commandes web). |
-- `FX_Router_v2.lua` (ReaImGui) n'est pas dans le dépôt : l'utilisateur l'a fourni en pièce jointe (lib JSFX `Effects/MonRig`, 4 containers par piste, source suivie depuis `nowundo_vl/fx_source`).
+- `NowUndo/Scripts/V3.21/FX_Router_v2.lua` (ReaImGui, v2.9) : choix de l'effet de chaque container (lib JSFX `Effects/MonRig`, 4 containers par piste, source suivie depuis `nowundo_vl/fx_source`). **Il ne bypasse jamais les containers** : l'activation des slots est faite par le Launchpad (`VL.apply_fx`).
 - `tools/` : outils de test (voir plus bas).
 
 ## Protocoles (à respecter)
@@ -70,7 +70,7 @@ propre page Launchpad** (`VL.web_with_page`).
 - `CU_KNOBS` / `CU_BTNS` / `CU_FAM_NAME` doivent rester **identiques** dans `nowundo_midi_learn.lua` et `twisterinoutreset.lua`.
 - Dans le Scenario, la table `H` contient les mots de la syntaxe : `split_key` n'accepte que les entrées de type fonction.
 - Ne jamais renommer les identifiants internes (ExtState, dossiers, formats) : seulement les textes affichés.
-- Un seul script Launchpad doit tourner (deux = page web qui « vacille »).
+- Un seul script Launchpad doit tourner (deux = page web qui « vacille », effets qui se battent) : **verrou d'instance** (`nowundo_vl/lp_hb`) ; le FX Router aussi (`FXRouter/hb`). Le miroir (`Virtual_Launchpad_secondary`) n'écrit jamais sur les pistes (`apply_fx` / `apply_routing` sortent en `mirror_mode` ou `VL_TEST`). `virtual_launchpad_web.lua` s'arrête tout seul (obsolète).
 - Livraison : commit + push sur la branche, puis envoyer les fichiers modifiés à l'utilisateur (il les copie à la main
   dans REAPER ; `NowUndo.html` va dans `reaper_www_root`). Dire clairement ce qui n'a pas pu être testé dans REAPER.
 

@@ -1,5 +1,6 @@
 -- @description FX Router v2.8 : bibliothèque JSFX scannée, un seul effet chargé par container
--- @version 2.8
+-- @version 2.9
+-- v2.9 : instance unique (une 2e instance refuse de demarrer : deux FX Router ouverts se battaient)
 -- v2.8 : source suivie par le Launchpad ; changement d'effet sans réactivation du container ; état piloté par la matrice FX
 -- Nécessite l'extension ReaImGui (ReaPack > ReaTeam Extensions > ReaImGui)
 
@@ -20,6 +21,18 @@ if not reaper.ImGui_CreateContext then
   reaper.MB("L'extension ReaImGui est requise.", "FX Router", 0)
   return
 end
+-- INSTANCE UNIQUE : chaque instance signale qu'elle est vivante (ExtState FXRouter/hb) ; une 2e refuse de demarrer
+-- (meme si c'est une autre copie du script, sous un autre nom). Un plantage libere le verrou au bout de 2 s.
+do
+  local hb = tonumber(reaper.GetExtState("FXRouter", "hb")) or 0
+  if reaper.time_precise() - hb < 2 then
+    reaper.MB("Le FX Router est deja ouvert.\n\nUne seule instance a la fois.", "FX Router", 0)
+    return
+  end
+  reaper.SetExtState("FXRouter", "hb", tostring(reaper.time_precise()), false)
+  reaper.atexit(function() reaper.SetExtState("FXRouter", "hb", "0", false) end)
+end
+
 local ctx = reaper.ImGui_CreateContext('FX Router')
 
 ------------------------------------------------------------
@@ -718,6 +731,7 @@ end
 -- Boucle principale
 ------------------------------------------------------------
 local function loop()
+  reaper.SetExtState("FXRouter", "hb", tostring(reaper.time_precise()), false)   -- verrou d'instance
   sync_launchpad_source()
   if first_frame then
     local x, y, w, h = load_geometry()

@@ -809,6 +809,7 @@ end
 
 function VL.apply_routing(edges)
   if not (reaper and reaper.CountTracks) then return end
+  if VL.mirror_mode or rawget(_G, "VL_TEST") then return end   -- seul le Launchpad principal ecrit sur les pistes (pas le miroir)
   edges = edges or VL.routing_edges()
   local tracks = VL.resolve_tracks(true)
   for _, e in ipairs(edges) do
@@ -938,6 +939,7 @@ end
 
 function VL.apply_fx(slots)
   if not (reaper and reaper.CountTracks) then return end
+  if VL.mirror_mode or rawget(_G, "VL_TEST") then return end   -- seul le Launchpad principal ecrit sur les pistes (pas le miroir)
   slots = slots or VL.fx_list()
   local tracks = VL.resolve_tracks(true)
   reaper.PreventUIRefresh(1)
@@ -3421,6 +3423,7 @@ end
 
 function VL.tick(t)
   t = t or now()
+  if VL._lp_owner then reaper.SetExtState("nowundo_vl", "lp_hb", tostring(reaper.time_precise()), false) end   -- verrou d'instance
   if VL.poll_looper_feedback then VL.poll_looper_feedback() end
   VL.rec_dub_tick(); VL.ext_cmd_poll()   -- [REC>DUB]
   VL.drop_tick(t)                         -- drop de groupe (V3.24)
@@ -4720,6 +4723,15 @@ function LPF.lp_status_text()
 end
 
 function VL.run_gfx_test()
+  -- INSTANCE UNIQUE : un 2e Launchpad principal renverrait son propre etat aux pistes (effets / routing qui se battent)
+  local lp_hb = tonumber(reaper.GetExtState("nowundo_vl", "lp_hb")) or 0
+  if reaper.time_precise() - lp_hb < 2 then
+    reaper.MB("Le Virtual Launchpad tourne deja.\n\nUne seule instance a la fois : sinon les effets, le routing et la page web se battent.\n(Le miroir Virtual_Launchpad_secondary n'est pas concerne.)", "Virtual Launchpad", 0)
+    return
+  end
+  VL._lp_owner = true
+  reaper.SetExtState("nowundo_vl", "lp_hb", tostring(reaper.time_precise()), false)
+  reaper.atexit(function() reaper.SetExtState("nowundo_vl", "lp_hb", "0", false) end)
   LPF.lp_refresh_devices()
   -- Taille de référence (design)
   local REF_CELL = 56

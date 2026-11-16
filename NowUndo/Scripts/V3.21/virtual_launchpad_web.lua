@@ -1,3 +1,8 @@
+-- OBSOLETE : ce script volait les commandes de la page web (le serveur web est dans virtuallaunchpad_main.lua).
+if reaper and reaper.MB then
+  reaper.MB("virtual_launchpad_web.lua est obsolete : ne pas le lancer.\nLe serveur de la page web est dans virtuallaunchpad_main.lua.", "NowUndo", 0)
+end
+do return end
 --[[
   Virtual_Launchpad_Web.lua
   Backend web pour le Virtual Launchpad (nowundo).
