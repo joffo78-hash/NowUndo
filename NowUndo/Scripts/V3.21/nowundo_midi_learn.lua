@@ -146,6 +146,7 @@ local acts = {
   A("act:scn_next", "Scenario : Pas suivant", "Scenario", "scn_next"),
   A("act:scn_capture", "Scenario : Capture on/off", "Scenario", "scn_capture"),
   A("act:rec_dub", "Rec -> Overdub (mode, sortie du 1er rec)", "Transport", "rec_dub_toggle"),
+  A("act:mute", "Mute (looper, sans couper la piste)", "Transport", "mute"),
   A("act:drop_group", "Drop de groupe (mixdown dans la boucle la plus longue)", "Transport", "drop_group"),
 }
 for _, a in ipairs(acts) do TARGETS[#TARGETS + 1] = a end
@@ -397,7 +398,7 @@ local CMD = {
   replace = 9, auto_rep = 10, clear_full = 11, part = 12,
   multiply = 13, undo = 14, redo = 15, restart = 16, rerec = 17,
   one_shot = 18, auto = 19, speed_step = 20, pitch_step = 21,
-  full_loop = 22, quantise_inout = 23, clear_all = 2, clear_all_full = 11,
+  full_loop = 22, quantise_inout = 23, clear_all = 2, clear_all_full = 11, mute = 37,
   reset = 24, reset_all = 24, beat_repeat = 33, restart_all = 16, stop_all = 3,
 }
 -- DOUBLE APPUI (touche clavier ou MIDI, < 0,4 s) : la meme action sur les 8 loopers, comme CLEAR / RESET du Launchpad.

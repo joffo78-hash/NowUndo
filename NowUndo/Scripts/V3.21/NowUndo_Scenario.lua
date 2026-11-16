@@ -66,7 +66,7 @@ local function fb(i)
     rev = rd(b + 17) > 0.5, pp = rd(b + 18) > 0.5, cloud = rd(b + 24) > 0.5,
     slicer = (pm > 0.5 and pm < 1.5), oneshot = pm > 1.5,
     link = rd(b + 9) > 0.5, auto = rd(b + 43) > 0.5,
-    br = rd(b + 189) > 0.5,
+    br = rd(b + 189) > 0.5, mute = rd(b + 199) > 0.5,
     len = rd(b + 46), lstart = rd(b + 44), lwidth = rd(b + 45),
   }
 end
@@ -137,6 +137,7 @@ H.link     = tog(8,  function(F) return F.link end)
 H.auto     = tog(19, function(F) return F.auto end)
 H.oneshot  = tog(18, function(F) return F.oneshot end)
 H.br       = tog(33, function(F) return F.br end)
+H.mute     = tog(37, function(F) return F.mute end)   -- V3.25 : mute du looper (sans couper la piste)
 
 -- e1..e4 : effets (slots FX 1-4 du looper = page Effects du Launchpad). Comme slicer : "l1 e1" active, "l1 e1 off" desactive.
 -- Execute par le Launchpad (commande ExtState), qui garde son affichage a jour. Macro TOGGLE : on inverse.
@@ -1178,7 +1179,7 @@ local function cap_finalize()
 end
 
 local function cap_start()
-  if tab == "mac" and mac_count() >= 64 then msg = "64 rushes maximum : supprimes-en un d'abord."; msg_err = true; return end
+  if tab == "mac" and mac_count() >= 128 then msg = "128 rushes maximum : supprimes-en un d'abord."; msg_err = true; return end
   capturing = true
   cap.macro = (tab == "mac")
   cap.virt = snapshot()
@@ -1466,7 +1467,7 @@ end
 -- Partage avec le Launchpad (page 4, couche "Action macros") par l'ExtState "NowUndo_Macros" :
 --   set = macros + disposition sur le Launchpad ; rev = numero de version (le Launchpad recharge quand il change).
 --------------------------------------------------------------------------
-local MAC_EXT, MAC_MAX = "NowUndo_Macros", 64
+local MAC_EXT, MAC_MAX = "NowUndo_Macros", 128   -- V3.25 : 2 pages de rushes sur le Launchpad (Rushes + Rushes 2)
 local MDIR = reaper.GetResourcePath() .. "/Data/NowUndo_Macros/"
 local PALETTE = { 0xFF4040, 0xFF9040, 0xFFD320, 0x99FF66, 0x30E060, 0x40D0D0, 0x66CCFF, 0x3A7BFF, 0x9933FF, 0xE040FF, 0xFF66AA, 0xDDDDDD }
 local macros, layout, mac_next_id = {}, {}, 1
@@ -1520,7 +1521,7 @@ local function mac_deserialize(txt)
     end
   end
   for c, id in pairs(lay) do                       -- disposition : seulement des macros existantes, 64 cases
-    if c < 1 or c > 64 or not seen[id] then lay[c] = nil end
+    if c < 1 or c > 128 or not seen[id] then lay[c] = nil end
   end
   return list, lay
 end
@@ -1570,15 +1571,15 @@ local function lp_place(ms)
     if lp_cell_of(m.id) then already = already + 1
     else
       local c = 1
-      while c <= 64 and layout[c] do c = c + 1 end
-      if c > 64 then full = true; break end
+      while c <= 128 and layout[c] do c = c + 1 end
+      if c > 128 then full = true; break end
       layout[c] = m.id; placed = placed + 1
     end
   end
   if placed > 0 then mac_save() end
   msg = placed .. " rush(es) pose(s) sur le Launchpad"
         .. (already > 0 and ("  (" .. already .. " deja presente(s))") or "")
-        .. (full and "  -  Launchpad plein (64 pads)" or "")
+        .. (full and "  -  Launchpad plein (2 x 64 pads)" or "")
   msg_err = full
 end
 local function lp_remove(ms)
@@ -1591,7 +1592,7 @@ local function lp_remove(ms)
 end
 
 local function mac_add(text, name, color)
-  if #macros >= MAC_MAX then msg = "64 rushes maximum : supprimes-en un d'abord."; msg_err = true; return nil end
+  if #macros >= MAC_MAX then msg = "128 rushes maximum : supprimes-en un d'abord."; msg_err = true; return nil end
   local id = mac_next_id; mac_next_id = id + 1
   local nm = mac_clean(name)
   local txt = (text or ""):gsub(";", ",")
@@ -1634,7 +1635,7 @@ ED.CATS = {
   { "Derniere action", { "off", "*" } },          -- off : ajoute / retire "off" ; * : armee au point de synchro
   { "Enregistrement", { "rec", "replace", "autorep", "multiply", "rerec", "auto" } },
   { "Lecture",        { "play", "stop", "restart", "rev", "pp", "oneshot", "fullloop", "part..." } },
-  { "Modes",          { "slicer", "cloud", "br", "brf...", "link" } },
+  { "Modes",          { "slicer", "cloud", "br", "brf...", "link", "mute" } },
   { "Effets",         { "e1", "e2", "e3", "e4" } },
   { "Niveaux",        { "vol...", "speed...", "pitch...", "fb...", "smix...", "brmix..." } },
   { "Boucle",         { "in...", "out...", "quant", "undo", "redo", "clear", "clearfull", "reset" } },
@@ -1875,7 +1876,7 @@ local function mac_rename()
   if ok then m.name = mac_clean(ret); mac_save(); msg = (m.name == "") and "Nom efface : le pad affichera l'action." or "Rush renomme."; msg_err = false end
 end
 local function mac_new()                    -- ADD : ouvre l'editeur (assistant + palette) sur une macro vide
-  if #macros >= MAC_MAX then msg = "64 rushes maximum."; msg_err = true; return end
+  if #macros >= MAC_MAX then msg = "128 rushes maximum."; msg_err = true; return end
   ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, nil, true, "", false, false
   ED.cur, ED.sug, ED.si, ED.view = 0, {}, 1, 0
   ED.refocus()
@@ -2111,7 +2112,7 @@ local PROBE = {
   rec = function(F) return F.rec end, replace = function(F) return F.st == 4 end, autorep = function(F) return F.st == 5 end,
   multiply = function(F) return F.st == 6 end, rev = function(F) return F.rev end, pp = function(F) return F.pp end,
   slicer = function(F) return F.slicer end, cloud = function(F) return F.cloud end, link = function(F) return F.link end,
-  auto = function(F) return F.auto end, oneshot = function(F) return F.oneshot end, br = function(F) return F.br end, play = function(F) return F.playing end,
+  auto = function(F) return F.auto end, oneshot = function(F) return F.oneshot end, br = function(F) return F.br end, mute = function(F) return F.mute end, play = function(F) return F.playing end,
 }
 local function mac_active(m, targets)
   if not m.toggle or m.err then return false end

@@ -252,6 +252,7 @@ local CMD = {
   restart = 16,      rerec = 17,                 one_shot = 18,
   auto = 19,         speed_step = 20,            pitch_step = 21,
   full_loop = 22,    quantise_inout = 23,
+  mute = 37,                                   -- V3.25 : mute du looper (bascule ; la boucle tourne sans son)
   reset_params = 24,                           -- RESET : tous les parametres a leur defaut sauf out_vol (JSFX cmd 24)
 }
 
@@ -472,6 +473,7 @@ function VL.poll_looper_feedback()
       L.rev      = (reaper.gmem_read(base + 17) or 0) > 0.5
       L.pingpong = (reaper.gmem_read(base + 18) or 0) > 0.5
       L.cloud    = (reaper.gmem_read(base + 24) or 0) > 0.5
+      L.mute     = (reaper.gmem_read(base + 199) or 0) > 0.5   -- V3.25
       local pm   = reaper.gmem_read(base + 8) or 0
       L.slicer   = (pm > 0.5 and pm < 1.5)
       L.oneshot  = (pm > 1.5)
@@ -1320,6 +1322,7 @@ local ACTIONS = {
   auto        = { kind = "toggle", key = "auto" },
   stop_play   = { kind = "toggle", key = "playing" },
   reverse     = { kind = "toggle", key = "rev" },
+  mute        = { kind = "toggle", key = "mute" },  -- V3.25
   auto_rev    = { kind = "toggle", key = "pingpong" },                  -- AUTO REV = ping-pong
   one_shot    = { kind = "toggle", key = "oneshot" },
   cloud       = { kind = "toggle", key = "cloud" },
@@ -3104,8 +3107,7 @@ function VL.macro_release(cell)
   if VL.macros.gate_tg then VL.macros.gate_tg[cell] = nil end
   VL.macro_fire(cell, "off", tg)   -- gate : relachement = tout OFF (pas une bascule)
 end
-VL.register_layer({ id = "macros", name = "Rushes", cell = function(row, col)
-  local cell = (row - 1) * 8 + col
+function VL.macro_cell_def(cell)
   return {
     short = fn(function() VL.macro_press(cell) end),
     release = fn(function() VL.macro_release(cell) end),  -- no-op si la macro n'est pas en mode GATE
@@ -3120,29 +3122,16 @@ VL.register_layer({ id = "macros", name = "Rushes", cell = function(row, col)
       if mm.toggle or mm.gate then return VL.macros.on[mm.id] and "on" or "idle" end
       return "on"
     end }
+end
+VL.register_layer({ id = "macros", name = "Rushes", cell = function(row, col)
+  return VL.macro_cell_def((row - 1) * 8 + col)
 end })
 
 -- Couche LOOP : vrais In / Out (le lien In/Width de l'interface du looper n'est pas utilise),
 -- quantise in/out, full loop, et selecteur de pas (% de la boucle ; si quantisee : une division par appui)
-VL.register_layer({ id = "loop", name = "Loop", cell = function(row, col)
-  if row <= 4 then
-    local looper, sg = pair_cell(row, col)
-    local is_in = row <= 2
-    local action = is_in and "loop_in_step" or "loop_out_step"
-    return { short = fn(function() VL.trigger(action, sg * NUDGES[S.layer_cfg.nudge], { looper }) end),
-             hex = is_in and 0x66FFCC or 0xFF6699,
-             label = function() return "L" .. looper .. (is_in and " IN " or " OUT ") .. sign_str(sg) .. fmtn(NUDGES[S.layer_cfg.nudge]) .. "%" end,
-             state = function() return "idle" end }
-  elseif row == 5 then
-    return { short = act_on(col, "quantise_inout"), hex = 0xFFCC66, label = "L" .. col .. " QUANT IN/OUT", state = function() return "idle" end }
-  elseif row == 6 then
-    return { short = act_on(col, "full_loop"), hex = 0xFFCC66, label = "L" .. col .. " FULL LOOP", state = function() return "idle" end }
-  elseif row == 7 then
-    return { short = fn(function() S.layer_cfg.nudge = col end), hex = 0xCCCCCC,
-             label = "STEP " .. fmtn(NUDGES[col]) .. "%",
-             state = function() return S.layer_cfg.nudge == col and "on" or "idle" end }
-  end
-  return nil
+-- Couche RUSHES 2 (remplace l'ancienne couche Loop, V3.25) : cases 65..128 de la disposition des rushes, meme fonctionnement
+VL.register_layer({ id = "macros2", name = "Rushes 2", cell = function(row, col)
+  return VL.macro_cell_def(64 + (row - 1) * 8 + col)
 end })
 
 -- Dispatch (appui court / long)
@@ -4924,10 +4913,11 @@ local HOLD = {
           for n in ids_s:gmatch("%d+") do ids[#ids + 1] = tonumber(n) end
           local r, c = pad_at(cx, cy, CELL, OX, OY)
           local cell
-          if S.page == 4 and S.p4_layer == "macros" and r and r >= 1 and c <= 8 then cell = (r - 1) * 8 + c
+          local moff = (S.p4_layer == "macros2") and 64 or 0
+          if S.page == 4 and (S.p4_layer == "macros" or S.p4_layer == "macros2") and r and r >= 1 and c <= 8 then cell = moff + (r - 1) * 8 + c
           else
             cell = 1
-            while cell <= 64 and VL.macros.layout[cell] do cell = cell + 1 end       -- pas sur une case : a la suite
+            while cell <= 128 and VL.macros.layout[cell] do cell = cell + 1 end       -- pas sur une case : a la suite
           end
           if cell <= 64 and #ids > 0 then VL.macro_drop(ids, cell) end
         end
@@ -4987,12 +4977,13 @@ local HOLD = {
 
     elseif edge_up and down_pad then
       local r, c = down_pad[1], down_pad[2]
-      if S.page == 4 and S.p4_layer == "macros" and r >= 1 and c <= 8 and VL.macro_at((r - 1) * 8 + c) then
+      local moff = (S.p4_layer == "macros2") and 64 or 0
+      if S.page == 4 and (S.p4_layer == "macros" or S.p4_layer == "macros2") and r >= 1 and c <= 8 and VL.macro_at(moff + (r - 1) * 8 + c) then
         local r2, c2 = pad_at(gfx.mouse_x, gfx.mouse_y, CELL, OX, OY)             -- relache sur un autre pad : on DEPLACE la macro
         if r2 and r2 >= 1 and c2 <= 8 and (r2 ~= r or c2 ~= c) then
           local dd = down[r .. "," .. c]
           if dd then dd.consumed = true end                                       -- ne declenche pas la macro
-          VL.macro_move((r - 1) * 8 + c, (r2 - 1) * 8 + c2)
+          VL.macro_move(moff + (r - 1) * 8 + c, moff + (r2 - 1) * 8 + c2)
         end
       end
       if sticky_on and not sticky_pad and VL.is_holdable(r, c)

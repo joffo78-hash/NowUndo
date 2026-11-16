@@ -42,7 +42,8 @@ du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 a
 **Commandes JSFX (+48)** : 1 rec/dub, 2 clear, 3 stop/play, 4 reverse, 5 ping-pong, 6 slicer, 7 cloud, 8 link,
 9 replace, 10 auto-replace, 11 clear full, 12 part, 13 multiply, 14 undo, 15 redo, 16 restart, 17 re-rec, 18 one-shot,
 19 auto, 20 speed step, 21 pitch step, 22 full loop, 23 quantise, 24 reset, 30 exclu, 31/32 import (copie / requête longueur), 33 beat repeat,
-34/35/36 drop (horloge du passage sur la cible / source en attente d'effacement / copie de l'enregistrement ; arg = jeton).
+34/35/36 drop (horloge du passage sur la cible / source en attente d'effacement / copie de l'enregistrement ; arg = jeton),
+37 mute (arg 0 bascule / 1 on / 2 off ; état publié en `+199`).
 **Paramètres (+180)** : 3 speed, 4 pitch, 5 mix, 7 fade, 19 fdbk, 20 dégradation, 21 stéréo, 22 out vol, 26-28/35/36/38-41 cloud,
 29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2.
 
@@ -123,6 +124,10 @@ propre page Launchpad** (`VL.web_with_page`).
 - **MIDI Learn (V3.25)** : **Ctrl + clic sur Learn = cumul** (le contrôleur garde ses autres fonctions) ; cible
   « Dry/Wet des effets (Slicer + Cloud + BR) » (`par:fx_mix`, champ `also`) ; écritures de paramètres sur 3 boîtes
   + file d'attente (`PQ`).
+- **Mute de looper (V3.25)** : dans le JSFX (fondu ~5 ms, la boucle tourne, l'entrée n'est pas coupée, la piste non
+  plus) ; action Launchpad `mute` (bascule, groupe), MIDI Learn « Mute », mot de rush `mute` / `mute off`, bouton MUTE
+  (modes) de l'onglet Loopers du web. Pas de pad sur la page 1 (pleine).
+- **Page 4 : couche Loop remplacée par « Rushes 2 »** (cases 65-128) ; 128 rushes max dans le Scenario.
 - **Nouveau REC (V3.25)** : un looper qui lance un nouvel enregistrement (REC sur vide, Re-Rec) termine le REC en cours
   d'un autre looper (> 0,3 s), qui attend son point de synchro puis joue (`tools/trec.py`). Un overdub ne le fait pas.
 
@@ -144,6 +149,14 @@ propre page Launchpad** (`VL.web_with_page`).
      de la page 4 inchangées.
   4. Le web reprend les dispositions.
 
+- **CHANTIER « Quantize global » (demandé, à faire plus tard)** : une action (rush + MIDI Learn) qui, activée,
+  **quantise toutes les actions du looper** et pas seulement In/Out : REC (début / fin), Restart, activation /
+  désactivation du Slicer, Cloud, Beat Repeat, Reverse, effets (slots FX), Stop/Play, etc., ainsi que les unités de
+  **Rec Density**. Grille au choix : **cycle, temps, croche, double croche**. La grille est calculée sur **la durée
+  de la boucle de chaque looper** (pas sur l'horloge globale). Comme les autres rushes, elle s'active pour **tous**,
+  un **looper ciblé** ou **la sélection** (looper / groupe). Pistes : un état `qz` par looper dans le JSFX + une file
+  d'actions en attente déclenchées au prochain point de grille (comme `*` / exclu), effets FX déclenchés par le
+  Launchpad au même moment ; LED qui clignote en attente.
 - MIDI direct au JSFX via un JSFX « Clock » sur une piste Contrôle (horodatage à l'échantillon des appuis).
 - Conflit possible entre les touches à une lettre du Scenario et les raccourcis du MIDI Learn quand sa fenêtre a le focus
   (options proposées : laisser, pause quand focus, pause seulement pour les touches du Scenario).

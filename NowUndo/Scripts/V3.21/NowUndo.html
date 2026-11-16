@@ -947,7 +947,7 @@ html, body {
                   ["ONE SHOT", { a: "one_shot" }, l => l.fl & 32, "#CCCCCC"], ["STOP / PLAY", { a: "stop_play" }, l => l.st >= 2 && l.st <= 6, "#009933"],
                   ["MULTIPLY", { a: "multiply" }, l => l.st === 6, "#9933FF"], ["REPLACE", { a: "replace" }, l => l.st === 4, "#FF3300"],
                   ["RE-REC", { a: "rerec" }, null, "#FF3333"], ["REC / DUB", { a: "rec_overdub" }, l => l.st === 1 || l.st === 3 || l.st === 8, "#FF0000"]];
-  const LV_MOD = [["PING-PONG", { a: "auto_rev" }, l => l.fl & 2, "#FFD320"], ["AUTO REC", { a: "auto" }, l => (l.fl & 64) || l.st === 7, "#9999FF"],
+  const LV_MOD = [["MUTE", { a: "mute" }, null, "#FF4060"], ["PING-PONG", { a: "auto_rev" }, l => l.fl & 2, "#FFD320"], ["AUTO REC", { a: "auto" }, l => (l.fl & 64) || l.st === 7, "#9999FF"],
                   ["AUTO-REP", { c: 10 }, l => l.st === 5, "#d6b07a"], ["BEAT REPEAT", { c: 33 }, l => l.fl & 16, "#52C78C"]];
   function lvSend(x) {
     if (x.a) queueCmd("ACT," + (lvSel + 1) + "," + x.a);
