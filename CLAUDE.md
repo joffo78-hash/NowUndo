@@ -31,7 +31,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `+2` état (0 stop, 1 rec, 2 play, 3 dub, 4 replace, 5 auto-rep, 6 multiply, 7 attente, 8 sync) · `+42` part active ·
 `+44/+45/+46` loop start / width / length · `+47` pos % · `+48` **commande** · `+49` argument ·
 `+50..149` forme d'onde · `+155` BPM estimé · `+160..162` édition In/Out/Width · `+172/+173` VU in/out ·
-`+180` id de paramètre à écrire, `+181` valeur · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
+`+180` id de paramètre à écrire, `+181` valeur (V3.25 : 2 boîtes de plus `+195/+196` et `+197/+198`) · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
 `+182..184` sync point / ref / len du maître. Global : `0..24` Master Sync par part (`[o]==1` maître looper, `==2` Host,
 `[o+2]` longueur, `[o+3]` position), `100+i` vivant, `130+i` heartbeat, `950/951` heure de l'appui + adresse cible (V3.22),
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
@@ -116,6 +116,13 @@ propre page Launchpad** (`VL.web_with_page`).
   la cible = sa boucle d'avant. Les pistes d'effets aux (20-23) ne sont pas incluses (elles mélangent d'autres sources).
   Vérifié par `tools/tdrop.py` (effet sur la piste source, A en reverse, B granulaire, A vitesse ×2 : recalage de 16
   samples sur l'horloge, normal).
+- **Rushes gate / toggle (V3.25)** : le **dernier rush actif gagne** (pile `H._live` dans le Scenario, clé = looper + mot).
+  Activer = tel qu'écrit (plus d'inversion en toggle : un 2e BR ne coupe pas le 1er, la fraction devient la sienne) ;
+  désactiver = chaque action reprend la valeur du rush actif le plus récent qui la porte, sinon défaut. Pad toggle allumé
+  = rush dans la pile (et 1er mot vérifié sur le looper). Corrigé : `brf` au relâchement d'un gate revient bien à Free.
+- **MIDI Learn (V3.25)** : **Ctrl + clic sur Learn = cumul** (le contrôleur garde ses autres fonctions) ; cible
+  « Dry/Wet des effets (Slicer + Cloud + BR) » (`par:fx_mix`, champ `also`) ; écritures de paramètres sur 3 boîtes
+  + file d'attente (`PQ`).
 - **Nouveau REC (V3.25)** : un looper qui lance un nouvel enregistrement (REC sur vide, Re-Rec) termine le REC en cours
   d'un autre looper (> 0,3 s), qui attend son point de synchro puis joue (`tools/trec.py`). Un overdub ne le fait pas.
 

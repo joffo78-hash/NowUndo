@@ -301,12 +301,12 @@ H.brf = function(v)
   if not v then return nil, "fraction attendue (1/2 1/3 1/4 1/6 1/8 1/12 1/16 1/32 1/64 ou free)" end
   local idx = brf_parse(v)
   if not idx then return nil, "fraction inconnue : " .. v .. " (1/2 1/3 1/4 1/6 1/8 1/12 1/16 1/32 1/64 ou free)" end
-  local tg = tmode
+  local tg, om = tmode, H._omode           -- lus a la compilation (la fonction part plus tard, depuis la file)
   return { { ch = "param", f = function(i)
     local F = fb(i)
     local val = idx
     if tg and math.floor(rd(F.b + 25) + 0.5) == idx then val = 0 end   -- TOGGLE : fraction <-> Free
-    if H._omode then val = 0 end                                       -- GATE, relachement : Free
+    if om then val = 0 end                                             -- GATE, relachement : Free
     return F.b, 59, val
   end } }
 end
@@ -432,11 +432,11 @@ local function compile(text, forced, toggle, gate_off)
             if not ops then errs[#errs + 1] = "[" .. act .. "] " .. k .. " : " .. err; ok = false; break end
             for _, i in ipairs(targets) do
               for _, op in ipairs(ops) do
-                if not op.all then items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, glob = op.glob, slot = op.slot, want = op.want } end
+                if not op.all then items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, glob = op.glob, slot = op.slot, want = op.want, key = k .. (op.slot and ("#" .. op.slot) or "") } end
               end
             end
             for _, op in ipairs(ops) do
-              if op.all then for i = 1, NLOOP do items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, all = true } end end
+              if op.all then for i = 1, NLOOP do items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, all = true, key = k } end end
             end
           end
         end
@@ -2027,15 +2027,57 @@ local function sel_targets()
   return { math.max(1, math.min(NLOOP, sl)) }
 end
 
+-- ===== RUSHES GATE / TOGGLE : le DERNIER rush actif gagne =====
+-- Chaque rush active (pad gate tenu, pad toggle allume) est empile. Activer = appliquer tel qu'ecrit (jamais d'inversion :
+-- un 2e beat repeat ne coupe pas le 1er, la fraction devient la sienne, rien ne s'additionne). Desactiver = pour chaque
+-- action (looper + mot), remettre la valeur du rush actif le plus recent qui la porte encore, sinon la defaire (defaut).
+H._live = {}
+H._live_find = function(mid)
+  for n, e in ipairs(H._live) do if e.mid == mid then return n, e end end
+end
+H._rush_live = function(m, targets, on)
+  local n = H._live_find(m.id)
+  if n then table.remove(H._live, n) end
+  if on then
+    H._live[#H._live + 1] = { mid = m.id, targets = targets }
+    return compile(m.text, targets, false, false)
+  end
+  local out = {}
+  for _, it in ipairs(compile(m.text, targets, false, true)) do
+    local repl = nil
+    if it.key and it.i then
+      for k = #H._live, 1, -1 do
+        local e2 = H._live[k]
+        local m2 = mac_find(e2.mid)
+        local hit = false
+        for _, ti in ipairs(e2.targets) do if ti == it.i then hit = true end end
+        if m2 and not m2.err and hit then
+          for _, it2 in ipairs(compile(m2.text, e2.targets, false, false)) do
+            if it2.i == it.i and it2.key == it.key then repl = repl or {}; repl[#repl + 1] = it2 end
+          end
+          if repl then break end
+        end
+      end
+    end
+    if repl then for _, x in ipairs(repl) do out[#out + 1] = x end else out[#out + 1] = it end
+  end
+  return out
+end
 local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro GATE (appui / relachement du pad)
   if m.err then msg = "Rush '" .. mac_label(m) .. "' invalide : " .. m.err; msg_err = true; return end
   reaper.gmem_attach(GMEM)
   if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end       -- mode ALL : action collective sur les 8 loopers
   local items
   if m.gate and (gst == "on" or gst == "off") then
-    items = compile(m.text, targets, false, gst == "off")   -- GATE : appui = tout ON (tel qu'ecrit), relachement = tout OFF
+    items = H._rush_live(m, targets, gst == "on")          -- GATE : appui = tel qu'ecrit, relachement = defait (dernier actif gagne)
+  elseif m.toggle and not m.err then
+    -- TOGGLE : allume -> eteint selon la pile ; si l'etat a ete change ailleurs (ex. BR coupe a la main), on rallume
+    local _, e = H._live_find(m.id)
+    local on = not e
+    if e and H._probe_ok and H._probe_ok(m) and not H._mac_active(m, e.targets) then on = true end
+    items = H._rush_live(m, (e and not on) and e.targets or targets, on)
   else
-    items = compile(m.text, targets, m.toggle)
+    items = compile(m.text, targets, false)
   end
   grp_counter = grp_counter + 1
   local t0 = reaper.time_precise()
@@ -2104,6 +2146,17 @@ local function mac_active(m, targets)
   end
   return any
 end
+H._mac_active = mac_active
+H._probe_ok = function(m)
+  local s = m.text:lower():gsub("à", " "):gsub("[=:]", " ")
+  local t = {}
+  for w in (s:match("^[^,]*") or ""):gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
+  local key = t[1] and split_key(t[1]:match("[^/]+") or "")
+  if not key then return false end
+  if PROBE[key] then return true end
+  local x = t[2] and num(t[2])
+  return x ~= nil and (key == "in" or key == "out" or (VPID and VPID[key] ~= nil))
+end
 local mac_on_t, mac_on_s = 0, nil
 
 -- declenchements venant du Launchpad (ExtState NowUndo_Scn/mcr : id<TAB>cibles<TAB>temps) + heartbeat "alive"
@@ -2112,7 +2165,12 @@ local function mac_poll()
   if t - mac_on_t > 0.12 then                                      -- pads toggle du Launchpad : ON = plein feu, OFF = attenue
     mac_on_t = t
     local tg, ids = sel_targets(), {}
-    for _, m in ipairs(macros) do if m.toggle and mac_active(m, tg) then ids[#ids + 1] = m.id end end
+    for _, m in ipairs(macros) do
+      if m.toggle then
+        local _, e = H._live_find(m.id)
+        if e and (not H._probe_ok(m) or mac_active(m, e.targets)) then ids[#ids + 1] = m.id end
+      end
+    end
     local s = table.concat(ids, ",")
     if s ~= mac_on_s then mac_on_s = s; reaper.SetExtState(MAC_EXT, "on", s, false) end
     -- macros dont une action armee (*) attend le point de synchro : leur pad clignote sur le Launchpad

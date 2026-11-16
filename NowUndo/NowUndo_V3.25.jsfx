@@ -2025,10 +2025,15 @@ loop(3,
 
   // Remote param write (ReaImGui / external): +180 = param id, +181 = value
   // Applied only on the active part; id mirrors export offsets.
-  wr_id = gmem[gmem_base + 180];
+  // V3.25 : 3 boites a parametres (+180/+181, +195/+196, +197/+198) : un controleur MIDI peut ecrire plusieurs
+  // parametres dans le meme cycle (MIDI Learn : cumul / Dry/Wet des effets)
+  wr_mb = 0;
+  loop(3,
+  wr_mo = wr_mb == 0 ? 180 : (wr_mb == 1 ? 195 : 197);
+  wr_id = gmem[gmem_base + wr_mo];
   wr_id > 0 ? (
     p != (active_part - 1) ? switch_part(p + 1);
-    wr_v = gmem[gmem_base + 181];
+    wr_v = gmem[gmem_base + wr_mo + 1];
     wr_id == 3  ? ( speed = max(0.01, min(100, wr_v)); slider1 = speed; ) :
     wr_id == 4  ? ( pitch = max(-48, min(48, wr_v)); slider2 = pitch; ) :
     wr_id == 5  ? ( mix = max(0, min(1, wr_v)); slider3 = mix; ) :
@@ -2082,8 +2087,10 @@ loop(3,
     wr_id == 63 ? ( cloud_freeze = wr_v >= 0.5 ? 1 : 0; slider63 = cloud_freeze; ) :
     wr_id == 64 ? ( cloud_diffuse = max(0, min(1, wr_v)); slider64 = cloud_diffuse; ) :
     0;
-    gmem[gmem_base + 180] = 0;
-    gmem[gmem_base + 181] = 0;
+    gmem[gmem_base + wr_mo] = 0;
+    gmem[gmem_base + wr_mo + 1] = 0;
+  );
+  wr_mb += 1;
   );
   
   gmem[gmem_base + 0]  = instance_id;

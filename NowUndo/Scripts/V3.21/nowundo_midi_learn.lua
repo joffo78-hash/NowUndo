@@ -170,6 +170,11 @@ for _, p in ipairs({
   P("par:cl_mix",   "Cloud Dry/Wet",                  36, 36, 0, 1,   1),
   P("par:br_mix",   "Beat Repeat Dry/Wet",            60, 194, 0, 1,  1),
 }) do TARGETS[#TARGETS + 1] = p end
+do   -- V3.25 : un seul controleur pour les 3 Dry/Wet (Slicer + Cloud + Beat Repeat) ; soft takeover lu sur le Slicer
+  local p = P("par:fx_mix", "Dry/Wet des effets (Slicer + Cloud + BR)", 61, 193, 0, 1, 1)
+  p.also = { 36, 60 }
+  TARGETS[#TARGETS + 1] = p
+end
 
 -- Restart INDIVIDUEL par looper : agit toujours sur le looper nomme, sans tenir compte de la selection / du groupe
 for i = 1, 8 do
@@ -406,6 +411,7 @@ local DOUBLE_S, last_on = 0.40, {}
 --------------------------------------------------------------------------
 local maps = {}
 local learn_id, learn_armed_t = nil, 0
+local learn_add = false   -- V3.25 : Ctrl + clic sur Learn = AJOUTER cette fonction au controleur (sans retirer les autres)
 local scroll, filter = 0, ""
 local status_msg, status_t = "", 0
 local midi_out_idx, last_seq = -1, 0
@@ -745,11 +751,32 @@ local function write_cmd(looper, cmd, arg)
   reaper.gmem_write(b + 48, cmd)
 end
 
+-- V3.25 : 3 boites a parametres par looper (+180/+181, +195/+196, +197/+198) -> un controleur peut ecrire plusieurs
+-- parametres d'un coup (cumul, Dry/Wet des effets). Boites pleines : file d'attente videe aux cycles suivants
+-- (une valeur plus recente du meme parametre remplace l'ancienne).
+local PQ = { q = {} }
+function PQ.try(b, id, value)
+  for _, o in ipairs({ 180, 195, 197 }) do
+    local cur = reaper.gmem_read(b + o) or 0
+    if cur == 0 or cur == id then
+      reaper.gmem_write(b + o + 1, value); reaper.gmem_write(b + o, id)
+      return true
+    end
+  end
+  return false
+end
+function PQ.flush()
+  if not next(PQ.q) then return end
+  reaper.gmem_attach(GMEM)
+  local keep = {}
+  for _, e in ipairs(PQ.q) do if not PQ.try(e.b, e.id, e.v) then keep[#keep + 1] = e end end
+  PQ.q = keep
+end
 local function write_param(looper, id, value)
   reaper.gmem_attach(GMEM)
   local b = gbase(looper, active_part(looper))
-  reaper.gmem_write(b + 181, value)
-  reaper.gmem_write(b + 180, id)
+  for _, e in ipairs(PQ.q) do if e.b == b and e.id == id then e.v = value return end end
+  if not PQ.try(b, id, value) then PQ.q[#PQ.q + 1] = { b = b, id = id, v = value } end
 end
 
 local SCN_CMD = { scn_validate = "validate", scn_prev = "prev", scn_next = "next", scn_capture = "toggle" }
@@ -982,7 +1009,12 @@ local function param_norm(t, v)
   return n ^ (1 / (t.curve or 1))
 end
 local function param_write(t, v)
-  for _, i in ipairs(targets()) do if alive(i) then write_param(i, t.wr, v) end end
+  for _, i in ipairs(targets()) do
+    if alive(i) then
+      write_param(i, t.wr, v)
+      if t.also then for _, w in ipairs(t.also) do write_param(i, w, v) end end
+    end
+  end
 end
 -- Soft takeover (Pickup coche) : la valeur entrante est ignoree tant qu'elle n'a pas rejoint / croise la valeur actuelle
 local pk_par = {}
@@ -1208,7 +1240,7 @@ local function handle_event(msg, dev, kev)
       -- v2.8 : une TOUCHE s'ajoute a l'assignation MIDI (elle ne la remplace pas) ; 1 touche = 1 seule fonction
       local done_id, removed = learn_id, {}
       for id, code in pairs(KB.k) do
-        if id ~= done_id and code == ev.d1 then KB.k[id] = nil; removed[#removed + 1] = BY_ID[id] and BY_ID[id].name or id end
+        if id ~= done_id and code == ev.d1 and not learn_add then KB.k[id] = nil; removed[#removed + 1] = BY_ID[id] and BY_ID[id].name or id end
       end
       KB.k[done_id] = ev.d1
       local msgtxt = "Learned " .. (BY_ID[done_id] and BY_ID[done_id].name or done_id) .. " ← Touche " .. KB.name(ev.d1)
@@ -1222,7 +1254,16 @@ local function handle_event(msg, dev, kev)
     end
     if ev.status ~= KB.ST and (now - learn_armed_t) > 0.05 and not is_off then
       local done_id = learn_id
-      local removed = steal_assignment(done_id, ev, dn)
+      local removed, shared = {}, {}
+      if learn_add then                                 -- cumul : on garde les autres fonctions de ce controleur
+        for id, m in pairs(maps) do
+          if id ~= done_id and m.status == ev.status and m.ch == ev.ch and m.d1 == ev.d1 and is_aux_id(id) == is_aux_id(done_id) then
+            shared[#shared + 1] = BY_ID[id] and BY_ID[id].name or id
+          end
+        end
+      else
+        removed = steal_assignment(done_id, ev, dn)
+      end
       maps[done_id] = {
         status = ev.status, ch = ev.ch, d1 = ev.d1, d2 = -1,
         ret = maps[done_id] and maps[done_id].ret or false,
@@ -1232,6 +1273,7 @@ local function handle_event(msg, dev, kev)
       local msgtxt = "Learned " .. (BY_ID[done_id] and BY_ID[done_id].name or done_id) .. " ← " .. fmt_midi(maps[done_id])
       if dn ~= "" then msgtxt = msgtxt .. " @" .. dn end
       if #removed > 0 then msgtxt = msgtxt .. "   (retire de: " .. table.concat(removed, ", ") .. ")" end
+      if #shared > 0 then msgtxt = msgtxt .. "   (pilote aussi: " .. table.concat(shared, ", ") .. ")" end
       notify(msgtxt)
       learn_id = nil
       learn_block = { dn = dn, st = ev.status, ch = ev.ch, t = now }
@@ -1691,7 +1733,11 @@ local function draw()
         elseif col == "clear" and CUL.get(t) then CUL.set(t, nil); notify("Cleared " .. t.name) end
       elseif col == "learn" then
         if learn_id == t.id then learn_id = nil; notify("Learn cancelled")
-        else learn_id = t.id; learn_armed_t = reaper.time_precise(); notify("Learning " .. t.name) end
+        else
+          learn_id = t.id; learn_armed_t = reaper.time_precise()
+          learn_add = (gfx.mouse_cap & 4) == 4
+          notify((learn_add and "Learning (cumul, Ctrl) " or "Learning ") .. t.name)
+        end
       elseif col == "ret" then
         maps[t.id] = maps[t.id] or { status = 0, ch = 0, d1 = 0 }
         maps[t.id].ret = not maps[t.id].ret
@@ -1996,6 +2042,7 @@ function KB.release_all()
 end
 
 local function main()
+  PQ.flush()
   reaper.SetExtState(EXT, "hb", tostring(reaper.time_precise()), false)
   process_midi()
   process_keys()
