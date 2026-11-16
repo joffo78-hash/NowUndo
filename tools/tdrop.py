@@ -1,6 +1,6 @@
 """V3.25 : test du DROP de groupe ENREGISTRE (2 loopers + piste "NU Drop" avec NU_DropCapture, gmem partage).
 A (id 1) enregistre ~2 s (maitre), B (id 2) ~1 s en esclave. La piste de B a un "effet" (filtre + saturation) applique
-apres le JSFX. La piste NU Drop recoit A + effet(B) (sends post-fader) et enregistre un passage de A.
+apres le JSFX. NU_DropCapture est en bout de chaine de la piste de A (canaux 1/2) et recoit effet(B) sur 2 canaux ajoutes (3/4).
 Apres la bascule, A seul (sans effet, B efface) doit sonner comme A + effet(B) d'avant, a la meme phase.
 Usage : cd tools && cp ../NowUndo/NowUndo_V3.25.jsfx v325.jsfx && cp ../NowUndo/NU_DropCapture.jsfx cap.jsfx
         && python3 tdrop.py . [base|arev|gran|speed]
@@ -69,7 +69,8 @@ def step(nblk=1):
         m = C
         for i in range(BLK):
             A._clock[0] = (n0 + i) / SR
-            m.v_spl0 = ra.out[n0 + i][0] + outB[n0 + i][0]; m.v_spl1 = ra.out[n0 + i][1] + outB[n0 + i][1]
+            m.v_spl0 = ra.out[n0 + i][0]; m.v_spl1 = ra.out[n0 + i][1]          # piste cible (apres ses effets)
+            m.v_spl2 = outB[n0 + i][0]; m.v_spl3 = outB[n0 + i][1]              # autres loopers (sends, canaux ajoutes)
             m.sec_sample()
         rc.n = n0 + BLK
         A._clock[0] = ra.n / SR

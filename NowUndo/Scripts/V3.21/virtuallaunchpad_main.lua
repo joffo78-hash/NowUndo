@@ -507,7 +507,7 @@ VL.config = {
   sync_fx_patterns = { "master sync", "master_synchro", "central timebase" },   -- nom du JSFX Master Sync (minuscules)
   sync_inbox = 96,                 -- gmem[96..98] : boite de commandes du JSFX Master Sync (Main / Chorus / Bridge)
   looper_window_fx = 0,            -- index (0 = premier) de l'effet looper dont on ouvre la fenetre
-  fx_patterns = { "nowundo", "noundo", "looper" },   -- nom du JSFX a reconnaitre sur les pistes
+  fx_patterns = { "nowundo", "noundo", "looper", "drop capture" },   -- (drop capture : jamais compte comme slot FX)   -- nom du JSFX a reconnaitre sur les pistes
   -- Noms de secours si les index de piste ne collent pas
   in_name_patterns = { "^in%s*%d+", "^input%s*%d+", "^entree%s*%d+" },
   looper_name_patterns = { "^l%d+", "^looper%s*%d+" },
@@ -2378,62 +2378,68 @@ function VL.rec_dub_tick()
   end
 end
 -- ===================== DROP DE GROUPE (JSFX V3.25 + NU_DropCapture) =====================
--- Les loopers du groupe actif qui jouent sont envoyes (sends post-fader, temporaires) vers la piste cachee "NU Drop"
--- (creee au 1er drop, JSFX NU_DropCapture) qui enregistre UN passage de la boucle la plus longue, tel qu'on l'entend :
+-- NU_DropCapture, pose temporairement en bout de chaine de la piste du looper cible (les autres loopers du groupe y
+-- arrivent par des sends post-fader sur 2 canaux ajoutes), enregistre UN passage de la boucle la plus longue, tel qu'on l'entend :
 -- effets des pistes (slots FX), Slicer, Cloud, Beat Repeat, vitesse / pitch, In/Out, volumes, faders.
 -- A la fin du passage : la cible joue le mixdown "a plat" (ses effets sont coupes, ils sont dans l'enregistrement ;
 -- UNDO sur elle = sa boucle d'avant), les autres loopers qui jouaient sont EFFACES dans le meme bloc, le groupe est supprime.
 -- Echanges gmem : 300 + (i-1)*10 = accuse du looper i (+1 horloge, +5 duree), 380 signal final, 381 cible,
 -- 393 depart de la capture, 394 fin de capture, 395 gain (1 / volume de la piste cible), 396 latence des effets (PDC).
-VL.DROP = { BASE = 300, CAP = 3500000, run = nil, msg = nil, msg_t = 0, tok = 0, BUS = "NU Drop" }
+VL.DROP = { BASE = 300, CAP = 3500000, run = nil, msg = nil, msg_t = 0, tok = 0 }
 function VL.drop_note(fmt, ...)
   local ok, m = pcall(string.format, fmt, ...)
   VL.DROP.msg = ok and m or tostring(fmt); VL.DROP.msg_t = now()
   log("info", "DROP : %s", VL.DROP.msg)
 end
 function VL.drop_rd(i, k) return reaper.gmem_read(VL.DROP.BASE + (i - 1) * 10 + k) or 0 end
--- piste "NU Drop" : cachee, pas d'envoi au master, JSFX NU_DropCapture (ajoute s'il manque). Retourne piste, fx
-function VL.drop_bus()
-  local D, tr = VL.DROP, nil
-  for t = 0, reaper.CountTracks(0) - 1 do
-    local x = reaper.GetTrack(0, t)
-    local _, nm = reaper.GetSetMediaTrackInfo_String(x, "P_NAME", "", false)
-    if nm == D.BUS then tr = x break end
+-- V3.25 (corrige) : la capture se fait SUR LA PISTE DU LOOPER CIBLE (meme bloc audio que lui : calage exact).
+-- On ajoute 2 canaux libres a la piste, les autres loopers y arrivent par des sends post-fader, et NU_DropCapture est pose
+-- en bout de chaine (broches 3/4 sur ces 2 canaux). Tout est retire a la fin (ou en cas d'abandon).
+function VL.drop_capture_on(tt)
+  local n = math.floor(reaper.GetMediaTrackInfo_Value(tt, "I_NCHAN") or 2)
+  if n < 2 then n = 2 end
+  if n + 2 > 64 then return nil end
+  reaper.SetMediaTrackInfo_Value(tt, "I_NCHAN", n + 2)
+  local before = reaper.TrackFX_GetCount(tt)
+  local fx
+  for _, name in ipairs({ "JS:NU_DropCapture.jsfx", "JS:NU_DropCapture", "NU Drop Capture", "NU_DropCapture" }) do
+    local r = reaper.TrackFX_AddByName(tt, name, false, 1)
+    if r and r >= 0 then fx = r break end
   end
-  if not tr then
-    local n = reaper.CountTracks(0)
-    reaper.InsertTrackAtIndex(n, false)
-    tr = reaper.GetTrack(0, n)
-    if not tr then return nil end
-    reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", D.BUS, true)
-    reaper.SetMediaTrackInfo_Value(tr, "B_MAINSEND", 0)
-    reaper.SetMediaTrackInfo_Value(tr, "B_SHOWINTCP", 0)
-    reaper.SetMediaTrackInfo_Value(tr, "B_SHOWINMIXER", 0)
-    if reaper.TrackList_AdjustWindows then reaper.TrackList_AdjustWindows(false) end
-    log("info", "DROP : piste '%s' creee (cachee, sans envoi au master)", D.BUS)
+  if not fx or reaper.TrackFX_GetCount(tt) <= before then
+    reaper.SetMediaTrackInfo_Value(tt, "I_NCHAN", n)
+    return nil
   end
-  local function find()
-    for fx = 0, reaper.TrackFX_GetCount(tr) - 1 do
-      local _, nm = reaper.TrackFX_GetFXName(tr, fx, "")
-      if (nm or ""):lower():find("drop capture", 1, true) then return fx end
+  -- broches 3/4 (entree et sortie) -> canaux n+1 / n+2 de la piste (index 0 : n, n+1)
+  if reaper.TrackFX_SetPinMappings then
+    for io = 0, 1 do
+      for k = 0, 1 do
+        local c = n + k
+        reaper.TrackFX_SetPinMappings(tt, fx, io, 2 + k, c < 32 and (1 << c) or 0, c >= 32 and (1 << (c - 32)) or 0)
+      end
     end
   end
-  local fx = find()
-  if not fx then
-    for _, name in ipairs({ "JS:NU_DropCapture.jsfx", "JS:NU_DropCapture", "NU Drop Capture", "NU_DropCapture" }) do
-      local r = reaper.TrackFX_AddByName(tr, name, false, -1)
-      if r and r >= 0 then break end
-    end
-    fx = find()
-  end
-  if fx then reaper.TrackFX_SetEnabled(tr, fx, true) end
-  return tr, fx
+  reaper.TrackFX_SetEnabled(tt, fx, true)
+  return fx, n
 end
 function VL.drop_unsend(R)
-  if not (R and R.sends and R.bus) then return end
-  for _, src in ipairs(R.sends) do
-    local idx = LPF.find_send(src, R.bus)
-    if idx then reaper.RemoveTrackSend(src, 0, idx) end
+  if not R or R.cleaned then return end
+  R.cleaned = true
+  local tt = R.tt
+  if tt then
+    for _, src in ipairs(R.sends or {}) do
+      for idx = reaper.GetTrackNumSends(src, 0) - 1, 0, -1 do
+        if reaper.GetTrackSendInfo_Value(src, 0, idx, "P_DESTTRACK") == tt
+           and math.floor(reaper.GetTrackSendInfo_Value(src, 0, idx, "I_DSTCHAN")) == R.ch then
+          reaper.RemoveTrackSend(src, 0, idx); break
+        end
+      end
+    end
+    for fx = reaper.TrackFX_GetCount(tt) - 1, 0, -1 do
+      local _, nm = reaper.TrackFX_GetFXName(tt, fx, "")
+      if (nm or ""):lower():find("drop capture", 1, true) then reaper.TrackFX_Delete(tt, fx) end
+    end
+    if R.nch then reaper.SetMediaTrackInfo_Value(tt, "I_NCHAN", R.nch) end
   end
   R.sends = nil
 end
@@ -2473,33 +2479,30 @@ function VL.drop_group()
   for _, i in ipairs(cand) do
     if not tracks.loopers[i] then VL.drop_note("piste du looper %d introuvable", i) return end
   end
-  local bus, cfx = VL.drop_bus()
-  if not bus or not cfx then
-    VL.drop_note("JSFX 'NU_DropCapture.jsfx' introuvable : copie-le dans le dossier Effects de REAPER")
+  local tt = tracks.loopers[tgt]
+  local nch0 = math.floor(reaper.GetMediaTrackInfo_Value(tt, "I_NCHAN") or 2)
+  local cfx, ch = VL.drop_capture_on(tt)
+  if not cfx then
+    VL.drop_note("JSFX 'NU_DropCapture.jsfx' introuvable (dossier Effects de REAPER) ou piste du looper %d pleine", tgt)
     return
   end
-  local R = { phase = "arm", g = g, tgt = tgt, cand = cand, src = {}, bus = bus, sends = {}, t0 = now() }
+  local R = { phase = "arm", g = g, tgt = tgt, cand = cand, src = {}, tt = tt, ch = ch, nch = nch0, sends = {}, t0 = now() }
   for _, i in ipairs(cand) do if i ~= tgt then R.src[#R.src + 1] = i end end
-  -- sends post-fader temporaires vers NU Drop ; latence des effets (PDC) : la plus grande des pistes du groupe
+  -- sends post-fader temporaires des autres loopers vers les 2 canaux ajoutes de la piste cible
   local pdc = 0
-  for _, i in ipairs(cand) do
+  for _, i in ipairs(R.src) do
     local tr = tracks.loopers[i]
-    local idx = reaper.CreateTrackSend(tr, bus)
+    local idx = reaper.CreateTrackSend(tr, tt)
     if idx and idx >= 0 then
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_SENDMODE", 0)
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_SRCCHAN", 0)
-      reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_DSTCHAN", 0)
+      reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_DSTCHAN", ch)
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "D_VOL", 1)
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "B_MUTE", 0)
       R.sends[#R.sends + 1] = tr
     end
-    if reaper.TrackFX_GetNamedConfigParm and reaper.TrackFX_GetCount(tr) > 0 then
-      local ok, okv, v = pcall(reaper.TrackFX_GetNamedConfigParm, tr, 0, "chain_pdc_actual")
-      v = ok and okv and tonumber(v) or 0
-      if v and v > pdc and v < 16384 then pdc = v end
-    end
   end
-  local tv = reaper.GetMediaTrackInfo_Value(tracks.loopers[tgt], "D_VOL") or 1
+  local tv = reaper.GetMediaTrackInfo_Value(tt, "D_VOL") or 1
   D.tok = (math.floor(now() * 10) % 1000000) + 1
   if D.tok == D.last_tok then D.tok = D.tok + 1 end
   D.last_tok = D.tok
@@ -2538,8 +2541,8 @@ function VL.drop_tick(t)
     local c = reaper.gmem_read(D.BASE + 94) or 0
     if c == tok then
       gmem_write_cmd(R.tgt, 36, tok); R.phase = "copy"; R.t1 = t
-    elseif c == tok + 0.75 then VL.drop_abort(R, "la capture a refuse le passage (piste NU Drop)")
-    elseif t > R.limit then VL.drop_abort(R, "capture trop longue : la piste NU Drop ne recoit rien ?") end
+    elseif c == tok + 0.75 then VL.drop_abort(R, "la capture a refuse le passage")
+    elseif t > R.limit then VL.drop_abort(R, "capture trop longue : NU_DropCapture ne tourne pas sur la piste ?") end
     return
   end
   if R.phase == "copy" then

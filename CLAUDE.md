@@ -8,7 +8,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 
 - Dépôt : `joffo78-hash/NowUndo`, branche de travail `ccr-12a0f3a9-86p9ey` (tout le travail récent y est).
 - `NowUndo/NowUndo_V3.25.jsfx` : **version courante du JSFX** (3.19 → 3.24 gardées pour l'historique).
-- `NowUndo/NU_DropCapture.jsfx` : capture du drop (posé automatiquement par le Launchpad sur la piste cachée « NU Drop »).
+- `NowUndo/NU_DropCapture.jsfx` : capture du drop (posée temporairement par le Launchpad en bout de chaîne de la piste du looper cible).
 - `NowUndo/Scripts/V3.21/` : tous les scripts courants (le nom du dossier est historique) :
   | Fichier | Rôle |
   |---|---|
@@ -109,8 +109,10 @@ propre page Launchpad** (`VL.web_with_page`).
 - **Drop de groupe (V3.25, refait)** : `VL.drop_group()` / `VL.drop_tick()` dans le Launchpad, **pad B2 de la page 1** (à la
   place de QUANTISE IN/OUT, qui reste dispo par MIDI Learn / Twister), bouton DROP de l'onglet Loopers du web
   (`ACT,i,drop_group`), pédalier (`drop_group`), action MIDI Learn « Drop de groupe », `drop_group` dans `NowUndo_VLcmd/q`.
-  Principe : sends post-fader temporaires des loopers du groupe qui jouent vers la piste cachée « NU Drop » (créée au 1er
-  drop, sans envoi au master) où `NU_DropCapture` enregistre **un passage** de la boucle la plus longue (durée entendue =
+  Principe (corrigé : avant, piste « NU Drop » séparée = horloge décalée → saut + boucle bancale) : `NU_DropCapture` est
+  posé **en bout de chaîne de la piste du looper cible** (même bloc audio = calage exact), la piste reçoit 2 canaux de
+  plus où arrivent les sends post-fader des autres loopers (broches 3/4, gain 1/volume cible) ; tout est retiré à la fin.
+  Il enregistre **un passage** de la boucle la plus longue (durée entendue =
   fenêtre / vitesse), effets des pistes et tous les modes compris, raccord fondu sur 10 ms. Puis la cible joue le mixdown
   à plat (vitesse 1, pitch 0, pas de reverse / slicer / cloud / BR / stereo, mix et out vol 100 %, fade 0), ses slots FX
   sont coupés, les autres loopers qui jouaient sont **effacés** dans le même bloc et le **groupe est supprimé**. Undo sur
