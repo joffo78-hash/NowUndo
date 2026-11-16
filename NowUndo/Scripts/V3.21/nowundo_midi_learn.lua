@@ -1158,10 +1158,21 @@ local function is_ignored_dev(dname)
 end
 
 -- Le message appartient-il a un learn aux ? (alors les maps principales l'ignorent)
+-- V3.25 : une affectation ne repond QU'A l'appareil sur lequel elle a ete apprise. Ancienne affectation sans appareil :
+-- lignes Twister (tw:) = Twister seulement ; autres = seulement les appareils deja utilises par au moins une affectation.
+-- Un appareil sur lequel rien n'est appris (ex. QuNeo) ne declenche donc plus rien.
+local function dev_ok(id, m, dn)
+  if m.dev and m.dev ~= "" then return m.dev == dn end
+  if not dn or dn == "" then return true end
+  local low = dn:lower()
+  if id:match("^tw:") then return (low:find("twister", 1, true) or low:find("fighter", 1, true)) ~= nil end
+  for _, o in pairs(maps) do if o.dev == dn then return true end end
+  return false
+end
 local function matches_aux(ev, dn)
   for id, m in pairs(maps) do
     if is_aux_id(id) and m.status == ev.status and m.ch == ev.ch and m.d1 == ev.d1
-       and (not m.dev or m.dev == "" or m.dev == dn) then
+       and dev_ok(id, m, dn) then
       return true
     end
   end
@@ -1300,7 +1311,7 @@ local function handle_event(msg, dev, kev)
 
   for id, m in pairs(maps) do
     if not is_aux_id(id) and m.status == ev.status and m.ch == ev.ch and m.d1 == ev.d1
-       and (not m.dev or m.dev == "" or m.dev == dn) then
+       and dev_ok(id, m, dn) then
       local tgt = BY_ID[id]
       if tgt then
         local is_on, is_off = false, false

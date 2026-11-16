@@ -489,8 +489,10 @@ local function bind_str(c)
   return string.format("%s %d  ch%d", nm, c.d1, (c.ch or 0) + 1)
 end
 
-local function matches(c, st, ch, d1)
+local function matches(c, st, ch, d1, dev)
+  -- V3.25 : la pedale ne repond qu'a l'appareil sur lequel elle a ete apprise (ex. un QuNeo n'active plus le Chocolate)
   return c and c.d1 ~= nil and c.status == st and c.ch == ch and c.d1 == d1
+         and (not c.dev or c.dev == "" or dev == nil or c.dev == dev)
 end
 
 local function handle_midi(ev)
@@ -537,7 +539,7 @@ local function handle_midi(ev)
   for _, ctrl in ipairs(model.ctrls) do
     local key = model.id .. ":" .. ctrl.id
     local c = CFG[key]
-    if matches(c, st, ch, b2) then
+    if matches(c, st, ch, b2, ev.dev) then
       hit_any = true
       S.mi_res = "-> " .. (ctrl.label or ctrl.id) .. ((c.act and (" : " .. (c.act.label or c.act.name))) or " (aucune action : bouton ACTION)")
       local x = rt(key)

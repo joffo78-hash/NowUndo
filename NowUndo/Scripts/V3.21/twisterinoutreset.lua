@@ -2111,8 +2111,10 @@ local function midi_process()
           local blocked = consumed or main_blocked()
           if not blocked then
             for id, m in pairs(midi_maps) do
-              -- le peripherique appris est respecte (dev == "" : ancienne map, accepte tout)
-              if m.status == st and m.ch == ch and m.d1 == d1 and (m.dev == "" or m.dev == dn) then
+              -- V3.25 : le peripherique appris est respecte ; ancienne map sans peripherique = le Twister seulement
+              -- (un autre controleur, ex. QuNeo, qui envoie le meme CC ne declenche plus les boutons / knobs)
+              if m.status == st and m.ch == ch and m.d1 == d1
+                 and ((m.dev ~= "" and m.dev == dn) or (m.dev == "" and (dn or ""):lower():find("twister", 1, true) or (m.dev == "" and (dn or ""):lower():find("fighter", 1, true)))) then
                 local idx = tonumber(id:match(":(%d+)$"))
                 -- idx 0 est valide (Knob 1) : ne pas utiliser "if idx then" (0 est falsy en Lua)
                 if idx ~= nil then

@@ -142,6 +142,10 @@ propre page Launchpad** (`VL.web_with_page`).
   sauts du slicer (`slc_move`, `sw_on` / `sw_pos`) — avant, chaque répétition de la tranche réécrivait son début et il ne
   restait que la queue de la note. **Overdub** en slicer : écrit à la tête de fond (`slx_pos`, `slw_move`). La porte du
   slicer ne coupe plus l'écriture.
+- **Appareils MIDI stricts (V3.25)** : une affectation ne répond **qu'à l'appareil sur lequel elle a été apprise**
+  (MIDI Learn `dev_ok`, Twister, pédalier `matches(..., dev)`). Ancienne affectation sans appareil : lignes Twister (`tw:`)
+  = Twister seulement ; autres = seulement les appareils déjà utilisés par au moins une affectation. Un appareil sans
+  learn (ex. QuNeo) ne déclenche plus rien (il envoyait des Clear via des CC communs).
 - **Nouveau REC (V3.25)** : un looper qui lance un nouvel enregistrement (REC sur vide, Re-Rec) termine le REC en cours
   d'un autre looper (> 0,3 s), qui attend son point de synchro puis joue (`tools/trec.py`). Un overdub ne le fait pas.
 
