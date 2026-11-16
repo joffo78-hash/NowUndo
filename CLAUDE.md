@@ -128,6 +128,22 @@ propre page Launchpad** (`VL.web_with_page`).
 
 ## Idées en suspens (proposées, pas faites)
 
+- **GRAND CHANTIER « tout est rush » (validé sur le principe, à faire plus tard, par étapes)** :
+  1. Moteur commun `NowUndo_Rush.lua` (langage des rushes sorti du Scenario), exécuté **directement par le Launchpad**
+     (pas de détour par le Scenario : garder l'heure d'appui du REC calé) ; les mots qui ont une action Launchpad passent
+     par elle (règles de groupe, Launch/GO, Exclu) ; cibles : rien = sélection (looper ou groupe), `l1`, `l1/l3`, **`g2`,
+     `g1/g3` (sans parenthèses : `G(n)` reste le rappel de preset)** ; dans un scénario, pas sans cible = cible
+     précédente du pas, sinon sélection.
+  2. Rushes **d'usine** (lecture seule, illimités, ~40 fonctions : page 1 + Launch/GO, Exclu, Sync, Drop, pas du
+     scénario, FX 1-4, pages Twister, presets) qui n'occupent pas les 64 rushes perso ; un pad = rush + cible
+     (« REC du looper 3 » = `rec` + `l3`, pas d'entrée en plus).
+  3. Page 1 et RC-505 = **dispositions de rushes** (défaut = disposition actuelle) ; pad = court / long / double
+     (+ relâchement gate), les comportements suivent la fonction ; Ctrl+clic sur un pad = réaffecter ; bouton
+     « Disposition d'usine » ; LED = état du 1er mot sur la cible du pad (REC : rouge / orange / clignote).
+     Zones fixes : rangée du haut (loopers) et colonne de droite (groupes / pages / HOLD) ; couches Effects / Groups
+     de la page 4 inchangées.
+  4. Le web reprend les dispositions.
+
 - MIDI direct au JSFX via un JSFX « Clock » sur une piste Contrôle (horodatage à l'échantillon des appuis).
 - Conflit possible entre les touches à une lettre du Scenario et les raccourcis du MIDI Learn quand sa fenêtre a le focus
   (options proposées : laisser, pause quand focus, pause seulement pour les touches du Scenario).
