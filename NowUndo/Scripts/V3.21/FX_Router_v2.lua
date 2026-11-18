@@ -762,6 +762,9 @@ local function loop()
         if reaper.ImGui_Selectable(ctx, src.label, i == current) then
           current = i
           reaper.SetExtState("FXRouter", "src", tostring(i), true)
+          -- le Launchpad suit : ses pads d'effets (D5-D8) affichent les slots de cette source (entree comprise)
+          local q = reaper.GetExtState("NowUndo_VLcmd", "q")
+          reaper.SetExtState("NowUndo_VLcmd", "q", q .. string.format("fxsrc_%d\t%.3f\n", i, reaper.time_precise()), false)
         end
       end
       reaper.ImGui_EndCombo(ctx)
