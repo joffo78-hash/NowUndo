@@ -387,6 +387,9 @@ df_b1 = df_alloc(241); df_b2 = df_alloc(331); df_b3 = df_alloc(503); df_b4 = df_
 df_fl = 0; df_fr = 0; df_lp_l = 0; df_lp_r = 0; df_on = 0;
 slice_env = 1.0; slice_decay_samples = srate * 0.15; slice_decay_step = 1.0 / slice_decay_samples; slice_att = 1.0; slice_att_step = 0; slice_att_eff_ms = 0;
 replace_fade = 0; replace_fade_coeff = 1.0 / (srate * 0.02); state_transition_fade = 1.0;
+// V3.26 : fondu d'entree / de sortie de l'OVERDUB (5 ms) : avant, l'entree s'ajoutait / s'arretait d'un coup = une marche
+// inscrite dans la boucle (clic a chaque tour, que le Cloud fait ensuite reentendre partout)
+dub_pf = 0; dub_g = 1; dub_pfk = 1.0 / max(1, srate * 0.005);
 rec_lag_pend = 0; rec_start_lag = 0; rec_stop_lag = 0; lat_samps = 0; wr_off = 0;
 prev_in0 = 0; prev_in1 = 0; grain_mix = 0; xfade_coeff = 1.0 / (srate * 0.01); init_done = 0;
 tape_lpf_l = 0; tape_lpf_r = 0; tape_lpf_l_b = 0; tape_lpf_r_b = 0; tape_lpf_l_c = 0; tape_lpf_r_c = 0; tape_lpf_l_d = 0; tape_lpf_r_d = 0;
@@ -980,7 +983,7 @@ function generate_slicer_sequence(step_len) local(i, rnd_idx, temp, p) ( trans_c
 function calc_cloud_pitch(spread_val) local(ratio_p, impact_pct, ext_pct, r) ( ratio_p = spread_val * 0.01; ratio_p <= 0.0001 ? 0.0 : ( ratio_p <= 0.5 ? ( impact_pct = ratio_p * 2.0; rand(1.0) < impact_pct ? (rand(1.0) < 0.5 ? -12.0 : 12.0) : 0.0; ) : ( ext_pct = (ratio_p - 0.5) * 2.0; r = rand(1.0); r < 0.5 ? ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) : ( r < (0.5 + ext_pct * 0.5) ? ( rand(1.0) < 0.5 ? -24.0 : 24.0 ) : ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) ); ); ); );
 function tape_write_span(w_from, w_to, w_mode) local(k, k_end, seg_a, seg_b, wgt, tn, vL, vR, w2, oldL, oldR, steps, total_span, fb, targetL, targetR, dev, cutoff, lpf_alpha, deg, deg_amt, p_angle, gL, gR, mono_src, clippedL, clippedR, drive, souffle) (
   deg = degradation; w_to > w_from ? ( k = floor(w_from); k_end = floor(w_to); k_end < k ? k_end = k; steps = min(k_end - k + 1, 24); total_span = max(w_to - w_from, 0.0001);
-    loop(steps, k < buf_len ? ( seg_a = max(w_from, k); seg_b = min(w_to, k + 1); wgt = (seg_b - seg_a) * dens_g * sl_gate; wgt > 0 ? (
+    loop(steps, k < buf_len ? ( seg_a = max(w_from, k); seg_b = min(w_to, k + 1); wgt = (seg_b - seg_a) * dens_g * sl_gate * (w_mode == 1 ? dub_g : 1); wgt > 0 ? (
           tn = (((seg_a + seg_b) * 0.5) - w_from) / total_span; vL = prev_in0 + (in0 - prev_in0) * tn; vR = prev_in1 + (in1 - prev_in1) * tn;
           stereo_width > 0.0001 ? ( p_angle = (dub_pan * stereo_width + 1.0) * 0.25 * $pi; gL = cos(p_angle) * 1.414; gR = sin(p_angle) * 1.414; mono_src = (vL + vR) * 0.5; vL = mono_src * gL; vR = mono_src * gR; );
           w_mode == 2 ? ( w2 = wgt * replace_fade; oldL = left_buf[k]; oldR = right_buf[k]; targetL = oldL * (1.0 - w2) + vL * w2; targetR = oldR * (1.0 - w2) + vR * w2; ) : ( fb = 1.0 - wgt * (1.0 - feedback); oldL = left_buf[k]; oldR = right_buf[k]; targetL = oldL * fb + vL * wgt; targetR = oldR * fb + vR * wgt; );
@@ -3193,22 +3196,24 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     );
     sl_rec = (play_mode == 1 && !dub_gran && (state == 3 || state == 4 || state == 5));   // V3.25 : enregistrement en slicer
     !sl_rec ? ( slw_last = -1; sw_on = 0; );
-    wr_off = (lat_samps > 0 && !pingpong_on && !dub_gran && ((state >= 3 && state <= 6) || rp_tail_on))
+    wr_off = (lat_samps > 0 && !pingpong_on && !dub_gran && ((state >= 3 && state <= 6) || rp_tail_on || dub_pf > 0))
              ? min(lat_samps * abs(pos_step), eff_len * 0.25) * (effective_rev ? 1 : -1) : 0;
     state == 3 ? (
       dub_gran ? (
         wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); dub_pan = rand(2.0) - 1.0; )
                : ( !effective_rev ? dub_merge_behind(pos) : 0 );
-      ) : ( sw_on = 0; sl_rec ? slw_move(1) : write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; );
+      ) : ( sw_on = 0; dub_pf = min(1, dub_pf + dub_pfk); dub_g = dub_pf; sl_rec ? slw_move(1) : write_move(old_pos, pos, wrapped, effective_rev, 1); dub_g = 1; wrapped ? dub_pan = rand(2.0) - 1.0; );
       (rp_tail_on && replace_fade > 0 && !dub_gran && !sl_rec) ? write_move(old_pos, pos, wrapped, effective_rev, 2) : rp_tail_on = 0;   // V3.20 : queue de replace
       replace_fade = max(0, replace_fade - replace_fade_coeff);
       wet_s0 = s0; wet_s1 = s1;
     ) : state == 4 ? (
+      dub_pf = 0;
       dub_gran ? ( wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); dub_pan = rand(2.0) - 1.0; ) : 0 )
                : ( sl_rec ? slc_move(2) : write_move(old_pos, pos, wrapped, effective_rev, 2); wrapped ? dub_pan = rand(2.0) - 1.0; );
       replace_fade = min(1.0, replace_fade + replace_fade_coeff); rp_tail_on = 1;
       wet_s0 = s0; wet_s1 = s1;
     ) : state == 5 ? (
+      dub_pf = 0;
       // V3.20 : AUTO-REPLACE par comparaison de niveau. On remplace la ou l'entree est AU MOINS aussi forte que la boucle
       // a cet endroit (et au-dessus du seuil Auto Thresh). Plus de long hold : une hysteresis (-3 dB) + 30 ms de
       // confirmation a la fermeture evitent que le gate "tousse". Ouverture en 3 ms, fermeture en 25 ms, et l'ecriture
@@ -3228,8 +3233,10 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       (!dub_gran && replace_fade > 0) ? ( sl_rec ? slc_move(2) : write_move(old_pos, pos, wrapped, effective_rev, 2); ) : ( sw_on = 0; );
       rp_tail_on = !sl_rec;
       wet_s0 = s0; wet_s1 = s1;
-    ) : state == 6 ? ( write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; (rp_tail_on && replace_fade > 0 && !dub_gran) ? write_move(old_pos, pos, wrapped, effective_rev, 2) : rp_tail_on = 0; replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0; wet_s1 = s1;
+    ) : state == 6 ? ( dub_pf = 0; write_move(old_pos, pos, wrapped, effective_rev, 1); wrapped ? dub_pan = rand(2.0) - 1.0; (rp_tail_on && replace_fade > 0 && !dub_gran) ? write_move(old_pos, pos, wrapped, effective_rev, 2) : rp_tail_on = 0; replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0; wet_s1 = s1;
     ) : ( (rp_tail_on && replace_fade > 0 && !dub_gran) ? write_move(old_pos, pos, wrapped, effective_rev, 2) : rp_tail_on = 0;   // V3.20 : sortie de (auto-)replace en fondu
+          // V3.26 : sortie d'overdub en fondu (on continue d'ecrire 5 ms en baissant le niveau de l'entree)
+          (dub_pf > 0 && !dub_gran && state == 2) ? ( dub_pf = max(0, dub_pf - dub_pfk); dub_g = dub_pf; write_move(old_pos, pos, wrapped, effective_rev, 1); dub_g = 1; ) : ( dub_pf = 0; );
           replace_fade = max(0, replace_fade - replace_fade_coeff); wet_s0 = s0; wet_s1 = s1; );
   ) : ( wet_s0 = 0; wet_s1 = 0; acc_cur_dirty ? dub_commit_begin(1); rd_valid = 0; );
 );

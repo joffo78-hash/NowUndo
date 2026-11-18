@@ -218,6 +218,11 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   la V3.21 : le gain du nuage sautait à chaque grain. Renommés `cl_wsum` / `cl_atk`. **`tools/eel2py.py` met maintenant
   tous les noms en minuscules** (comme EEL2) : le banc reproduit le bug sur V3.25 (27 sauts / 4 s) et 0 sur V3.26.
   Aucune autre collision réelle dans le JSFX (les autres paires sont des locales de fonctions différentes).
+- **Clics inscrits dans la boucle** (enregistrement utilisateur : 2 clics à 17 ms d'écart, au même endroit à chaque tour ;
+  le Cloud les fait réentendre partout) : l'overdub démarrait / s'arrêtait d'un coup. Corrigé : **fondu de 5 ms à
+  l'entrée et à la sortie de l'overdub** (`dub_pf` / `dub_g`, la sortie continue d'écrire 5 ms en baissant). Les boucles
+  déjà enregistrées gardent leurs clics (à refaire). Constaté : Launchpad fermé = plus de clics en lecture normale
+  (micro-overdubs involontaires depuis le Launchpad ? non confirmé).
 - Signalé aussi : « en Link il ne suit plus la tête de lecture, le LFO doit avoir Pos comme centre » : pas reproduit
   (en Link le centre suit `pos`, le LFO oscille autour du centre) ; questions posées (Freeze ? curseur violet ? Twister ?).
 
