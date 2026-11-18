@@ -196,7 +196,11 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - Protocole : commande `+48` = **38** (arg 0 bascule / 1 on / 2 off) ; paramètres `+180` **65** grille, **66** force ;
   état publié `+156` (0 off, 1 on, 2 calcul), `+157` grille, `+158` force. Sliders 65-67.
 - MIDI Learn : action « Warp ON/OFF », paramètres « Warp : grille », « Warp : force ». Affichage « WARP 1/16 100% »
-  en haut à droite de la forme d'onde du JSFX.
+  en haut à droite de la forme d'onde du JSFX. **Dans la fenêtre du JSFX** (looper utilisé seul) : bas du panneau
+  PLAYBACK = bouton Warp, bouton grille (clic = suivante), barre Force.
+- Grille = **tempo de la boucle** (`loop_beat_len` : longueur / nombre de temps). Nombre de temps : bouton « Loop Beats »
+  (Auto / 2..32), sinon Auto (libre ou maître : puissance de 2 × chiffre de mesure, tempo le plus proche de 112 ;
+  esclave Host / d'un maître : déduit du tempo de référence). Le tempo de REAPER ne sert qu'à ce comptage.
 - **EEL2 : les noms de variables ne distinguent pas majuscules / minuscules** (`wp_A` = `wp_a`) : le traducteur Python,
   lui, les distingue → vérifier les collisions (script dans l'historique : regrouper les identifiants par `lower()`).
 - Test : `cd tools && python3 twarp.py . <fichier.jsfx> tag [--play [-v]]`.

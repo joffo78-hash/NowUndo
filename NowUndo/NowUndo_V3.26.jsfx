@@ -3521,6 +3521,13 @@ length > 0 ? ( sprintf(#lb_bpm, "%.1f bpm", 60 * srate / loop_beat_len()); ui_te
 ky3 = 318;
 v = ui_knob(44, 100, ky3, 14, grain_ms, 20, 200, "Grain", "%.0f ms", 80.0); ui_chg ? ( grain_ms = v; slider4 = grain_ms; );
 v = ui_knob(45, 190, ky3, 14, grain_fade, 5, 50, "Grn Fade", "%.0f%%", 25.0); ui_chg ? ( grain_fade = v; slider12 = grain_fade; );
+// V3.26 : WARP directement dans le looper (sans MIDI Learn) : bouton ON/OFF, grille (clic = suivante), force (barre)
+ui_btn(232, 328, 44, 18, wp_pub == 2 ? "Warp.." : "Warp", warp_on >= 0.5, 0.3, 0.9, 0.65) ? ( warp_on = warp_on >= 0.5 ? 0 : 1; slider65 = warp_on; );
+wp_gg = floor(warp_grid + 0.5);
+strcpy(#wp_gb, wp_gg == 0 ? "1/4" : (wp_gg == 1 ? "1/8" : (wp_gg == 2 ? "1/12" : (wp_gg == 3 ? "1/16" : (wp_gg == 4 ? "1/24" : "1/32")))));
+ui_btn(280, 328, 40, 18, #wp_gb, 0, 0.3, 0.9, 0.65) ? ( warp_grid = wp_gg >= 5 ? 0 : wp_gg + 1; slider66 = warp_grid; );
+v = ui_hbar(90, 324, 330, 52, 14, warp_force, 0, 100, 100, "Force %.0f%%"); ui_chg ? ( warp_force = floor(v + 0.5); slider67 = warp_force; );
+sprintf(#wp_fv, "%d%%", floor(warp_force + 0.5)); ui_text(350, 331, #wp_fv, 1, 1, 1, 0.9, 0);
 
 ui_ar = 0.25; ui_ag = 0.85; ui_ab = 0.4; ui_panel(390, 206, 360, 124, "LOOP REGION");
 sprintf(#lp_info, "%.2fs - %.2fs", loop_start / srate, (loop_start + loop_width) / srate); ui_text(590, 229, #lp_info, 0.7, 0.65, 0.68, 1, 0); ui_en = 1;
