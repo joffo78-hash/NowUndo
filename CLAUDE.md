@@ -149,6 +149,25 @@ propre page Launchpad** (`VL.web_with_page`).
 - **Nouveau REC (V3.25)** : un looper qui lance un nouvel enregistrement (REC sur vide, Re-Rec) termine le REC en cours
   d'un autre looper (> 0,3 s), qui attend son point de synchro puis joue (`tools/trec.py`). Un overdub ne le fait pas.
 
+## PROBLÈMES OUVERTS (à traiter en priorité dans la prochaine conversation)
+
+L'utilisateur est mécontent (« t'as rien corrigé du tout ») : commencer par **reproduire et corriger** ces points, sans
+nouvelles fonctionnalités, et **demander des captures / messages d'erreur** avant de supposer.
+1. **Le Launchpad ne répond plus quand on ouvre le MIDI Learn** (signalé le 17 nov., non résolu, cause inconnue). Questions
+   posées sans réponse : physique ou fenêtre ? revient-il à la fermeture du MIDI Learn ? erreur ReaScript ? apparu avec les
+   fichiers du 17 nov. ? Pistes : changements récents de `nowundo_midi_learn.lua` (`dev_ok`, `KB.text_focus`, `PQ`,
+   cumul, `par:fx_mix`, mute) ; le MIDI Learn écrit `nowundo_vl/state` + `rev` (`vl_state_edit`) et `midi_ui` que le
+   Launchpad relit ; verrou d'instance du Launchpad (`lp_hb`) ; ports mémorisés (`lp_in_name` / `lp_out_name`).
+   Comparer avec la version de `ccr-12a0f3a9-86p9ey` (`git diff ccr-12a0f3a9-86p9ey -- NowUndo/Scripts/V3.21/nowundo_midi_learn.lua`).
+2. **Le QuNeo déclenche des Clear** alors que tous les MIDI des Clear ont été retirés (MIDI Learn + pédalier). Correctif
+   « appareils stricts » livré, **non confirmé** ; suspect principal : boutons du Twister (`tw:btn`, page 7 Custom = Clear)
+   ou une ancienne copie de script lancée (`Scripts/nowundo_midi_learn.lua`, `VirtualTwister.lua`...), ou un raccourci REAPER.
+3. **Drop** : saut de position / boucle bancale signalé ; capture déplacée sur la piste de la cible, **non confirmé**.
+4. **Beat Repeat** : « 1/16 plus court que 1/32 » signalé ; le moteur mesuré est correct (1/16 = 125 ms, 1/32 = 62,5 ms
+   à 120 BPM) → probablement l'ordre des rushes gate / la pile « dernier actif gagne » ; en attente des textes de rushes.
+5. Le JSFX courant affiche **« NowUndo V3.25 (mute, rec slicer) »** : vérifier que c'est bien lui qui est chargé.
+   Ne pas créer de V3.26 sans accord (« touche à rien »).
+
 ## Idées en suspens (proposées, pas faites)
 
 - **GRAND CHANTIER « tout est rush » (validé sur le principe, à faire plus tard, par étapes)** :
