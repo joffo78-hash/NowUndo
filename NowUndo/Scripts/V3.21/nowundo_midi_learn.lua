@@ -148,6 +148,7 @@ local acts = {
   A("act:rec_dub", "Rec -> Overdub (mode, sortie du 1er rec)", "Transport", "rec_dub_toggle"),
   A("act:mute", "Mute (looper, sans couper la piste)", "Transport", "mute"),
   A("act:drop_group", "Drop de groupe (mixdown dans la boucle la plus longue)", "Transport", "drop_group"),
+  A("act:warp", "Warp ON/OFF (attaques calees sur la grille)", "Modes", "warp", nil, true),   -- V3.26
 }
 for _, a in ipairs(acts) do TARGETS[#TARGETS + 1] = a end
 
@@ -170,6 +171,8 @@ for _, p in ipairs({
   P("par:sl_mix",   "Slicer Dry/Wet",                 61, 193, 0, 1,  1),
   P("par:cl_mix",   "Cloud Dry/Wet",                  36, 36, 0, 1,   1),
   P("par:br_mix",   "Beat Repeat Dry/Wet",            60, 194, 0, 1,  1),
+  P("par:warp_grid", "Warp : grille (1/4 1/8 1/12 1/16 1/24 1/32)", 65, 157, 0, 5, 3, 1, 1),   -- V3.26
+  P("par:warp_force", "Warp : force (%)",               66, 158, 0, 100, 100),
 }) do TARGETS[#TARGETS + 1] = p end
 do   -- V3.25 : un seul controleur pour les 3 Dry/Wet (Slicer + Cloud + Beat Repeat) ; soft takeover lu sur le Slicer
   local p = P("par:fx_mix", "Dry/Wet des effets (Slicer + Cloud + BR)", 61, 193, 0, 1, 1)
@@ -398,7 +401,7 @@ local CMD = {
   replace = 9, auto_rep = 10, clear_full = 11, part = 12,
   multiply = 13, undo = 14, redo = 15, restart = 16, rerec = 17,
   one_shot = 18, auto = 19, speed_step = 20, pitch_step = 21,
-  full_loop = 22, quantise_inout = 23, clear_all = 2, clear_all_full = 11, mute = 37,
+  full_loop = 22, quantise_inout = 23, clear_all = 2, clear_all_full = 11, mute = 37, warp = 38,
   reset = 24, reset_all = 24, beat_repeat = 33, restart_all = 16, stop_all = 3,
 }
 -- DOUBLE APPUI (touche clavier ou MIDI, < 0,4 s) : la meme action sur les 8 loopers, comme CLEAR / RESET du Launchpad.

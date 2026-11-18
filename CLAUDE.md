@@ -181,6 +181,28 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - Test : `cd tools && python3 tdetect.py . <fichier.jsfx> tag [-v]` (scénarios : fort puis doux, basse + charley,
   crescendo, nappe avec trémolo).
 
+## V3.26 : WARP (18 nov., étape 1 livrée, non testée dans REAPER)
+
+- Comme le warp d'Ableton : les attaques (détection V3.26, **toutes**, pas la limite Slices) sont calées sur une grille
+  (`warp_grid` 0..5 = 1/4 1/8 1/12 1/16 1/24 1/32, sur la boucle de chaque looper via `loop_beat_len`) avec une force
+  (`warp_force` %). Entre deux attaques : étirement sans changer la hauteur (fenêtres de Hann 50 %, WSOLA ±5 ms, jamais de
+  lecture au-delà de l'attaque suivante), 10 ms d'attaque jamais étirés, fondus de 3 ms aux raccords. Circulaire (raccord
+  de boucle compris), longueur inchangée.
+- **Non destructif précalculé** (choix de l'utilisateur) : original = couche d'historique `wp_orig`, version calée =
+  couche suivante `wp_wsl`. ON/OFF = undo/redo internes en fondu (sans `sync_hard_resync`). Grille / force / In-Out
+  changés (attente 250 ms) → recalcul depuis l'original dans la couche d'après, bascule, recopie dans `wp_wsl`.
+  Toute nouvelle couche (overdub…) **fige** le warp (`warp_on` = 0). Undo / redo de l'utilisateur pilotent ON/OFF.
+  Clear / changement de part = plus de warp. Calcul étalé sur les blocs (~0,5 s pour 4 s de boucle à 48 kHz).
+- Protocole : commande `+48` = **38** (arg 0 bascule / 1 on / 2 off) ; paramètres `+180` **65** grille, **66** force ;
+  état publié `+156` (0 off, 1 on, 2 calcul), `+157` grille, `+158` force. Sliders 65-67.
+- MIDI Learn : action « Warp ON/OFF », paramètres « Warp : grille », « Warp : force ». Affichage « WARP 1/16 100% »
+  en haut à droite de la forme d'onde du JSFX.
+- **EEL2 : les noms de variables ne distinguent pas majuscules / minuscules** (`wp_A` = `wp_a`) : le traducteur Python,
+  lui, les distingue → vérifier les collisions (script dans l'historique : regrouper les identifiants par `lower()`).
+- Test : `cd tools && python3 twarp.py . <fichier.jsfx> tag [--play [-v]]`.
+- Constaté (ancien, pas touché) : un Undo utilisateur à longueur égale pose `sync_hard_resync` → petit clic au tour suivant
+  dans la simulation.
+
 ## Idées en suspens (proposées, pas faites)
 
 - **GRAND CHANTIER « tout est rush » (validé sur le principe, à faire plus tard, par étapes)** :
@@ -210,9 +232,8 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   **Contrainte (demandée)** : activer le quantize global ne doit **jamais modifier une boucle déjà calée** : In / Out
   existants et l'écart (largeur) restent tels quels (contrairement au bouton Quant actuel qui recale In / Out au
   changement) ; seules les actions **à venir** sont quantisées.
-- **SNAP des slices (demandé le 18 nov., en discussion)** : quantifier les slices sur une grille comme une quantification
-  MIDI. La grille suit la **logique des rushes** (sélection / looper ciblé / all), pas un réglage seulement global ;
-  à rapprocher du chantier « Quantize global » (même grille, calculée sur la boucle de chaque looper).
+- **WARP étape 2 (à faire si le son plaît)** : mot de rush `snap 1/16 80%` (cible sélection / `l3` / `all`), grille par
+  looper partagée avec le futur « Quantize global » ; bouton web / Launchpad ; swing éventuel.
 - MIDI direct au JSFX via un JSFX « Clock » sur une piste Contrôle (horodatage à l'échantillon des appuis).
 - Conflit possible entre les touches à une lettre du Scenario et les raccourcis du MIDI Learn quand sa fenêtre a le focus
   (options proposées : laisser, pause quand focus, pause seulement pour les touches du Scenario).

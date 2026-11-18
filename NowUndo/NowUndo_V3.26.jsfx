@@ -1,4 +1,4 @@
-adesc:aNowUndo V3.26 (slices a l'oreille, rec slicer) [V3.26 detection des slices perceptive : 3 bandes, contraste avec ce qui precede, masquage, repartition sur la boucle] [Drop de groupe enregistre apres les effets ; nouveau REC = fin du REC en cours] [V3.23 compensation de latence aller-retour] [V3.22 REC cale sur l'appui : pre-roll + fin compensee] [Cloud v2 : Size / Density (overlap) / Agitation, Freeze, Diffuse] [V3.20 slicer precis + crossfade, Cloud width = Stereo, Rec Density aleatoire, Auto-Replace par comparaison de niveau] [In/Out fix r12 brf+BRmix+SLmix] Looper (beat repeat) (sync point + reference master, slicer: auto-refresh each buffer change, Rate Link grid, auto-detect leger (enveloppe+seuil+hold), gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
+adesc:aNowUndo V3.26 (warp, slices a l'oreille) [V3.26 WARP : attaques calees sur une grille (1/4..1/32, force), original garde, ON/OFF instantane] [V3.26 detection des slices perceptive : 3 bandes, contraste avec ce qui precede, masquage, repartition sur la boucle] [Drop de groupe enregistre apres les effets ; nouveau REC = fin du REC en cours] [V3.23 compensation de latence aller-retour] [V3.22 REC cale sur l'appui : pre-roll + fin compensee] [Cloud v2 : Size / Density (overlap) / Agitation, Freeze, Diffuse] [V3.20 slicer precis + crossfade, Cloud width = Stereo, Rec Density aleatoire, Auto-Replace par comparaison de niveau] [In/Out fix r12 brf+BRmix+SLmix] Looper (beat repeat) (sync point + reference master, slicer: auto-refresh each buffer change, Rate Link grid, auto-detect leger (enveloppe+seuil+hold), gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
 options:gmem=nowundo_sync
 options:maxmem=128000000
 slider1:speed=1.0<0.01,100.0,0.01>-Speed
@@ -64,6 +64,9 @@ slider60:slx_mix=1<0,1,0.01>-Slicer Dry/Wet (0 = boucle d'origine, 1 = slicer)
 slider62:cloud_size=80<1,1000,1:log=80>-Cloud Size (ms)
 slider63:cloud_freeze=0<0,1,1{Off,On}>-Cloud Freeze
 slider64:cloud_diffuse=0<0,1,0.01>-Cloud Diffuse
+slider65:warp_on=0<0,1,1{Off,On}>-Warp (attaques calees sur la grille)
+slider66:warp_grid=3<0,5,1{1/4 (Noire),1/8 (Croche),1/12 (Triolet),1/16 (Double),1/24 (Triolet Double),1/32 (Triple)}>-Warp Grid
+slider67:warp_force=100<0,100,1>-Warp Force (%)
 
 @init
 // Decay : position 0..100 <-> ms, interpolation exponentielle entre points :
@@ -222,6 +225,10 @@ cand_k = odf2_mem + odf_max_n + 16; cand_v = cand_k + cand_max + 16; cand_s = ca
 cand_p = cand_ok + cand_max + 16; sel_k = cand_p + cand_max + 16; sel_s = sel_k + max_transients + 16;
 st_win = sel_s + max_transients + 16; st_band = st_win + st_N + 16; st_ring = st_band + 64;
 st_fft = ceil((st_ring + (st_lag + 1) * st_nb + 64) / 4096) * 4096;
+// V3.26 : warp (attaques de l'original, positions de depart / d'arrivee, ecart a la grille)
+wp_max = 1024; wp_mk = st_fft + 8192; wp_sr = wp_mk + wp_max + 16; wp_tg = wp_sr + wp_max + 16; wp_dd = wp_tg + wp_max + 16;
+wp_busy = 0; wp_phase = 0; wp_live = 0; wp_scan = 0; wp_prev_on = 0; wp_mn = 0; wp_n = 0; wp_orig = 0; wp_wsl = 0; wp_tgt = 0; wp_from = 0;
+wp_sig = -1; wp_sig_seen = -1; wp_sig_t = 0; wp_len = 0; an_after_wp = 0; wp_ls = 0; wp_lw = 1;
 i = 0; loop(st_N, st_win[i] = 0.5 - 0.5 * cos(2 * $pi * i / st_N); i += 1; );
 st_fmax = min(16000, 0.45 * srate);
 i = 0; loop(st_nb + 1,
@@ -489,7 +496,7 @@ function dt_hop() local(cl, cm, ch, mx, sc, j) (
   dt_gh += (dt_eh > dt_gh ? dt_kb : dt_kd) * (dt_eh - dt_gh);
 );
 function start_analysis_ex(keep) local(j) (
-  length > 0 ? (
+  wp_scan ? ( an_after_wp = 1; ) : length > 0 ? (
     (slicer_src == 1 && !src_auto) ? grid_build() : (
       !keep ? trans_count = 0;
       an_keep = keep;
@@ -911,6 +918,7 @@ function try_finish_rec(target, from_auto) local(ms_off, locked, mid, is_self, i
 );
 function switch_part(new_part) local(target_len, target_base_len, idx_old, idx_new) (
   xf_on = 0; rd_valid = 0; rp_tail_on = 0; frz_ready = 0; frz_copying = 0; frz_prev = -1;
+  wp_busy = 0; wp_phase = 0; wp_live = 0; wp_scan = 0; warp_on = 0; slider65 = 0;   // V3.26 : plus de warp
   dub_flush(); state == 1 ? try_finish_rec(2, 0);
   idx_old = active_part - 1; part_speed[idx_old] = speed; part_pitch[idx_old] = pitch; part_rev[idx_old] = rev_on; part_pingpong[idx_old] = pingpong_on; part_play_mode[idx_old] = play_mode; part_cloud_on[idx_old] = cloud_on; part_link_on[idx_old] = link_on;
   active_part == 1 ? ( master_pos1 = master_pos; clk_cyc1 = clk_cyc; len_part1 = length; base_len_part1 = base_loop_length; left_buf != buf_part1_l ? (memcpy(buf_part1_l, left_buf, length); memcpy(buf_part1_r, right_buf, length);); ) :
@@ -934,11 +942,14 @@ function switch_part(new_part) local(target_len, target_base_len, idx_old, idx_n
   last_state_target = -1;
 );
 function push_new_history_state() local(src_l, src_r, new_idx) (
+  wp_phase == 7 ? ( memcpy(wp_wl, wp_tl, wp_len); memcpy(wp_wl + single_buf_len, wp_trr, wp_len); switch_history_slot(wp_wsl); wp_busy = 0; wp_phase = 0; wp_sig = wp_sig_job; ); wp_busy ? ( wp_busy = 0; wp_phase = 0; wp_scan ? ( wp_scan = 0; analysing = 0; an_after_wp = 1; ); );
+  wp_live ? ( wp_live = 0; warp_on = 0; slider65 = 0; );   // V3.26 : une nouvelle couche fige le warp
   new_idx = (active_history_idx + 1) % max_history; src_l = left_buf; src_r = right_buf; switch_history_slot(new_idx); history_head = new_idx;
   memcpy(left_buf, src_l, length); memcpy(right_buf, src_r, length); hist_len[new_idx] = length; dirty_len = max(dirty_len, length); hist_undo = min(hist_undo + 1, max_history - 1); hist_redo = 0; history_count = hist_undo + 1;
 );
 function sync_length_from_history() local(nl) ( nl = hist_len[active_history_idx]; nl > 0 && nl != length ? ( length = nl; loop_start = 0; loop_width = length; smooth_start = 0; smooth_width = length; pos >= length ? pos = 0; master_pos = min(master_pos, length); xfade_pos_active = 0; start_analysis(); ); );
 function undo_state() ( 
+  wp_phase == 7 ? ( memcpy(wp_wl, wp_tl, wp_len); memcpy(wp_wl + single_buf_len, wp_trr, wp_len); switch_history_slot(wp_wsl); wp_busy = 0; wp_phase = 0; wp_sig = wp_sig_job; ); wp_busy ? ( wp_busy = 0; wp_phase = 0; wp_scan ? ( wp_scan = 0; analysing = 0; an_after_wp = 1; ); );
   rp_tail_on = 0; dub_flush(); 
   hist_undo > 0 ? ( 
     active_history_idx = (active_history_idx - 1 + max_history) % max_history; 
@@ -949,6 +960,7 @@ function undo_state() (
   ); 
 );
 function redo_state() ( 
+  wp_phase == 7 ? ( memcpy(wp_wl, wp_tl, wp_len); memcpy(wp_wl + single_buf_len, wp_trr, wp_len); switch_history_slot(wp_wsl); wp_busy = 0; wp_phase = 0; wp_sig = wp_sig_job; ); wp_busy ? ( wp_busy = 0; wp_phase = 0; wp_scan ? ( wp_scan = 0; analysing = 0; an_after_wp = 1; ); );
   rp_tail_on = 0; dub_flush(); 
   hist_redo > 0 ? ( 
     active_history_idx = (active_history_idx + 1) % max_history; 
@@ -1289,6 +1301,7 @@ function do_clear(clear_type) local(ms_off, wipe_n, wipe1, wipe2, wipe3, hi) (
   // Aussi le slot historique actif (peut differer de left_buf si hist)
   hi = 0; loop(max_history, wipe_n = max(wipe_n, min(max(hist_len[hi], 0), single_buf_len)); hi += 1;);
 
+  wp_busy = 0; wp_phase = 0; wp_live = 0; wp_scan = 0; warp_on = 0; slider65 = 0;   // V3.26 : plus de warp
   dub_discard(); out_vol = 1.0; slider21 = out_vol; feedback = 1.0; slider18 = feedback; speed = 1.0; slider1 = speed; pitch = 0.0; slider2 = pitch; rev_on = 0; slider16 = rev_on; pingpong_on = 0; slider17 = pingpong_on; grain_ms = 80.0; slider4 = grain_ms; grain_fade = 25; slider12 = grain_fade; wg_fade = 0.25; fade_ms = 10; slider5 = fade_ms; auto_on = 0;
   cloud_on = 0; slider23 = cloud_on; cloud_density = 0.5; slider25 = cloud_density; cloud_chaos = 0.0; slider26 = cloud_chaos; cloud_spread = 0.1; slider27 = cloud_spread; cloud_pitch_spread = 0.0; slider34 = cloud_pitch_spread; cloud_mix = 1.0; slider35 = cloud_mix; cloud_pos_mode = 1; slider36 = cloud_pos_mode; cloud_pos_pct = 50.0; slider37 = cloud_pos_pct; cloud_lfo_shape = 0; slider38 = cloud_lfo_shape; cloud_lfo_rate = 1.0; slider39 = cloud_lfo_rate; cloud_lfo_depth = 0.0; slider40 = cloud_lfo_depth;
   play_mode = 0; slider6 = play_mode; dens_occ = 100; slider28 = dens_occ; loop_beats = 0; slider30 = loop_beats; loop_quant = 0; slider24 = loop_quant; slicer_pitch_spread = 0.0; slider33 = slicer_pitch_spread;
@@ -1734,6 +1747,232 @@ function rx_poll() (
   );
 );
 
+// ===================== V3.26 : WARP (snap des attaques sur une grille, comme le warp d'Ableton) =====================
+// L'original reste intact dans sa couche d'historique (wp_orig) ; la version calee est calculee dans la couche suivante (wp_wsl).
+// Warp ON = on joue wp_wsl, OFF = on rejoue wp_orig (bascule instantanee, en fondu, sans rien recalculer).
+// Grille / force / In-Out changes -> recalcul depuis l'original (dans une couche de travail, puis recopie dans wp_wsl).
+// Toute nouvelle couche (overdub, replace, multiply...) FIGE le warp : il fait alors partie de la boucle (Undo = avant).
+// Entre deux attaques, le son est compresse / etire sans changer la hauteur (fenetres qui se recouvrent, calees sur la
+// forme d'onde) ; les ~10 premieres ms de chaque attaque ne sont jamais etirees (attaque franche).
+function wp_beats() ( warp_grid < 0.5 ? 1.0 : (warp_grid < 1.5 ? 0.5 : (warp_grid < 2.5 ? 1.0/3.0 : (warp_grid < 3.5 ? 0.25 : (warp_grid < 4.5 ? 1.0/6.0 : 0.125)))); );
+function wp_slot_l(idx) ( idx == 0 ? (active_part == 1 ? buf_part1_l : (active_part == 2 ? buf_part2_l : buf_part3_l)) : hist_mem_start + (idx - 1) * slot_size; );
+function wp_signature() ( floor(warp_grid + 0.5) * 1000003 + floor(warp_force + 0.5) * 1009 + floor(loop_start) * 7 + floor(loop_width) * 13 + floor(loop_beat_len()) * 3 + length * 17; );
+// index circulaire dans la fenetre de la boucle (x entier, peut etre negatif)
+function wp_ix(x) ( x = floor(x); wp_ls + (x >= 0 ? x % wp_lw : (wp_lw - ((0 - x) % wp_lw)) % wp_lw); );
+function wp_abort() ( wp_busy ? ( wp_busy = 0; wp_phase = 0; wp_scan ? ( wp_scan = 0; analysing = 0; an_after_wp = 1; ); ); );
+// --- points d'arrivee : chaque attaque va vers la ligne de grille la plus proche (force %), deux attaques ne
+// peuvent pas tomber au meme endroit (la plus proche de sa ligne reste), etirement limite a x3 / /3
+function wp_targets() local(g, j, n, rel, q, t, d, ok, lk, mins) (
+  wp_ls = floor(loop_start); wp_lw = max(1, floor(loop_width));
+  g = max(srate * 0.005, loop_beat_len() * wp_beats());
+  mins = floor(srate * 0.02);
+  n = 0; j = 0;
+  loop(wp_mn,
+    rel = floor(wp_mk[j]) - wp_ls;
+    (rel >= 0 && rel < wp_lw) ? (
+      q = floor(rel / g + 0.5) * g;
+      t = floor(rel + (q - rel) * max(0, min(1, warp_force * 0.01)) + 0.5);
+      d = abs(t - rel);
+      ok = 1;
+      n > 0 ? (
+        lk = n - 1;
+        (t - wp_tg[lk] < mins || (t - wp_tg[lk]) > 3 * (rel - wp_sr[lk]) || 3 * (t - wp_tg[lk]) < (rel - wp_sr[lk])) ? (
+          // conflit avec la precedente : garde celle qui est la plus proche de sa ligne
+          d < wp_dd[lk] ? ( n -= 1; ) : ( ok = 0; );
+        );
+      );
+      ok ? ( wp_sr[n] = rel; wp_tg[n] = t; wp_dd[n] = d; n += 1; );
+    );
+    j += 1;
+  );
+  // raccord de la boucle : derniere -> premiere (+ un tour)
+  while (n > 1 && (wp_tg[0] + wp_lw - wp_tg[n - 1] < mins || wp_sr[0] + wp_lw - wp_sr[n - 1] < mins)) ( n -= 1; );
+  wp_n = n; wp_seg = 0; wp_ss = 0;
+);
+// --- un segment (attaque k -> attaque k+1) : etat wp_ss 0 = preparation, 1 = fenetres, 2 = raccords
+function wp_seg_init() local(k1) (
+  k1 = wp_seg + 1;
+  wp_a = wp_sr[wp_seg]; wp_ta = wp_tg[wp_seg];
+  k1 >= wp_n ? ( wp_b = wp_sr[0] + wp_lw; wp_tb = wp_tg[0] + wp_lw; ) : ( wp_b = wp_sr[k1]; wp_tb = wp_tg[k1]; );
+  wp_lsrc = max(1, wp_b - wp_a); wp_lout = max(1, wp_tb - wp_ta);
+  wp_atk = floor(min(srate * 0.01, 0.5 * min(wp_lsrc, wp_lout)));
+  wp_cp = abs(wp_lout - wp_lsrc) <= 1;     // pas d'etirement : simple copie (decalage)
+  wp_rr = (wp_lout - wp_atk) / max(1, wp_lsrc - wp_atk);
+  wp_hop = floor(max(32, min(srate * 0.02, (wp_lout - wp_atk) * 0.5)));
+  wp_gn = wp_hop * 2; wp_j = 0; wp_pr = 0;
+  wp_xn = floor(max(1, min(srate * 0.003, (wp_lout - wp_atk) * 0.25)));
+);
+function wp_seg_fill() local(t, i, s) (
+  // copie directe (attaque, ou tout le segment s'il n'est pas etire) puis zero sur la partie a etirer
+  i = 0;
+  loop(wp_cp ? wp_lout : wp_atk,
+    t = wp_ix(wp_ta + i); s = wp_ix(wp_a + i);
+    wp_tl[t] = wp_sl[s]; wp_trr[t] = wp_srr[s]; i += 1;
+  );
+  !wp_cp ? ( loop(wp_lout - wp_atk, t = wp_ix(wp_ta + i); wp_tl[t] = 0; wp_trr[t] = 0; i += 1; ); );
+  wp_lout;
+);
+function wp_grain() local(os, ri, de, bd, bs, x, c, p0, p1, n, t, w, s, lo, hi, tw, cost) (
+  os = wp_ta + wp_atk - wp_hop + wp_j * wp_hop;
+  ri = floor(wp_a + wp_atk + (os - (wp_ta + wp_atk)) / wp_rr + 0.5);
+  de = 0; cost = wp_gn;
+  wp_j > 0 ? (
+    // WSOLA : decalage qui prolonge le mieux la fenetre precedente (pas de phase qui s'annule)
+    tw = floor(srate * 0.005); bs = -1000000000; bd = 0; de = 0 - tw;
+    while (de <= tw) (
+      c = 0; x = 0;
+      while (x < wp_hop) (
+        p0 = wp_ix(wp_pr + wp_hop + x); p1 = wp_ix(ri + de + x);
+        c += (wp_sl[p0] + wp_srr[p0]) * (wp_sl[p1] + wp_srr[p1]);
+        x += 8;
+      );
+      c > bs ? ( bs = c; bd = de; );
+      de += 3;
+    );
+    de = bd; cost += (2 * tw / 3) * (wp_hop / 8);
+  );
+  // jamais lire l'attaque suivante en avance (pas de pre-echo) : la fenetre reste avant wp_b - 2 ms
+  de = min(de, wp_b - floor(srate * 0.002) - ri - (min(wp_gn, wp_tb - os) - 1));
+  ri += de; wp_pr = ri;
+  lo = wp_ta + wp_atk; hi = wp_tb;
+  n = 0;
+  loop(wp_gn,
+    t = os + n;
+    (t >= lo && t < hi) ? (
+      w = 0.5 - 0.5 * cos(2 * $pi * n / wp_gn);
+      s = ri + n;
+      s >= wp_b ? s = wp_b - 1 - (s - wp_b) % max(1, wp_hop);   // (securite) jamais au-dela de l'attaque suivante
+      s = wp_ix(s); t = wp_ix(t);
+      wp_tl[t] += w * wp_sl[s]; wp_trr[t] += w * wp_srr[s];
+    );
+    n += 1;
+  );
+  wp_j += 1;
+  os + wp_hop >= wp_tb ? wp_ss = 2;
+  cost;
+);
+function wp_seg_join() local(i, t, k, s) (
+  // fondus courts : copie de l'attaque -> son etire, puis son etire -> debut exact de l'attaque suivante
+  i = 0;
+  loop(wp_xn,
+    k = (i + 1) / (wp_xn + 1); t = wp_ix(wp_ta + wp_atk + i); s = wp_ix(wp_a + wp_atk + i);
+    wp_tl[t] = wp_tl[t] * k + wp_sl[s] * (1 - k); wp_trr[t] = wp_trr[t] * k + wp_srr[s] * (1 - k); i += 1;
+  );
+  i = 0;
+  loop(wp_xn,
+    k = (i + 1) / (wp_xn + 1); t = wp_ix(wp_tb - 1 - i); s = wp_ix(wp_b - 1 - i);
+    wp_tl[t] = wp_tl[t] * k + wp_sl[s] * (1 - k); wp_trr[t] = wp_trr[t] * k + wp_srr[s] * (1 - k); i += 1;
+  );
+  wp_xn * 2;
+);
+// --- un pas de calcul (budget en echantillons traites par bloc : pas de pic de CPU)
+function wp_render_step(bud) local(used) (
+  used = 0;
+  while (used < bud && wp_phase == 4) (
+    wp_seg >= wp_n ? ( wp_phase = 5; ) : (
+      wp_ss == 0 ? ( wp_seg_init(); used += wp_seg_fill(); wp_ss = wp_cp ? 3 : 1; ) :
+      wp_ss == 1 ? ( used += wp_grain(); ) :
+      wp_ss == 2 ? ( used += wp_seg_join(); wp_ss = 3; ) :
+      ( wp_seg += 1; wp_ss = 0; );
+    );
+  );
+);
+// --- tic du warp (une fois par bloc). Bascule ON/OFF = meme longueur, memes positions : pas de recalage force
+// (sync_hard_resync), qui provoque un clic au tour suivant.
+function wp_tick() local(on, sig, now, nx, cp) (
+  now = time_precise();
+  on = wp_live && !wp_busy && active_history_idx == wp_wsl && length == wp_len;
+  // undo / redo faits par l'utilisateur sur la bascule du warp -> l'etat ON / OFF suit
+  (wp_live && !wp_busy && on != wp_prev_on) ? ( warp_on = on; slider65 = warp_on; );
+  sig = wp_signature();
+  sig != wp_sig_seen ? ( wp_sig_seen = sig; wp_sig_t = now + 0.25; );
+  wp_free = (state == 0 || state == 2 || state == 7) && length > 0 && !cm_active;
+  wp_busy ? (
+    // abandon si la boucle a change sous nos pieds (undo, nouvelle couche, clear, longueur)
+    (length != wp_len || (wp_phase <= 5 && active_history_idx != wp_from) || state == 1 || (state >= 3 && state <= 6)) ? wp_abort();
+  );
+  (wp_busy && warp_on < 0.5 && (wp_phase <= 4 || wp_phase == 6)) ? wp_abort();
+  (an_after_wp && !wp_scan && !analysing) ? ( an_after_wp = 0; (length > 0 && !(slicer_src == 1 && !src_auto)) ? start_analysis_ex(1); );
+  wp_busy ? (
+    wp_phase == 1 ? (
+      // detection des attaques sur TOUT le buffer original (des que l'analyse des slices est libre)
+      (!analysing && !cm_active) ? (
+        wp_scan = 1; ana_k = 0 - odf_hop * 40; ana_end = floor(length);
+        cand_n = 0; dv_f = 0; dv_s = 0; dv_hold = 0; dv_trk = 0; ana_max_peak = 0.0001;
+        dt_b1 = 0; dt_b2 = 0; dt_el = 0; dt_em = 0; dt_eh = 0; dt_gl = -1; dt_hc = 0; dt_tr = 0; dt_pk = 0;
+        analysing = 1; wp_phase = 2;
+      );
+    ) : wp_phase == 3 ? (
+      // positions exactes des attaques (quelques-unes par bloc)
+      cp = 0;
+      while (cp < 24 && wp_ri < wp_mn) ( wp_mk[wp_ri] = odf_refine(max(0, wp_mk[wp_ri] - floor(srate * 0.001))); wp_ri += 1; cp += 1; );
+      wp_ri >= wp_mn ? ( wp_targets(); wp_ci = 0; wp_phase = 6; );
+    ) : wp_phase == 6 ? (
+      // la couche cible part d'une copie de l'original (hors fenetre In/Out, tout reste identique)
+      cp = min(262144, wp_len - wp_ci);
+      cp > 0 ? ( memcpy(wp_tl + wp_ci, wp_sl + wp_ci, cp); memcpy(wp_trr + wp_ci, wp_srr + wp_ci, cp); wp_ci += cp; );
+      wp_ci >= wp_len ? ( wp_n > 0 ? ( wp_phase = 4; ) : ( wp_phase = 5; ); );
+    ) : wp_phase == 4 ? (
+      wp_render_step(max(4096, floor(samplesblock * 12)));
+    ) : wp_phase == 5 ? (
+      // fin du calcul : on bascule (en fondu) sur la version calee
+      wp_rerender ? (
+        switch_history_slot(wp_tgt); xf_begin(floor(srate * 0.01), 1);
+        wp_ci = 0; wp_phase = 7;
+      ) : (
+        history_head = wp_tgt; hist_len[wp_tgt] = length; dirty_len = max(dirty_len, length);
+        hist_undo = min(hist_undo + 1, max_history - 1); hist_redo = 0; history_count = hist_undo + 1;
+        switch_history_slot(wp_tgt); xf_begin(floor(srate * 0.01), 1);
+        wp_wsl = wp_tgt; wp_busy = 0; wp_phase = 0; wp_live = 1; wp_sig = wp_sig_job; wp_prev_on = 1;
+        !(slicer_src == 1 && !src_auto) ? start_analysis_ex(1);
+      );
+    ) : wp_phase == 7 ? (
+      // recalcul : la couche de travail est recopiee dans la couche du warp, puis on y revient (contenu identique)
+      !xf_on ? (
+        cp = min(262144, wp_len - wp_ci);
+        cp > 0 ? ( memcpy(wp_wl + wp_ci, wp_tl + wp_ci, cp); memcpy(wp_wl + single_buf_len + wp_ci, wp_trr + wp_ci, cp); wp_ci += cp; );
+        wp_ci >= wp_len ? (
+          switch_history_slot(wp_wsl); hist_len[wp_wsl] = length;
+          wp_busy = 0; wp_phase = 0; wp_cb = 0; wp_sig = wp_sig_job; wp_prev_on = 1;
+          !(slicer_src == 1 && !src_auto) ? start_analysis_ex(1);
+        );
+      );
+    );
+  ) : (
+    on = wp_live && active_history_idx == wp_wsl && length == wp_len;
+    (warp_on >= 0.5 && !on && wp_free) ? (
+      (wp_live && active_history_idx == wp_orig && hist_redo >= 1 && length == wp_len && sig == wp_sig) ? (
+        // la version calee est encore la (redo) : bascule immediate
+        wp_hr = sync_hard_resync; redo_state(); sync_hard_resync = wp_hr; xf_begin(floor(srate * 0.01), 1); wp_prev_on = 1;
+        !(slicer_src == 1 && !src_auto) ? start_analysis_ex(1);
+      ) : (now >= wp_sig_t) ? (
+        // nouveau warp : detection sur la couche actuelle (= original), calcul dans la couche suivante
+        wp_live = 0; wp_orig = active_history_idx; wp_from = wp_orig; wp_len = length;
+        wp_tgt = (wp_orig + 1) % max_history; wp_rerender = 0;
+        wp_sl = wp_slot_l(wp_orig); wp_srr = wp_sl + single_buf_len; wp_tl = wp_slot_l(wp_tgt); wp_trr = wp_tl + single_buf_len;
+        wp_sig_job = sig; wp_busy = 1; wp_phase = 1;
+      );
+    ) : (warp_on < 0.5 && on) ? (
+      // OFF : retour a l'original (la version calee reste disponible pour ON)
+      wp_hr = sync_hard_resync; undo_state(); sync_hard_resync = wp_hr; xf_begin(floor(srate * 0.01), 1); wp_prev_on = 0;
+      !(slicer_src == 1 && !src_auto) ? start_analysis_ex(1);
+    ) : (on && sig != wp_sig && now >= wp_sig_t && wp_free) ? (
+      // grille / force / In-Out changes : recalcul depuis l'original, dans une couche de travail
+      nx = (wp_wsl + 1) % max_history;
+      (nx != wp_orig && max_history >= 3) ? (
+        hist_undo >= max_history - 1 ? ( hist_undo = max_history - 2; history_count = hist_undo + 1; );
+        wp_from = wp_wsl; wp_tgt = nx; wp_rerender = 1;
+        wp_sl = wp_slot_l(wp_orig); wp_srr = wp_sl + single_buf_len; wp_tl = wp_slot_l(wp_tgt); wp_trr = wp_tl + single_buf_len;
+        wp_wl = wp_slot_l(wp_wsl);
+        wp_sig_job = sig; wp_busy = 1; wp_ri = wp_mn; wp_phase = 3;   // attaques deja connues (original inchange)
+      );
+    );
+  );
+  on = wp_live && active_history_idx == wp_wsl && length == wp_len;
+  !wp_busy ? wp_prev_on = on;
+  wp_pub = wp_busy ? 2 : on;
+);
+
 @serialize
 // Sauvegarde dediee de l'ID (entier). Au chargement projet, restaure
 // slider45/manual_id meme si un re-init a reinitialise le slider.
@@ -1863,7 +2102,7 @@ det_chg ? ( det_chg = 0; (length > 0 && !analysing && !cm_active && state != 8 &
 analysing == 1 ? (
   // V3.26 : detection perceptive. Par echantillon : 2 filtres a 1 pole (3 bandes) + 3 suiveurs de crete ; tous les ~3 ms : contraste.
   ana_budget = max(1024, floor(samplesblock * 8));
-  i = 0; odf_ls = floor(loop_start); odf_lw = max(1, floor(loop_width));
+  i = 0; odf_ls = wp_scan ? 0 : floor(loop_start); odf_lw = wp_scan ? max(1, floor(length)) : max(1, floor(loop_width));   // V3.26 : warp = tout le buffer
   while (i < ana_budget && ana_k < ana_end) (
     // amorce = fin de la boucle (avant : le % d'EEL2 sur un nombre negatif lisait le DEBUT de la boucle a l'envers,
     // ce qui pouvait masquer ou retarder l'attaque du premier temps)
@@ -1890,6 +2129,11 @@ analysing == 1 ? (
       dv_j += 1;
     );
     cand_n = dv_m;
+    wp_scan ? (
+      // V3.26 : detection pour le warp -> on garde TOUTES les attaques (pas de limite Slices), les slices ne changent pas
+      wp_mn = min(cand_n, wp_max); dv_j = 0; loop(wp_mn, wp_mk[dv_j] = cand_k[dv_j]; dv_j += 1; );
+      wp_scan = 0; analysing = 0; wp_ri = 0; wp_phase = 3;
+    ) : (
     an_ns = cand_n; an_nr = cand_n; an_ne = cand_n;
     an_N = (slicer_src == 0 || src_auto) ? min(det_cap, floor(max_slices + 0.5)) : 0;
     an_wasg = (slicer_src == 1);
@@ -1917,6 +2161,7 @@ analysing == 1 ? (
       dv_j = 0; loop(cand_n, cand_v[dv_j] += 3 * log10(max(0.001, cand_s[dv_j] / ana_max_peak)); dv_j += 1; );
       an_done = 0;
       analysing = 3;
+    );
     );
   );
 ) : analysing == 3 ? (
@@ -1946,6 +2191,7 @@ analysing == 1 ? (
   );
   an_done ? ( an_sortfill(); an_commit(); );
 );
+wp_tick();   // V3.26 : warp
 // MAJ DE L'ID (slider manuel) — entier stable 0..8
 manual_id = floor(manual_id + 0.5);
 manual_id < 0 ? manual_id = 0 : manual_id > 8 ? manual_id = 8;
@@ -2055,6 +2301,7 @@ loop(3,
     cmd == 32 ? ld_query() :
     cmd == 33 ? do_beat_repeat(!br_on) :
     cmd == 37 ? ( lp_mute = cmd_arg == 1 ? 1 : (cmd_arg == 2 ? 0 : !lp_mute); ) :   // V3.25 : mute (0 bascule, 1 on, 2 off)
+    cmd == 38 ? ( warp_on = cmd_arg == 1 ? 1 : (cmd_arg == 2 ? 0 : (warp_on >= 0.5 ? 0 : 1)); slider65 = warp_on; ) :   // V3.26 : warp (0 bascule, 1 on, 2 off)
     cmd == 34 ? dr_arm_target(cmd_arg) :
     cmd == 35 ? dr_arm_source(cmd_arg) :
     cmd == 36 ? dr_commit_begin(cmd_arg) :
@@ -2188,6 +2435,8 @@ loop(3,
     wr_id == 62 ? ( cloud_size = max(1, min(1000, wr_v)); slider62 = cloud_size; ) :      // V3.21
     wr_id == 63 ? ( cloud_freeze = wr_v >= 0.5 ? 1 : 0; slider63 = cloud_freeze; ) :
     wr_id == 64 ? ( cloud_diffuse = max(0, min(1, wr_v)); slider64 = cloud_diffuse; ) :
+    wr_id == 65 ? ( warp_grid = max(0, min(5, floor(wr_v + 0.5))); slider66 = warp_grid; ) :   // V3.26
+    wr_id == 66 ? ( warp_force = max(0, min(100, wr_v)); slider67 = warp_force; ) :
     0;
     gmem[gmem_base + wr_mo] = 0;
     gmem[gmem_base + wr_mo + 1] = 0;
@@ -2196,6 +2445,7 @@ loop(3,
   );
   
   gmem[gmem_base + 199] = lp_mute;   // V3.25 : mute
+  gmem[gmem_base + 156] = wp_pub; gmem[gmem_base + 157] = warp_grid; gmem[gmem_base + 158] = warp_force;   // V3.26 : warp (0 off, 1 on, 2 calcul)
   gmem[gmem_base + 0]  = instance_id;
   gmem[gmem_base + 1]  = instance_alias;
   // V3.10 : point de synchro (+182 pos samples, -1 aucun | +183 id reference 1..8, 9 = Host | +184 longueur reference | +185 reference toujours active)
@@ -3242,6 +3492,13 @@ max_len_to_draw > 0 ? (
   cloud_on ? ( gfx_set(0.75, 0.2, 0.95, 0.9); gfx_rect(cloud_cursor_x, wav_y, 1, wav_h); gfx_rect(cloud_cursor_x - 2, wav_y + wav_h - 8, 5, 8); );
   gfx_set(1, 0.3, 0.3, 0.95); gfx_rect(cursor_x, wav_y, 1, wav_h); gfx_rect(cursor_x - 3, wav_y, 6, 8);
 ) : ( ui_text(wav_x + wav_w * 0.5 - 70, mid_y - 6, "Press Rec to start recording", 0.6, 0.55, 0.58, 1, 0) );
+// V3.26 : etat du warp (en haut a droite de la forme d'onde)
+wp_pub > 0 ? (
+  wp_g = floor(warp_grid + 0.5);
+  strcpy(#wp_g, wp_g == 0 ? "1/4" : (wp_g == 1 ? "1/8" : (wp_g == 2 ? "1/12" : (wp_g == 3 ? "1/16" : (wp_g == 4 ? "1/24" : "1/32")))));
+  wp_pub == 2 ? sprintf(#wp_lbl, "WARP %s ... calcul", #wp_g) : sprintf(#wp_lbl, "WARP %s  %d%%", #wp_g, floor(warp_force + 0.5));
+  ui_text(wav_x + wav_w - 130, wav_y + 4, #wp_lbl, 0.35, 0.95, 0.75, 1, 0);
+);
 
 ui_ar = 0.92; ui_ag = 0.38; ui_ab = 0.72; ui_panel(10, 206, 372, 144, "PLAYBACK");
 bx = 22; by = 226;
