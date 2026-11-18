@@ -207,6 +207,15 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - Constaté (ancien, pas touché) : un Undo utilisateur à longueur égale pose `sync_hard_resync` → petit clic au tour suivant
   dans la simulation.
 
+## V3.26 : Cloud qui craque (18 nov.)
+
+- Reproduit (`tools/tvoice.py`) : voix tenue forte + densité 95 % → les grains s'additionnent parfois en phase, crêtes
+  au-dessus de 0,95 → écrêtage doux de sortie = craquements. Corrigé : **limiteur à anticipation 2 ms** sur la sortie du
+  Cloud (seuil 0,8, `cl_lk` / `cl_lg`), le gain est atteint avant que le pic sorte de la ligne à retard. Le Cloud a donc
+  2 ms de retard. Le banc simule maintenant le Cloud (adresses fixes 120 M ramenées dans `bench.py`), `tools/tcloud.py`.
+- Signalé aussi : « en Link il ne suit plus la tête de lecture, le LFO doit avoir Pos comme centre » : pas reproduit
+  (en Link le centre suit `pos`, le LFO oscille autour du centre) ; questions posées (Freeze ? curseur violet ? Twister ?).
+
 ## Idées en suspens (proposées, pas faites)
 
 - **GRAND CHANTIER « tout est rush » (validé sur le principe, à faire plus tard, par étapes)** :

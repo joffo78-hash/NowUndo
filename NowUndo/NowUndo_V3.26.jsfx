@@ -227,6 +227,10 @@ st_win = sel_s + max_transients + 16; st_band = st_win + st_N + 16; st_ring = st
 st_fft = ceil((st_ring + (st_lag + 1) * st_nb + 64) / 4096) * 4096;
 // V3.26 : warp (attaques de l'original, positions de depart / d'arrivee, ecart a la grille)
 wp_max = 1024; wp_mk = st_fft + 8192; wp_sr = wp_mk + wp_max + 16; wp_tg = wp_sr + wp_max + 16; wp_dd = wp_tg + wp_max + 16;
+// V3.26 : limiteur a anticipation du Cloud (2 ms) : a forte densite les grains s'additionnent parfois en phase -> pics
+// au-dessus de 0 dB ecretes en sortie = craquements (voix tenue, densite 95 %)
+cl_lk = wp_dd + wp_max + 16; memset(cl_lk, 0, 512); cl_lD = max(8, min(250, floor(srate * 0.002))); cl_li = 0;
+cl_lg = 1; cl_lh = 1; cl_lc = 0; cl_lth = 0.8; cl_latt = 1 - exp(-4 / cl_lD); cl_lrel = 1 - exp(-1 / (srate * 0.08));
 wp_busy = 0; wp_phase = 0; wp_live = 0; wp_scan = 0; wp_prev_on = 0; wp_mn = 0; wp_n = 0; wp_orig = 0; wp_wsl = 0; wp_tgt = 0; wp_from = 0;
 wp_sig = -1; wp_sig_seen = -1; wp_sig_t = 0; wp_len = 0; an_after_wp = 0; wp_ls = 0; wp_lw = 1;
 i = 0; loop(st_N, st_win[i] = 0.5 - 0.5 * cos(2 * $pi * i / st_N); i += 1; );
@@ -3152,9 +3156,17 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       df_w = sin(cloud_diffuse * $pi * 0.5); df_d = cos(cloud_diffuse * $pi * 0.5); df_k = 1 - 0.45 * cloud_diffuse;
       cl_out_l = cl_out_l * df_d + df_xl * df_w * df_k; cl_out_r = cl_out_r * df_d + df_xr * df_w * df_k;
     );
+    // V3.26 : limiteur (le gain atteint sa valeur avant que le pic sorte de la ligne a retard : pas de clic)
+    cl_lpk = max(abs(cl_out_l), abs(cl_out_r));
+    cl_lt = cl_lpk > cl_lth ? cl_lth / cl_lpk : 1;
+    cl_lt <= cl_lh ? ( cl_lh = cl_lt; cl_lc = cl_lD; ) : ( cl_lc > 0 ? ( cl_lc -= 1; ) : ( cl_lh += (1 - cl_lh) * cl_lrel; ); );
+    cl_lg += (cl_lh - cl_lg) * (cl_lh < cl_lg ? cl_latt : cl_lrel);
+    cl_dl = cl_lk[cl_li]; cl_dr = cl_lk[256 + cl_li]; cl_lk[cl_li] = cl_out_l; cl_lk[256 + cl_li] = cl_out_r;
+    cl_li += 1; cl_li >= cl_lD ? cl_li = 0;
+    cl_out_l = cl_dl * cl_lg; cl_out_r = cl_dr * cl_lg;
     cmx = cloud_mix * cloud_x;
     s0 = s0 * (1.0 - cmx) + cl_out_l * cmx; s1 = s1 * (1.0 - cmx) + cl_out_r * cmx;
-  ) : ( cloud_x <= 0.0001 ? ( cl_timer = 0; gi = 0; loop(cl_max, g_base = cl_mem + gi * cl_stride; g_base[2] = 0; gi += 1; ); ); );
+  ) : ( cloud_x <= 0.0001 ? ( cl_timer = 0; gi = 0; loop(cl_max, g_base = cl_mem + gi * cl_stride; g_base[2] = 0; gi += 1; ); memset(cl_lk, 0, 512); cl_lg = 1; cl_lh = 1; cl_lc = 0; ); );
   dub_gran && (!is_one_shot_mode || one_shot_playing) ? dub_grain_tick(pos, effective_rev, state != 5 || auto_rep_active);
   (!is_one_shot_mode || one_shot_playing) ? (
     old_pos = pos; pos_step_actual = pos_step * (effective_rev ? -1 : 1); pos += pos_step_actual; wrapped = 0; rd_last_st = pos_step_actual;
