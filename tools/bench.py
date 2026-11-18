@@ -9,7 +9,10 @@ SR = 48000
 BLK = 256
 
 def load(jsfx, tag):
-    code, aliases = eel2py.translate(jsfx, patches=[("mem_budget = 120000000;", "mem_budget = 12000000;")])
+    # cloud / freeze sont a des adresses fixes (120 M) : on les ramene dans la memoire simulee (14 M)
+    code, aliases = eel2py.translate(jsfx, patches=[("mem_budget = 120000000;", "mem_budget = 12000000;"),
+                                                    ("cl_mem = 120000500;", "cl_mem = 11700000;"),
+                                                    ("frz_l = 120100000; frz_max = 3600000;", "frz_l = 11800000; frz_max = 1000000;")])
     fn = '%s/_gen_%s.py' % (HERE, tag)
     open(fn, 'w').write(code)
     spec = importlib.util.spec_from_file_location('gen_' + tag, fn)
