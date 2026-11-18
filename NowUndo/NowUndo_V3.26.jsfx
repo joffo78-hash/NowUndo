@@ -1979,6 +1979,9 @@ function wp_tick() local(on, sig, now, nx, cp) (
 file_var(0, saved_manual_id);
 file_avail(0) >= 0 ? (
   // lecture projet
+  // V3.26 : un projet d'avant le warp n'a pas ses reglages -> grille 1/16 et force 100 % (sinon 1/4 et 0 % = rien ne bouge)
+  wp_cfg_ok = 0; file_avail(0) > 0 ? file_var(0, wp_cfg_ok);
+  wp_cfg_ok < 0.5 ? ( warp_grid = 3; slider66 = 3; warp_force = 100; slider67 = 100; warp_on = 0; slider65 = 0; );
   saved_manual_id = floor(saved_manual_id + 0.5);
   saved_manual_id < 0 ? saved_manual_id = 0 : saved_manual_id > 8 ? saved_manual_id = 8;
   manual_id = saved_manual_id;
@@ -1990,6 +1993,7 @@ file_avail(0) >= 0 ? (
   // ecriture projet
   saved_manual_id = floor(manual_id + 0.5);
   saved_manual_id < 0 ? saved_manual_id = 0 : saved_manual_id > 8 ? saved_manual_id = 8;
+  wp_cfg_ok = 1; file_var(0, wp_cfg_ok);   // V3.26
 );
 
 @block
