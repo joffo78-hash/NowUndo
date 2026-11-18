@@ -228,6 +228,9 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   (`xf_begin(xf_len_rs)`, voix fantôme) à chaque BR on / off / refresh, et tout recalage > 64 échantillons en lecture
   normale passe aussi par ce fondu (petit recalage = anti-clic `pd_arm`). En BR, chaque répétition a au moins 3 ms de
   fondu même si Fade = 0. Effet de bord voulu : l'ancien petit clic après un Undo (recalage au tour suivant) a disparu.
+- **Warp + Beat Repeat (18 nov.)** : le BR change In/Out, qui entraient dans la signature du warp → recalcul sur la
+  fenêtre du BR (« le warp se réinitialise »). Le warp utilise maintenant la fenêtre de la boucle (`wp_win_s/w` =
+  `br_saved_start/width` pendant un BR). Vérifié dans `tools/twarp.py` (cas BR on/off : pas de recalcul, warp gardé).
 - Signalé aussi : « en Link il ne suit plus la tête de lecture, le LFO doit avoir Pos comme centre » : pas reproduit
   (en Link le centre suit `pos`, le LFO oscille autour du centre) ; questions posées (Freeze ? curseur violet ? Twister ?).
 

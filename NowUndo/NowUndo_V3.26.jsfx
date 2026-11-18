@@ -1770,14 +1770,17 @@ function rx_poll() (
 // forme d'onde) ; les ~10 premieres ms de chaque attaque ne sont jamais etirees (attaque franche).
 function wp_beats() ( warp_grid < 0.5 ? 1.0 : (warp_grid < 1.5 ? 0.5 : (warp_grid < 2.5 ? 1.0/3.0 : (warp_grid < 3.5 ? 0.25 : (warp_grid < 4.5 ? 1.0/6.0 : 0.125)))); );
 function wp_slot_l(idx) ( idx == 0 ? (active_part == 1 ? buf_part1_l : (active_part == 2 ? buf_part2_l : buf_part3_l)) : hist_mem_start + (idx - 1) * slot_size; );
-function wp_signature() ( floor(warp_grid + 0.5) * 1000003 + floor(warp_force + 0.5) * 1009 + floor(loop_start) * 7 + floor(loop_width) * 13 + floor(loop_beat_len()) * 3 + length * 17; );
+// fenetre du warp = la boucle (In/Out), PAS la fenetre du Beat Repeat : un BR ne doit pas relancer le calcul
+function wp_win_s() ( br_on ? br_saved_start : loop_start; );
+function wp_win_w() ( br_on ? br_saved_width : loop_width; );
+function wp_signature() ( floor(warp_grid + 0.5) * 1000003 + floor(warp_force + 0.5) * 1009 + floor(wp_win_s()) * 7 + floor(wp_win_w()) * 13 + floor(loop_beat_len()) * 3 + length * 17; );
 // index circulaire dans la fenetre de la boucle (x entier, peut etre negatif)
 function wp_ix(x) ( x = floor(x); wp_ls + (x >= 0 ? x % wp_lw : (wp_lw - ((0 - x) % wp_lw)) % wp_lw); );
 function wp_abort() ( wp_busy ? ( wp_busy = 0; wp_phase = 0; wp_scan ? ( wp_scan = 0; analysing = 0; an_after_wp = 1; ); ); );
 // --- points d'arrivee : chaque attaque va vers la ligne de grille la plus proche (force %), deux attaques ne
 // peuvent pas tomber au meme endroit (la plus proche de sa ligne reste), etirement limite a x3 / /3
 function wp_targets() local(g, j, n, rel, q, t, d, ok, lk, mins) (
-  wp_ls = floor(loop_start); wp_lw = max(1, floor(loop_width));
+  wp_ls = floor(wp_win_s()); wp_lw = max(1, floor(wp_win_w()));
   g = max(srate * 0.005, loop_beat_len() * wp_beats());
   mins = floor(srate * 0.02);
   n = 0; j = 0;

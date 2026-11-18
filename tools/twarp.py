@@ -135,6 +135,19 @@ m.v_warp_on = 0.0; blocks(GAP, PLAY)
 xo2, _ = cur()
 check('OFF apres recalcul = original exact', max(abs(a - b) for a, b in zip(xo2, x0)) < 1e-9)
 
+# --- Beat Repeat avec le warp actif : ni recalcul ni retour a l'original (signale le 18 nov.)
+m.v_warp_on = 1.0; wait(lambda: GM[gb + 156] == 1 and m.v_wp_busy == 0, play=PLAY)
+hi = int(m.v_active_history_idx); xb0, _ = cur()
+m.f_do_beat_repeat(1); busy = 0
+for _ in range(int(0.6 * SR / BLK)):
+    blocks(1, PLAY); busy = max(busy, m.v_wp_busy, 2 if GM[gb + 156] == 2 else 0)
+check('BR on : warp garde, pas de recalcul', m.v_warp_on == 1 and busy == 0 and int(m.v_active_history_idx) == hi, '(busy %d, couche %d/%d)' % (busy, int(m.v_active_history_idx), hi))
+m.f_do_beat_repeat(0)
+for _ in range(int(0.6 * SR / BLK)):
+    blocks(1, PLAY); busy = max(busy, m.v_wp_busy, 2 if GM[gb + 156] == 2 else 0)
+xb1, _ = cur()
+check('BR off : warp garde, meme contenu', m.v_warp_on == 1 and busy == 0 and max(abs(a - b) for a, b in zip(xb0, xb1)) < 1e-9)
+
 # --- overdub sur la version calee : le warp est fige, Undo revient a la version calee (warp reglable)
 m.v_warp_on = 1.0; wait(lambda: GM[gb + 156] == 1, play=PLAY)
 m.f_push_new_history_state(); blocks(GAP, PLAY)
