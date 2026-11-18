@@ -8,7 +8,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 
 - Dépôt : `joffo78-hash/NowUndo`, branche de travail **`nowundo-v3.26`** (créée depuis `ccr-12a0f3a9-86p9ey`, qui contient tout le travail jusqu'au 16 nov. 2026).
 - `NowUndo/NowUndo_V3.26.jsfx` : **version courante du JSFX** (3.19 → 3.25 gardées pour l'historique). Faite à partir du
-  fichier que l'utilisateur avait chargé dans REAPER (une V3.25 **sans** le Replace en slicer « tranche entendue » `slc_move`).
+  fichier que l'utilisateur avait chargé dans REAPER (une V3.25 sans `slc_move`, remis ensuite : V3.26 = V3.25 + détection).
 - `NowUndo/NU_DropCapture.jsfx` : capture du drop (posée temporairement par le Launchpad en bout de chaîne de la piste du looper cible).
 - `NowUndo/Scripts/V3.21/` : tous les scripts courants (le nom du dossier est historique) :
   | Fichier | Rôle |
@@ -210,6 +210,9 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   **Contrainte (demandée)** : activer le quantize global ne doit **jamais modifier une boucle déjà calée** : In / Out
   existants et l'écart (largeur) restent tels quels (contrairement au bouton Quant actuel qui recale In / Out au
   changement) ; seules les actions **à venir** sont quantisées.
+- **SNAP des slices (demandé le 18 nov., en discussion)** : quantifier les slices sur une grille comme une quantification
+  MIDI. La grille suit la **logique des rushes** (sélection / looper ciblé / all), pas un réglage seulement global ;
+  à rapprocher du chantier « Quantize global » (même grille, calculée sur la boucle de chaque looper).
 - MIDI direct au JSFX via un JSFX « Clock » sur une piste Contrôle (horodatage à l'échantillon des appuis).
 - Conflit possible entre les touches à une lettre du Scenario et les raccourcis du MIDI Learn quand sa fenêtre a le focus
   (options proposées : laisser, pause quand focus, pause seulement pour les touches du Scenario).
