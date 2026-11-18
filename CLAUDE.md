@@ -7,7 +7,8 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 ## Où est quoi
 
 - Dépôt : `joffo78-hash/NowUndo`, branche de travail **`nowundo-v3.26`** (créée depuis `ccr-12a0f3a9-86p9ey`, qui contient tout le travail jusqu'au 16 nov. 2026).
-- `NowUndo/NowUndo_V3.25.jsfx` : **version courante du JSFX** (3.19 → 3.24 gardées pour l'historique).
+- `NowUndo/NowUndo_V3.26.jsfx` : **version courante du JSFX** (3.19 → 3.25 gardées pour l'historique). Faite à partir du
+  fichier que l'utilisateur avait chargé dans REAPER (une V3.25 **sans** le Replace en slicer « tranche entendue » `slc_move`).
 - `NowUndo/NU_DropCapture.jsfx` : capture du drop (posée temporairement par le Launchpad en bout de chaîne de la piste du looper cible).
 - `NowUndo/Scripts/V3.21/` : tous les scripts courants (le nom du dossier est historique) :
   | Fichier | Rôle |
@@ -165,8 +166,20 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 3. **Drop** : saut de position / boucle bancale signalé ; capture déplacée sur la piste de la cible, **non confirmé**.
 4. **Beat Repeat** : « 1/16 plus court que 1/32 » signalé ; le moteur mesuré est correct (1/16 = 125 ms, 1/32 = 62,5 ms
    à 120 BPM) → probablement l'ordre des rushes gate / la pile « dernier actif gagne » ; en attente des textes de rushes.
-5. Le JSFX courant affiche **« NowUndo V3.25 (mute, rec slicer) »** : vérifier que c'est bien lui qui est chargé.
-   Ne pas créer de V3.26 sans accord (« touche à rien »).
+5. (Résolu d'après l'utilisateur le 18 nov. : « tout ça est résolu ».)
+
+## V3.26 (18 nov.) : détection des slices « à l'oreille »
+
+- Avant : les N slices = les N attaques au **volume brut** le plus fort (sans écart) → tout se regroupait dans la partie
+  forte de la boucle ; une attaque noyée dans un fond (charley sur basse) n'était pas vue ; l'amorce de l'analyse lisait
+  le début de la boucle à l'envers (`%` d'EEL2 sur un négatif) et pouvait retarder la 1re slice.
+- Maintenant (`dt_*` dans le JSFX) : 3 bandes (< 150 Hz, médiums, > 2,5 kHz), suiveurs de crête, contraste en dB avec le
+  fond (monte en 250 ms, redescend en 60 ms) **et** avec le niveau d'il y a ~25 ms (écarte trémolo / nappe qui enfle),
+  seuil 6 dB, masquage 60 ms (la plus forte des deux reste). Choix des N : score = contraste (plafonné 30 dB) + un peu de
+  volume, écart mini = moitié de l'écart moyen, bonus d'éloignement (à score égal la zone la moins couverte gagne).
+  Coupe recalée sur la montée au-dessus du niveau qui précède (`odf_refine`).
+- Test : `cd tools && python3 tdetect.py . <fichier.jsfx> tag [-v]` (scénarios : fort puis doux, basse + charley,
+  crescendo, nappe avec trémolo).
 
 ## Idées en suspens (proposées, pas faites)
 
