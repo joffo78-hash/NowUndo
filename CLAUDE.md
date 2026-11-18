@@ -201,8 +201,8 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - Grille = **tempo de la boucle** (`loop_beat_len` : longueur / nombre de temps). Nombre de temps : bouton « Loop Beats »
   (Auto / 2..32), sinon Auto (libre ou maître : puissance de 2 × chiffre de mesure, tempo le plus proche de 112 ;
   esclave Host / d'un maître : déduit du tempo de référence). Le tempo de REAPER ne sert qu'à ce comptage.
-- **EEL2 : les noms de variables ne distinguent pas majuscules / minuscules** (`wp_A` = `wp_a`) : le traducteur Python,
-  lui, les distingue → vérifier les collisions (script dans l'historique : regrouper les identifiants par `lower()`).
+- **EEL2 : les noms de variables ne distinguent pas majuscules / minuscules** (`wp_A` = `wp_a`). Le traducteur Python
+  le fait maintenant aussi (tout en minuscules).
 - Test : `cd tools && python3 twarp.py . <fichier.jsfx> tag [--play [-v]]`.
 - Constaté (ancien, pas touché) : un Undo utilisateur à longueur égale pose `sync_hard_resync` → petit clic au tour suivant
   dans la simulation.
@@ -213,6 +213,11 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   au-dessus de 0,95 → écrêtage doux de sortie = craquements. Corrigé : **limiteur à anticipation 2 ms** sur la sortie du
   Cloud (seuil 0,8, `cl_lk` / `cl_lg`), le gain est atteint avant que le pic sorte de la ligne à retard. Le Cloud a donc
   2 ms de retard. Le banc simule maintenant le Cloud (adresses fixes 120 M ramenées dans `bench.py`), `tools/tcloud.py`.
+- **Vraie cause des craquements (trouvée sur l'enregistrement de l'utilisateur)** : EEL2 ne distingue pas majuscules /
+  minuscules → `cl_W` (somme des fenêtres) = `cl_w` (fenêtre du grain) et `cl_A` (attaque) = `cl_a` (agitation) depuis
+  la V3.21 : le gain du nuage sautait à chaque grain. Renommés `cl_wsum` / `cl_atk`. **`tools/eel2py.py` met maintenant
+  tous les noms en minuscules** (comme EEL2) : le banc reproduit le bug sur V3.25 (27 sauts / 4 s) et 0 sur V3.26.
+  Aucune autre collision réelle dans le JSFX (les autres paires sont des locales de fonctions différentes).
 - Signalé aussi : « en Link il ne suit plus la tête de lecture, le LFO doit avoir Pos comme centre » : pas reproduit
   (en Link le centre suit `pos`, le LFO oscille autour du centre) ; questions posées (Freeze ? curseur violet ? Twister ?).
 

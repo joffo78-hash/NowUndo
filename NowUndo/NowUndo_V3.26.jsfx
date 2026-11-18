@@ -3105,15 +3105,16 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       cl_timer += max(1, cl_mean * ((1 - cl_a) * (0.95 + rand(0.1)) + cl_a * (-log(max(0.000001, 1 - rand(1.0))))));
       cl_timer < 1 ? cl_timer = 1;
     );
-    // rendu
-    cl_out_l = 0; cl_out_r = 0; cl_act = 0; cl_W = 0; cl_ws = eff_start; cl_wl = max(16, eff_end - eff_start); gi = 0;
+    // rendu. V3.26 : EEL2 ne distingue pas majuscules / minuscules -> cl_W (somme des fenetres) etait cl_w (fenetre du
+    // grain) et cl_A (attaque) etait cl_a (agitation) : le gain sautait a chaque grain = craquements. Renommes cl_wsum / cl_atk.
+    cl_out_l = 0; cl_out_r = 0; cl_act = 0; cl_wsum = 0; cl_ws = eff_start; cl_wl = max(16, eff_end - eff_start); gi = 0;
     loop(cl_max,
       g_base = cl_mem + gi * cl_stride;
       g_base[2] ? (
         cl_ph = g_base[1]; cl_x = cl_ph / g_base[3];
         cl_x >= 1 ? ( g_base[2] = 0; ) : (
-          cl_A = g_base[8];
-          cl_w = cl_x < cl_A ? 0.5 - 0.5 * cos($pi * cl_x / cl_A) : 0.5 + 0.5 * cos($pi * (cl_x - cl_A) / (1 - cl_A));
+          cl_atk = g_base[8];
+          cl_w = cl_x < cl_atk ? 0.5 - 0.5 * cos($pi * cl_x / cl_atk) : 0.5 + 0.5 * cos($pi * (cl_x - cl_atk) / (1 - cl_atk));
           g_base[9] > 1.001 ? cl_w = cl_w ^ g_base[9];
           cl_p = g_base[0] + g_base[5] * cl_ph; cl_p -= cl_ws; cl_p -= floor(cl_p / cl_wl) * cl_wl; cl_p += cl_ws;
           cl_i1 = floor(cl_p); cl_fr = cl_p - cl_i1; cl_i0 = cl_i1 - 1; cl_i0 < cl_ws ? cl_i0 += cl_wl; cl_i2 = cl_i1 + 1; cl_i2 >= cl_ws + cl_wl ? cl_i2 -= cl_wl; cl_i3 = cl_i2 + 1; cl_i3 >= cl_ws + cl_wl ? cl_i3 -= cl_wl;
@@ -3126,7 +3127,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
             g_base[13] += cl_c * (cl_r - g_base[13]); g_base[14] += cl_c * (g_base[13] - g_base[14]); cl_r = g_base[14];
           );
           abs(g_base[4]) > 0.0001 ? ( cl_m = (cl_l + cl_r) * 0.5; cl_l = cl_m * g_base[6]; cl_r = cl_m * g_base[7]; );
-          cl_out_l += cl_l * cl_w; cl_out_r += cl_r * cl_w; cl_act += 1; cl_W += cl_w;
+          cl_out_l += cl_l * cl_w; cl_out_r += cl_r * cl_w; cl_act += 1; cl_wsum += cl_w;
           g_base[1] = cl_ph + 1;
         );
       );
@@ -3141,7 +3142,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     // en douceur : pas de pompage.
     cl_spr = min(cl_wl * 0.5, srate * 0.005 + (cloud_spread + cl_a * cl_a) * cl_wl * 0.5);
     cl_dec = max(0, min(1, max((cl_spr / srate - 0.005) / 0.05, cl_a * 2 + (cloud_pitch_spread > 0.01 ? 0.5 : 0))));
-    cl_g = 0.9 / (max(1, cl_W) ^ (0.75 - 0.25 * cl_dec));   // 0.75 : compromis (le jitter de 5 ms decorrele deja les aigus)
+    cl_g = 0.9 / (max(1, cl_wsum) ^ (0.75 - 0.25 * cl_dec));   // 0.75 : compromis (le jitter de 5 ms decorrele deja les aigus)
     cl_out_l *= cl_g; cl_out_r *= cl_g;
     // diffusion / espace
     (cloud_diffuse > 0.001 || df_on) ? (

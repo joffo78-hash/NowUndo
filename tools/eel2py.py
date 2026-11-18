@@ -442,6 +442,9 @@ def translate(path, sections_wanted=('init', 'slider', 'block', 'sample'), patch
     for a, b in patches:
         assert src.count(a) == 1, a
         src = src.replace(a, b)
+    # EEL2 ne distingue pas majuscules / minuscules dans les noms (cl_W == cl_w) : on fait pareil, sinon le banc
+    # cache des bugs qui existent dans REAPER (Cloud V3.21-3.25 : gain qui saute = craquements)
+    src = re.sub(r'"[^"\n]*"|(?<![\w$#])[A-Za-z_][A-Za-z_0-9.]*', lambda mm: mm.group(0) if mm.group(0).startswith('"') else mm.group(0).lower(), src)
     lines = src.split('\n')
     aliases = {}
     secs = {}
