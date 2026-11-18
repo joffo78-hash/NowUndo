@@ -357,6 +357,7 @@ xf_on = 0; xf_k = 0; xf_inc = 0; xf_eqp = 0; xf_l = 0; xf_r = 0; xf_p = 0; xf_st
 rd_valid = 0; rd_last_l = 0; rd_last_r = 0; rd_last_p = 0; rd_last_st = 0; rd_last_ws = 0; rd_last_we = 1; rd_last_g = 0; rd_last_pan = 0; rd_last_pamt = 0;
 xf_len_slice = max(16, floor(srate * 0.0025));   // fondu entre deux slices : 2.5 ms equi-puissance
 xf_len_jump = max(16, floor(srate * 0.012));     // sortie du slicer : 12 ms
+xf_len_rs = max(16, floor(srate * 0.006));       // V3.26 : saut de la tete en lecture normale (Beat Repeat...) : 6 ms
 sl_pre_t = floor(srate * 0.002);                 // pre-roll : le fondu d'entree se termine SUR le point de coupe
 pd_l = 0; pd_r = 0; pd_arm = 0; pd_prev_l = 0; pd_prev_r = 0; pd_k = exp(-1 / (srate * 0.0025));
 sl_pan_amt = 0; sl_pan_k = 1 - exp(-1 / (srate * 0.004)); slice_hold = 0;
@@ -1402,10 +1403,14 @@ function do_beat_repeat(want) local(i, nx, g, cur, best, bd, d) (
               : loop_width = max(srate * 0.01, length - loop_start);
       );
       br_on = 1; sync_hard_resync = 1; br_suppress_an = 1;
+      smooth_start = loop_start; smooth_width = loop_width;   // V3.26 : fenetre posee d'un coup (le glissement faisait rebondir la tete = clics)
+      xf_begin(xf_len_rs, 1);   // V3.26 : la tete change de fenetre -> fondu 6 ms avec l'ancienne lecture
     ) : (
       br_on ? (
         loop_start = br_saved_start; loop_width = br_saved_width;
         br_on = 0; sync_hard_resync = 1; br_suppress_an = 1;
+        smooth_start = loop_start; smooth_width = loop_width;   // V3.26
+        xf_begin(xf_len_rs, 1);   // V3.26 : la tete change de fenetre -> fondu 6 ms avec l'ancienne lecture
       );
     );
   );
@@ -1423,6 +1428,8 @@ function br_refresh() local(i, nx, g) (
       g > 0 ? loop_width = min(g, length - loop_start) : 0;
     );
     sync_hard_resync = 1; br_suppress_an = 1;
+    smooth_start = loop_start; smooth_width = loop_width;   // V3.26
+    xf_begin(xf_len_rs, 1);   // V3.26 : la tete change de fenetre -> fondu 6 ms avec l'ancienne lecture
   );
 );
 
@@ -2970,15 +2977,19 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
                                       || sync_hard_resync );
   
   // Jump forcé (comme reverse) dès que play_mode normal, même si sync_a pas encore stabilisé un instant
+  // V3.26 : tout saut de la tete (Beat Repeat on/off, In/Out, undo, recalage) se fait en fondu : l'ancienne lecture
+  // continue en voix fantome 6 ms pendant que la nouvelle monte (avant : saut sec = clic). Petit recalage = anti-clic.
   (need_resync || (force_mode_exit && length > 0 && loop_width > 0 && play_mode == 0 && !is_one_shot_mode)) ? ( 
-    trigger_pos_jump(sync_expected()); 
+    rs_to = sync_expected();
+    abs(rs_to - pos) > 64 ? xf_begin(xf_len_rs, 1) : ( abs(rs_to - pos) > 0.5 ? pd_arm = 1; );
+    trigger_pos_jump(rs_to); 
     sync_hard_resync = 0;
   ) : ( 
     is_normal_playback && wrapped ? ( 
       sync_exp = sync_expected(); 
       sync_dev = pos - sync_exp; 
       sync_dev -= loop_width * floor(sync_dev / loop_width + 0.5); 
-      abs(sync_dev) > 1 ? trigger_pos_jump(sync_exp); 
+      abs(sync_dev) > 1 ? ( abs(sync_dev) > 64 ? xf_begin(xf_len_rs, 1) : pd_arm = 1; trigger_pos_jump(sync_exp); );
     ); 
   );
   
@@ -3008,7 +3019,8 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
   // V3.20 : gain slicer (avec hold pendant le pre-roll) ; pas d'enveloppe de bord de boucle en slicer (elle ecrasait
   // l'attaque du slice pose au debut de la boucle)
   play_mode == 1 ? ( slice_hold > 0 ? slice_hold -= 1 : ( slice_env = max(0, slice_env - slice_decay_step); slice_att = min(1, slice_att + slice_att_step); ); g_main = slice_env * slice_att * sl_gate * slice_mute_gate; ) : ( slice_env = 1.0; g_main = 1.0; );
-  fade_samps = min((fade_ms * 0.001) * srate, eff_len * 0.5); rel_pos = safe_pos - eff_start; loop_envelope = 1.0;
+  // V3.26 : en Beat Repeat, chaque repetition a au moins 3 ms de fondu (Fade a 0 = un clic par repetition)
+  fade_samps = min((max(fade_ms, br_on ? 3 : 0) * 0.001) * srate, eff_len * 0.5); rel_pos = safe_pos - eff_start; loop_envelope = 1.0;
   play_mode != 1 ? (
     fade_samps > 0 && rel_pos < fade_samps ? loop_envelope = min(loop_envelope, rel_pos / fade_samps); dist_from_end = eff_end - safe_pos; fade_samps > 0 && dist_from_end < fade_samps && !ml_fwd_free ? loop_envelope = min(loop_envelope, dist_from_end / fade_samps);
   );

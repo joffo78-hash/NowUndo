@@ -204,8 +204,7 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - **EEL2 : les noms de variables ne distinguent pas majuscules / minuscules** (`wp_A` = `wp_a`). Le traducteur Python
   le fait maintenant aussi (tout en minuscules).
 - Test : `cd tools && python3 twarp.py . <fichier.jsfx> tag [--play [-v]]`.
-- Constaté (ancien, pas touché) : un Undo utilisateur à longueur égale pose `sync_hard_resync` → petit clic au tour suivant
-  dans la simulation.
+- (Corrigé plus tard, voir Beat Repeat) un Undo utilisateur à longueur égale faisait un petit clic au tour suivant.
 
 ## V3.26 : Cloud qui craque (18 nov.)
 
@@ -223,6 +222,12 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   l'entrée et à la sortie de l'overdub** (`dub_pf` / `dub_g`, la sortie continue d'écrire 5 ms en baissant). Les boucles
   déjà enregistrées gardent leurs clics (à refaire). Constaté : Launchpad fermé = plus de clics en lecture normale
   (micro-overdubs involontaires depuis le Launchpad ? non confirmé).
+- **Beat Repeat qui clique (18 nov.)** : reproduit sur une voix (`tools/tbr.py`). Causes : (1) au changement de fenêtre,
+  la fenêtre « glissait » (`smooth_start/width`) et la tête rebondissait d'un bord à l'autre ; (2) le saut de la tête
+  (recalage `sync_hard_resync` / repli dans la fenêtre) était sec. Corrigé : fenêtre posée d'un coup + **fondu 6 ms**
+  (`xf_begin(xf_len_rs)`, voix fantôme) à chaque BR on / off / refresh, et tout recalage > 64 échantillons en lecture
+  normale passe aussi par ce fondu (petit recalage = anti-clic `pd_arm`). En BR, chaque répétition a au moins 3 ms de
+  fondu même si Fade = 0. Effet de bord voulu : l'ancien petit clic après un Undo (recalage au tour suivant) a disparu.
 - Signalé aussi : « en Link il ne suit plus la tête de lecture, le LFO doit avoir Pos comme centre » : pas reproduit
   (en Link le centre suit `pos`, le LFO oscille autour du centre) ; questions posées (Freeze ? curseur violet ? Twister ?).
 
