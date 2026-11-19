@@ -758,7 +758,16 @@ end
 -- Interface
 --------------------------------------------------------------------------
 local function ld(k, d) return tonumber(reaper.GetExtState(EXT, k)) or d end
-gfx.init("NowUndo Scenario", ld("w", 620), ld("h", 560), ld("dock", 0), ld("x", 120), ld("y", 120))
+-- Instance unique : le script continue fenetre fermee (rushes, scenarios) ; le relancer rouvre juste la fenetre
+do
+  local al = tonumber(reaper.GetExtState("NowUndo_Scn", "alive")) or 0
+  if reaper.time_precise() - al < 1 then
+    reaper.SetExtState("NowUndo_Scn", "ui_req", "1", false)
+    return
+  end
+end
+H._open = function() gfx.init("NowUndo Scenario", ld("w", 620), ld("h", 560), ld("dock", 0), ld("x", 120), ld("y", 120)); H._bg = false end
+H._open()
 
 local was_down, last_click_t, last_click_row = false, 0, 0
 local RH, LIST_Y = 24, 78
@@ -2624,13 +2633,35 @@ local STC = { [0] = { .25, .25, .28 }, [1] = { .9, .15, .15 }, [2] = { .2, .7, .
   [4] = { .3, .6, .9 }, [5] = { .6, .4, .9 }, [6] = { .3, .8, .8 }, [7] = { .95, .85, .2 }, [8] = { .95, .85, .2 } }
 
 local function main()
+  if H._bg then                                                    -- fenetre fermee : rushes et scenarios continuent
+    if reaper.GetExtState(CAPEXT, "ui_req") == "1" then
+      reaper.SetExtState(CAPEXT, "ui_req", "", false)
+      H._open()
+    else
+      reaper.gmem_attach(GMEM)
+      pump(); cap_cmd_poll(); mac_poll()
+      if capturing then cap_poll() end
+      if tl.on and not capturing then tl_poll() end
+      reaper.defer(main)
+      return
+    end
+  end
   local c = gfx.getchar()
-  if c == -1 then save_win(); return end
+  local close = c == -1
   if c == 27 then
     if ED.on then ED.close(false); c = 0
     elseif show_help then show_help = false
     elseif capturing then cap_stop()
-    else save_win(); return end
+    else close = true end
+  end
+  if close then                                                    -- on ferme la fenetre, pas le script
+    if c ~= -1 then save_win() else pcall(save_win) end
+    if ED.on then ED.close(false) end
+    if capturing then cap_stop() end
+    show_help = false
+    gfx.quit(); H._bg = true
+    reaper.defer(main)
+    return
   end
   reaper.gmem_attach(GMEM)
   pump()
@@ -2873,7 +2904,7 @@ local function main()
   reaper.defer(main)
 end
 
-reaper.atexit(function() cap_stop(); persist() end)
+reaper.atexit(function() cap_stop(); persist(); reaper.SetExtState(CAPEXT, "alive", "0", false) end)
 main()
 
 

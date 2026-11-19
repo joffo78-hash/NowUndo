@@ -2330,7 +2330,21 @@ function main()
   local fb = midi_fb_status
   if fb == "" then fb = "OUT: " .. midi_out_name() .. " | clic ici = port MIDI" end
   gfx.drawstr(fb)
-  if mouse_click and gfx.mouse_y < 26 * s then
+  -- verrou des pages (nowundo_vl/tw_lock) : les actions ne changent plus la page, seuls les rappels manuels
+  local lk_on = reaper.GetExtState(VL_SEC, "tw_lock") == "1"
+  local lk_txt = lk_on and "PAGE VERROUILLEE" or "page : suit les actions"
+  gfx.setfont(1, "Arial", math.floor(8 * s), lk_on and "b" or "")
+  local lk_w = gfx.measurestr(lk_txt) + 8 * s
+  local lk_x, lk_y = w - lk_w - 4 * s, 15 * s
+  if lk_on then gfx.set(0.95, 0.55, 0.1, 1) else gfx.set(0.25, 0.25, 0.3, 1) end
+  gfx.rect(lk_x, lk_y, lk_w, 11 * s, 1)
+  gfx.set(lk_on and 0 or 0.8, lk_on and 0 or 0.8, lk_on and 0 or 0.85, 1)
+  gfx.x, gfx.y = lk_x + 4 * s, lk_y + 1 * s
+  gfx.drawstr(lk_txt)
+  local lk_hov = gfx.mouse_x >= lk_x and gfx.mouse_y >= lk_y and gfx.mouse_y <= lk_y + 11 * s
+  if mouse_click and lk_hov then
+    reaper.SetExtState(VL_SEC, "tw_lock", lk_on and "0" or "1", true)
+  elseif mouse_click and gfx.mouse_y < 26 * s then
     pick_midi_out()
   end
   if page == 7 then
@@ -2589,10 +2603,37 @@ function main()
   reaper.defer(main)
 end
 
+-- Les affectations du MIDI Learn tiennent sur plusieurs lignes : REAPER ne les relit pas entieres au redemarrage
+-- (ExtState persistant = une ligne). Le MIDI Learn recharge son modele (nowundo_midi_learn_model.txt) a son lancement ;
+-- si on demarre sans lui, le Twister le recharge lui-meme (avant : il fallait ouvrir / fermer le MIDI Learn).
+function CU.model_boot()
+  local hb = tonumber(reaper.GetExtState(LEARN_EXT, "hb")) or 0
+  if reaper.time_precise() - hb < 2 then return end              -- MIDI Learn deja lance : c'est lui qui fait foi
+  if reaper.GetExtState(LEARN_EXT, "tpl_open") == "0" then return end
+  local src = debug.getinfo(1, "S").source or ""
+  local dir = src:match("^@(.*[/\\])")
+  if not dir then local _, pth = reaper.get_action_context(); dir = (pth or ""):match("^(.*[/\\])") or "" end
+  local f = io.open(dir .. "nowundo_midi_learn_model.txt", "r")
+  if not f then return end
+  local text = f:read("*a"); f:close()
+  if not text or not text:find("^NOWUNDO_MIDI_MODEL") then return end
+  local ok = { maps = 1, maps_aux = 1, maps_dev = 1, pickup = 1, custom = 1, maps_kbd = 1, midi_out = 2, midi_out_name = 2 }
+  for pg = 1, 8 do ok["aux_out_" .. pg] = 1; ok["aux_out_name_" .. pg] = 1; ok["aux_excl_" .. pg] = 1 end
+  for line in text:gmatch("[^\r\n]+") do
+    local k, v = line:match("^([^\t]+)\t(.*)$")
+    -- le port de sortie choisi dans la fenetre Twister (une seule ligne, bien relue) n'est pas ecrase
+    if k and ok[k] and (ok[k] == 1 or reaper.GetExtState(LEARN_EXT, k) == "") then
+      v = v:gsub("\\(.)", function(c) if c == "n" then return "\n" end return c end)
+      reaper.SetExtState(LEARN_EXT, k, v, true)
+    end
+  end
+end
+
 -- Instance unique : relancer le script ne fait que rouvrir la fenetre
 local function boot()
   reaper.atexit(function() reaper.SetExtState(HB_EXT, "hb", "0", false) end)
   init()
+  pcall(CU.model_boot)
   if reaper.MIDI_GetRecentInputEvent then midi_last_seq = reaper.MIDI_GetRecentInputEvent(0) or 0 end
   midi_reload_maps(true)
   aux_reload(true)
