@@ -234,6 +234,17 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - Signalé aussi : « en Link il ne suit plus la tête de lecture, le LFO doit avoir Pos comme centre » : pas reproduit
   (en Link le centre suit `pos`, le LFO oscille autour du centre) ; questions posées (Freeze ? curseur violet ? Twister ?).
 
+## 19 nov. : clics = PC + raccord de boucle
+
+- **PC de l'utilisateur** (MSI PRO B840, Ryzen 5 8400F, RTX 5060 Ti, Antelope Discrete 4 en USB, buffer 128) : LatencyMon
+  montrait des DPC `Wdf01000.sys` de 2,7 à 4,2 ms (plus long qu'un bloc de 128) quand REAPER tournait. Réglé côté PC :
+  Global C-state Control = Désactivé dans le BIOS (Overclocking > Advanced CPU Configuration > AMD CBS) ; après 20 min,
+  pire DPC 0,85 ms (NVIDIA). Le trafic MIDI des scripts est faible (Launchpad ~27 msg/s, Twister diff ≤ 33 Hz).
+- **Clic au raccord de la boucle** (enregistrement `clic.wav`, Fade = 0) : marche à chaque tour au même endroit. Corrigé :
+  au départ du REC on garde les 5 ms d'entrée qui précèdent la boucle (`seam_capture`, historique `ih_*`), à la fin les
+  5 dernières ms fondent vers elles (`seam_apply` au début de `finish_rec`, avant la rotation de latence). Pas en reverse /
+  ping-pong / vitesse ≠ 1. Test `tools/tseam.py . fichier.jsfx <fade_ms>` ; tlat / tcorec / trec / tdrop / twarp inchangés.
+
 ## 19 nov. : démarrage du Twister, Scenario fermé, verrou des pages, source du FX Router
 
 - **Twister inactif au démarrage tant qu'on n'avait pas ouvert le MIDI Learn** : cause probable = les affectations

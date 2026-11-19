@@ -230,6 +230,7 @@ wp_max = 1024; wp_mk = st_fft + 8192; wp_sr = wp_mk + wp_max + 16; wp_tg = wp_sr
 // V3.26 : limiteur a anticipation du Cloud (2 ms) : a forte densite les grains s'additionnent parfois en phase -> pics
 // au-dessus de 0 dB ecretes en sortie = craquements (voix tenue, densite 95 %)
 cl_lk = wp_dd + wp_max + 16; memset(cl_lk, 0, 512); cl_lD = max(8, min(250, floor(srate * 0.002))); cl_li = 0;
+sm_l = cl_lk + 512 + 16; sm_r = sm_l + 512; sm_ok = 0; sm_N = 0; rp_D = 0;   // V3.26 : raccord de boucle soude a la fin du REC
 cl_lg = 1; cl_lh = 1; cl_lc = 0; cl_lth = 0.8; cl_latt = 1 - exp(-4 / cl_lD); cl_lrel = 1 - exp(-1 / (srate * 0.08));
 wp_busy = 0; wp_phase = 0; wp_live = 0; wp_scan = 0; wp_prev_on = 0; wp_mn = 0; wp_n = 0; wp_orig = 0; wp_wsl = 0; wp_tgt = 0; wp_from = 0;
 wp_sig = -1; wp_sig_seen = -1; wp_sig_t = 0; wp_len = 0; an_after_wp = 0; wp_ls = 0; wp_lw = 1;
@@ -790,7 +791,28 @@ function rp_check() local(idx, M, P, n, ok, thr, ph, e) (
   ) : ( rp_cnt = 0; rp_pend = 0; );
 );
 
+// V3.26 : RACCORD DE BOUCLE. La fin d'un REC ne se raccorde pas a son debut (marche = clic a chaque tour quand
+// Fade = 0). Au depart du REC on garde les 5 ms d'entree qui PRECEDENT le 1er echantillon de la boucle (historique
+// d'entree ih_*) ; a la fin, les 5 dernieres ms de la boucle fondent vers elles : en bouclant, la fin rejoint
+// exactement le son qui menait au debut. base = index ih du 1er echantillon de la boucle.
+function seam_capture(base) local(k, j) (
+  sm_N = min(500, max(16, floor(srate * 0.005)));
+  k = 0; loop(sm_N, j = (base - sm_N + k) & ih_mask; sm_l[k] = ih_l[j]; sm_r[k] = ih_r[j]; k += 1; );
+  sm_ok = 1;
+);
+function seam_apply() local(k, i, w) (
+  (sm_ok && abs(rec_speed - 1) < 0.0001 && !rev_on && !pingpong_on && pos > sm_N * 4) ? (
+    k = 0;
+    loop(sm_N,
+      i = floor(pos) - sm_N + k; w = 0.5 - 0.5 * cos($pi * (k + 0.5) / sm_N);
+      left_buf[i] = left_buf[i] * (1 - w) + sm_l[k] * w; right_buf[i] = right_buf[i] * (1 - w) + sm_r[k] * w;
+      k += 1;
+    );
+  );
+  sm_ok = 0;
+);
 function finish_rec(new_state) local(ms_off, k) (
+  seam_apply();   // V3.26 : avant la rotation de latence (elle est circulaire : le raccord soude reste continu)
   // V3.23 : 1er REC joue en ecoutant une reference (maitre / Host) -> contenu avance de la latence (rotation)
   k = floor(min(lat_samps, pos * 0.25));
   (rec_ref_kind > 0 && k > 0 && pos + k <= buf_len) ? (
@@ -1017,7 +1039,7 @@ function rec_preroll(D) local(k, j, p, s0, s1, q0, q1) (
       tape_write_span(p, p + rec_speed, 1); p += rec_speed; k += 1;
     );
     in0 = s0; in1 = s1; prev_in0 = q0; prev_in1 = q1;
-    pos = p; dirty_len = max(dirty_len, pos);
+    pos = p; dirty_len = max(dirty_len, pos); rp_D = D;
     // la boucle commence D samples plus tot : la phase de reference (synchro) recule d'autant
     rec_ref_kind > 0 && rec_ref_len > 0 ? ( rec_ref_ph -= D; rec_ref_ph -= rec_ref_len * floor(rec_ref_ph / rec_ref_len); );
   );
@@ -2852,7 +2874,8 @@ state_target != last_state_target ? (
     state == 1 || state == 8 ? try_finish_rec(2, 0) : ( 
       analysing = 0; one_shot_playing = 0; switch_history_slot(0); history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; dirty_len = 0; pos = 0; master_pos = 0; clk_cyc = 0; length = 0; loop_start = 0; loop_width = 0; base_loop_length = 0; state = 1; trans_count = 0; state_transition_fade = 0; 
       sy_clear(active_part - 1); rec_ref_capture(); 
-      rec_start_lag > 0 ? rec_preroll(rec_start_lag);   // V3.22 : depart immediat -> la boucle commence a l'appui
+      rp_D = 0; rec_start_lag > 0 ? rec_preroll(rec_start_lag);   // V3.22 : depart immediat -> la boucle commence a l'appui
+      seam_capture(rp_D > 0 ? ih_n - rp_D : ih_n + 1);   // V3.26 : son qui precede la boucle (raccord)
     ); 
   ) : state_target == 2 ? (
     state == 1 || state == 8 ? try_finish_rec(2, 0) : ( length > 0 ? ( (state < 2 || state == 7) ? state_transition_fade = 0; state = 2; ); );   // V3.20 : Dub/Replace -> Play ne coupe plus la sortie
@@ -2888,6 +2911,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     qs_wait = 0; state = 1; state_target = 1; last_state_target = 1; 
     rec_ref_capture(); qs_snap ? rec_ref_snap();
     rec_start_time = time_precise();
+    pos < 1 ? seam_capture(ih_n);   // V3.26 : son qui precede la boucle (raccord)
     old_pos = pos; pos += rec_speed; dirty_len = max(dirty_len, pos); 
     tape_write_span(old_pos, pos, 1); 
   );
