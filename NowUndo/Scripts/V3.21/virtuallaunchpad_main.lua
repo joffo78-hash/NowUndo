@@ -1924,12 +1924,9 @@ end
 -- (champs de VL et non locales : le chunk principal est a la limite Lua de 200 variables locales)
 VL.AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2, reset_pitch = 1, reset_speed = 1,
                rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
--- Verrou des pages (ExtState nowundo_vl/tw_lock = "1") : plus de navigation automatique, seuls les rappels manuels
--- (boutons de page du Launchpad / du Twister, MIDI Learn, web) changent la page
-function VL.tw_locked() return reaper and reaper.GetExtState and reaper.GetExtState("nowundo_vl", "tw_lock") == "1" end
 function VL.auto_twister(action, targets, args)
   local pg = VL.AUTO_TW[action]
-  if not pg or VL.tw_locked() then return end                      -- (le miroir interactif navigue aussi : son etat est synchronise)
+  if not pg then return end                      -- (le miroir interactif navigue aussi : son etat est synchronise)
   if action == "slicer" or action == "cloud" then
     local def = ACTIONS[action]
     if def and toggle_on(def.key, targets) then pg = 1 end            -- on coupe le mode -> Volume
@@ -2024,8 +2021,8 @@ function VL.fx_nav(kind, id, slot)
     S.fx_source = (kind == "input") and id or (NIN + id)
     VL.publish_fx_source()
     VL.set_fx_slot(on_slot)
-    if not VL.tw_locked() then VL.set_fighter_page(6) end
-  elseif not VL.tw_locked() then
+    VL.set_fighter_page(6)
+  else
     VL.set_fighter_page(1)
   end
 end
@@ -2585,12 +2582,6 @@ function VL.ext_cmd_poll()
     local name, ts = line:match("^(%a[%w_]*)\t([%d%.]+)")
     if name == "rec_dub_toggle" and ts and t - tonumber(ts) < 2 then VL.rec_dub_toggle() end
     if name == "drop_group" and ts and t - tonumber(ts) < 2 then VL.drop_group() end   -- MIDI Learn / Scenario / web
-    -- fxsrc_<n> : source choisie a la main dans le FX Router (1..NIN entrees, NIN+1.. loopers) -> pads d'effets D5-D8
-    local fsn = name and tonumber(name:match("^fxsrc_(%d+)$"))
-    if fsn and ts and t - tonumber(ts) < 2 and fsn >= 1 and fsn <= NIN + NLOOP then
-      S.fx_source = fsn
-      VL.publish_fx_source()
-    end
     if name and ts and t - tonumber(ts) < 2 then
       -- fxg_<looper>_<slot>_tog (boutons d'effet du web) : comme le pad d'effet, le groupe du looper suit
       local gi, gs = name:match("^fxg_(%d+)_(%d+)_tog$")

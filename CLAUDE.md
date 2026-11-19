@@ -234,24 +234,6 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - Signalé aussi : « en Link il ne suit plus la tête de lecture, le LFO doit avoir Pos comme centre » : pas reproduit
   (en Link le centre suit `pos`, le LFO oscille autour du centre) ; questions posées (Freeze ? curseur violet ? Twister ?).
 
-## 19 nov. : démarrage du Twister, Scenario fermé, verrou des pages, source du FX Router
-
-- **Twister inactif au démarrage tant qu'on n'avait pas ouvert le MIDI Learn** : cause probable = les affectations
-  (`maps`, `maps_dev`, `custom`…) tiennent sur plusieurs lignes et l'ExtState persistant de REAPER ne les relit pas en
-  entier ; le MIDI Learn recharge `nowundo_midi_learn_model.txt` à son lancement. Maintenant le Twister recharge
-  lui-même ce modèle au démarrage si le MIDI Learn ne tourne pas (`CU.model_boot`, sauf `tpl_open` = 0 ; le port de
-  sortie déjà choisi n'est pas écrasé). **Hypothèse non confirmée dans REAPER.**
-- **Scenario** : fermer la fenêtre (croix / Échap) ne coupe plus le script : rushes, scénarios, file d'actions et
-  capture continuent (`H._bg`) ; relancer le script rouvre la fenêtre (instance unique via `NowUndo_Scn/alive`,
-  `NowUndo_Scn/ui_req`). Fermer la fenêtre arrête une capture en cours.
-- **Verrou des pages du Twister** : ExtState `nowundo_vl/tw_lock` = "1" (persistant). Coupe la navigation auto
-  (`VL.auto_twister`, `VL.fx_nav` → pages 6/1, `auto_twister` du MIDI Learn) ; les rappels manuels marchent toujours.
-  Bascule : action MIDI Learn « Twister : verrou des pages » (`fighter:lock`), bouton en haut à droite de la fenêtre
-  du Twister. Source / slot FX continuent de suivre les pads d'effets.
-- **FX Router → Launchpad** : choisir une source à la main dans le FX Router envoie `fxsrc_<n>` dans
-  `NowUndo_VLcmd/q` ; le Launchpad règle `S.fx_source` → les pads D5-D8 affichent et pilotent les slots de cette
-  source, **entrées comprises** (plus besoin de la page 2).
-
 ## Idées en suspens (proposées, pas faites)
 
 - **GRAND CHANTIER « tout est rush » (validé sur le principe, à faire plus tard, par étapes)** :

@@ -101,8 +101,6 @@ local NFIGHTER = #FIGHTER_NAMES
 for n = 1, NFIGHTER do
   TARGETS[#TARGETS + 1] = U("fighter:" .. n, "Twister page " .. n .. " (" .. SLOT_NAMES[n] .. ")", "Pages", { fighter = n })
 end
--- Verrou : les actions ne changent plus la page du Twister (seuls les rappels manuels la font bouger)
-TARGETS[#TARGETS + 1] = U("fighter:lock", "Twister : verrou des pages (bascule)", "Pages", { twlock = true })
 for i = 1, 8 do
   TARGETS[#TARGETS + 1] = U("status:" .. i, "Status L" .. i .. " (smart)", "Status", { status = i })
 end
@@ -886,11 +884,6 @@ local function fire_ui(ui)
     reaper.SetExtState(VL_SEC, "fighter_page", tostring(n), false)
   end
   if ui.status then reaper.SetExtState(VL_SEC, "midi_ui", "status:" .. ui.status, false) end
-  if ui.twlock then
-    local on = reaper.GetExtState(VL_SEC, "tw_lock") ~= "1"
-    reaper.SetExtState(VL_SEC, "tw_lock", on and "1" or "0", true)
-    notify(on and "Pages du Twister VERROUILLEES" or "Pages du Twister : suivent les actions")
-  end
 end
 
 local function wrap(v, lo, hi)
@@ -1056,7 +1049,7 @@ local AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,
 -- Relache -> Volume (page 1) : couper Slicer / Cloud, pitch revenu a 0, speed revenu a 100 %.
 local function auto_twister(action, looper, args)
   local pg = AUTO_TW[action]
-  if not pg or reaper.GetExtState(VL_SEC, "tw_lock") == "1" then return end   -- pages verrouillees : rappel manuel seulement
+  if not pg then return end
   local s = looper or sel_looper()
   if alive(s) then
     reaper.gmem_attach(GMEM)
