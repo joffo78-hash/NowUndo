@@ -1085,7 +1085,9 @@ function slw_move(wmode) local(o, n, d, sg) (
     sl_gate = sg;
   );
 );
-function hermite(frac, y0, y1, y2, y3) local(c0, c1, c2, c3) ( c0 = y1; c1 = 0.5 * (y2 - y0); c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3; c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2); c0 + frac * (c1 + frac * (c2 + frac * c3)); );
+// V3.26 : frac borne a [0,1] : une tete hors fenetre (Slicer + Beat Repeat) donnait frac = des milliers -> courbe
+// extrapolee enorme (bosse de quelques ms, jusqu'a 10^11). Interpolation inchangee pour 0 <= frac <= 1.
+function hermite(frac, y0, y1, y2, y3) local(c0, c1, c2, c3) ( frac = max(0, min(1, frac)); c0 = y1; c1 = 0.5 * (y2 - y0); c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3; c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2); c0 + frac * (c1 + frac * (c2 + frac * c3)); );
 // V3.20 : demarre un fondu entre l'ancienne tete (voix fantome) et la nouvelle position
 function xf_begin(len, eqp) (
   rd_valid ? (
@@ -3031,11 +3033,13 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
   effective_rev = (rev_on != (pingpong_on && ping_pong_dir < 0));
   ml_ok = state == 6 && mult_len > 256 && loop_start < 1 && (loop_start + loop_width) >= length - 1 && (length + mult_len) <= buf_len; ml_fwd_free = ml_ok && !effective_rev;   
   safe_pos = pos + delay_len * (effective_rev ? -1 : 1); safe_pos >= eff_end ? safe_pos -= eff_len; safe_pos < eff_start ? safe_pos += eff_len;
+  (safe_pos < eff_start || safe_pos >= eff_end) ? safe_pos -= eff_len * floor((safe_pos - eff_start) / eff_len);   // V3.26 : tete a plusieurs fenetres de la (Slicer + BR) : vrai modulo
   p1 = floor(safe_pos); p1 < eff_start ? p1 = eff_start; p1 >= eff_end ? p1 = eff_end - 1; frac = safe_pos - p1;
   p0 = p1 - 1; p0 < eff_start ? p0 += eff_len; p2 = p1 + 1; p2 >= eff_end ? p2 -= eff_len; p3 = p2 + 1; p3 >= eff_end ? p3 -= eff_len;
   s0_safe = hermite(frac, left_buf[p0], left_buf[p1], left_buf[p2], left_buf[p3]); s1_safe = hermite(frac, right_buf[p0], right_buf[p1], right_buf[p2], right_buf[p3]);
   xfade_pos_active ? (
     old_safe_pos = old_pos_ptr + delay_len * (effective_rev ? -1 : 1); old_safe_pos >= eff_end ? old_safe_pos -= eff_len; old_safe_pos < eff_start ? old_safe_pos += eff_len;
+    (old_safe_pos < eff_start || old_safe_pos >= eff_end) ? old_safe_pos -= eff_len * floor((old_safe_pos - eff_start) / eff_len);
     op1 = floor(old_safe_pos); op1 < eff_start ? op1 = eff_start; op1 >= eff_end ? op1 = eff_end - 1; ofrac = old_safe_pos - op1;
     op0 = op1 - 1; op0 < eff_start ? op0 += eff_len; op2 = op1 + 1; op2 >= eff_end ? op2 -= eff_len; op3 = op2 + 1; op3 >= eff_end ? op3 -= eff_len;
     old_s0 = hermite(ofrac, left_buf[op0], left_buf[op1], left_buf[op2], left_buf[op3]); old_s1 = hermite(ofrac, right_buf[op0], right_buf[op1], right_buf[op2], right_buf[op3]);

@@ -245,6 +245,15 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   5 dernières ms fondent vers elles (`seam_apply` au début de `finish_rec`, avant la rotation de latence). Pas en reverse /
   ping-pong / vitesse ≠ 1. Test `tools/tseam.py . fichier.jsfx <fade_ms>` ; tlat / tcorec / trec / tdrop / twarp inchangés.
 
+## 19 nov. : bosses énormes avec Slicer + Beat Repeat (bug ancien, présent en V3.25)
+
+- Enregistrement `clic2.wav` : bosse arrondie de 3 ms, 10× le signal, qui s'arrête net. Reproduit (`tools/tslc.py`,
+  `tools/tslc2_combo.py`) : Slicer + BR ensemble → 45 sauts / 3 s, sortie collée à ±1. Cause : le Slicer envoie la tête
+  hors de la fenêtre du BR (plusieurs fenêtres plus loin) ; le repli de `safe_pos` ne retirait qu'**une** fenêtre, `p1`
+  était bloqué au bord et `frac = safe_pos - p1` valait des milliers → `hermite` extrapolait une cubique (jusqu'à 1e11).
+  Corrigé : `hermite` borne `frac` à [0,1] (protège les 11 lectures) + vrai modulo pour `safe_pos` / `old_safe_pos`.
+  0 saut dans toutes les combinaisons ; tbr / twarp / tseam / tcorec / trec / tdrop inchangés.
+
 ## 19 nov. : démarrage du Twister, Scenario fermé, verrou des pages, source du FX Router
 
 - **Twister inactif au démarrage tant qu'on n'avait pas ouvert le MIDI Learn** : cause probable = les affectations
