@@ -187,15 +187,24 @@ local function draw_row(i, x, y, w, h, now_t, s)
   -- nom et etat, discrets, en haut a gauche
   local nm = "L" .. math.floor(alias + .5) .. "  " .. PART_NAME[ap]
   setfont(math.floor(fs), true); local nw = gfx.measurestr(nm)
+  -- etiquette : nom, etat, puis modes (REVERSE / SLICE / CLOUD) et effets actifs (FX n, en rose)
+  local parts = {{nm, .94, .94, .96}}
   local sn = STATE_NAME[state] or "STOP"
-  if cloud_on then                                                  -- temoin : zone recue du looper (diagnostic)
-    local q0, q1 = read(gb, 178), read(gb, 179)
-    sn = sn .. ((q1 > q0) and string.format("   CLOUD %.0f-%.0f %%", q0, q1) or "   CLOUD (zone non recue)")
+  if is_stop then parts[#parts + 1] = {sn, .62, .64, .68} else parts[#parts + 1] = {sn, st_col[1] + .15, st_col[2] + .15, st_col[3] + .15} end
+  if read(gb, 17) > .5 then parts[#parts + 1] = {"REVERSE", .82, .78, .95} end
+  if slicer_on then parts[#parts + 1] = {"SLICE", .98, .83, .22} end
+  if cloud_on then parts[#parts + 1] = {"CLOUD", .45, .75, 1} end
+  local fxm = math.floor(read(DASH_BASE, 30 + ds_i) + .5)       -- slots FX actifs (publie par le Launchpad)
+  if fxm > 0 then
+    local l = {}
+    for sl = 1, 8 do if (fxm >> (sl - 1)) & 1 == 1 then l[#l + 1] = tostring(sl) end end
+    parts[#parts + 1] = {"FX " .. table.concat(l, " "), .98, .45, .78}
   end
-  local snw = gfx.measurestr(sn)
-  rect(wx + 2, wy + 2, nw + snw + 22, fs + 6, 0, 0, 0, .55, 1)
-  text(wx + 6, wy + 4, nm, fs, .94, .94, .96, true)
-  if is_stop then text(wx + 14 + nw, wy + 4, sn, fs, .62, .64, .68, true) else text(wx + 14 + nw, wy + 4, sn, fs, st_col[1] + .15, st_col[2] + .15, st_col[3] + .15, true) end
+  local tw, gapw = 0, fs * .9
+  for k, pt in ipairs(parts) do pt.w = gfx.measurestr(pt[1]); tw = tw + pt.w + (k > 1 and gapw or 0) end
+  rect(wx + 2, wy + 2, tw + 10, fs + 6, 0, 0, 0, .55, 1)
+  local tx = wx + 6
+  for _, pt in ipairs(parts) do text(tx, wy + 4, pt[1], fs, pt[2], pt[3], pt[4], true); tx = tx + pt.w + gapw end
 
   -- cadre de selection / groupe (meme code que le Launchpad et le panneau)
   local ol, thick = nil, 2

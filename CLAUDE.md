@@ -18,7 +18,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
   | `twisterinoutreset.lua` | Midi Fighter Twister v3.5 (8 pages, page 7 Custom, page 8 Display, sélection d'effet FX Router). |
   | `nowundo_midi_learn.lua` | MIDI Learn v2.8 + raccourcis clavier (js_ReaScriptAPI), cumul clavier/MIDI, double appui. |
   | `NowUndo_8Looper_Panel.lua` | Panneau 8 loopers + import de fichiers audio (glisser-déposer, modes Adapter / Indépendant / Étirer). |
-  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées). Pas de paramètres, sources, boutons ni glisser-déposer. Fenêtre `NowUndo_8Waves`. |
+  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées ; étiquette : état + REVERSE / SLICE / CLOUD + « FX n » en rose). Pas de paramètres, sources, boutons ni glisser-déposer. Fenêtre `NowUndo_8Waves`. |
   | `NowUndo_Scenario.lua` | Séquenceur de scénarios + **Rushes** (ex « macros ») : éditeur, assistant, palette. |
   | `NowUndo_Twister_Web.lua` | Pont gmem ↔ ExtState pour l'onglet Twister In/Out et l'onglet **Loopers** du web. |
   | `NowUndo_Latency.lua` | Réglage global de la compensation de latence (V3.23). |
@@ -40,7 +40,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
 (sert aussi d'enregistrement au drop), **drop de groupe (V3.25)** : `300 + k*10` accusé du looper k (+0 jeton, +1 horloge
 du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 abandon), `381` cible, `393` départ capture,
-`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Nouveau REC (V3.25)** : `398` heure, `399` id.
+`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Tableau de bord (Launchpad)** : `6000+i` groupe, `6010+i` / `6020+i` masques des sources, `6030+i` masque des slots FX actifs du looper i (V3.26). **Nouveau REC (V3.25)** : `398` heure, `399` id.
 
 **Commandes JSFX (+48)** : 1 rec/dub, 2 clear, 3 stop/play, 4 reverse, 5 ping-pong, 6 slicer, 7 cloud, 8 link,
 9 replace, 10 auto-replace, 11 clear full, 12 part, 13 multiply, 14 undo, 15 redo, 16 restart, 17 re-rec, 18 one-shot,
