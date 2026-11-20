@@ -74,12 +74,19 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local st_col = STATE_COL[state] or {.035, .035, .04}
   local is_stop = STATE_COL[state] == nil
   local slicer_on, cloud_on = read(gb, 8) == 1, read(gb, 24) > .5
+  -- selection / groupe : teinte legere de tout le fond (couleur du groupe, sinon jaune si selectionne) + cadre
+  local ds_i = math.floor(alias + .5); if ds_i < 1 or ds_i > 8 then ds_i = i + 1 end
+  local gc = GROUP_RGB[math.floor(read(DASH_BASE, ds_i) + .5)]
+  local is_sel = (SEL_LOOPER == ds_i)
+  local tc = gc or (is_sel and {.98, .83, .22}) or nil
+  local tk = (gc and is_sel) and .24 or .17                       -- groupe + selection : un peu plus soutenu
 
   -- fond de la ligne (teinte du looper) et fond de la forme d'onde (gris clair a l'arret, comme le panneau)
   if is_stop then rect(x, y, w, h, .07 + hc[1] * .07, .07 + hc[2] * .07, .08 + hc[3] * .07, 1, 1)
   else rect(x, y, w, h, .075 + hc[1] * .13, .075 + hc[2] * .13, .085 + hc[3] * .13, 1, 1) end
   local wx, wy, ww, wh = x + 4, y + 3, w - 8, h - 6
   if is_stop then rect(wx, wy, ww, wh, .05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10, 1, 1) else rect(wx, wy, ww, wh, .025, .027, .035, 1, 1) end
+  if tc then rect(x, y, w, h, tc[1], tc[2], tc[3], tk, 1) end      -- voile de la couleur du groupe / de la selection
   rect(x, y, 4, h, is_stop and hc[1] * DIM or hc[1], is_stop and hc[2] * DIM or hc[2], is_stop and hc[3] * DIM or hc[3], 1, 1)   -- liseré couleur du looper
   if slicer_on then rect(wx - 1, wy - 1, ww + 2, wh + 2, .96, .78, .12, 1, 0) end
   if cloud_on then rect(wx - 2, wy - 2, ww + 4, wh + 4, .35, .70, 1, 1, 0) end
@@ -166,9 +173,6 @@ local function draw_row(i, x, y, w, h, now_t, s)
   if is_stop then text(wx + 14 + nw, wy + 4, sn, fs, .62, .64, .68, true) else text(wx + 14 + nw, wy + 4, sn, fs, st_col[1] + .15, st_col[2] + .15, st_col[3] + .15, true) end
 
   -- cadre de selection / groupe (meme code que le Launchpad et le panneau)
-  local ds_i = math.floor(alias + .5); if ds_i < 1 or ds_i > 8 then ds_i = i + 1 end
-  local gc = GROUP_RGB[math.floor(read(DASH_BASE, ds_i) + .5)]
-  local is_sel = (SEL_LOOPER == ds_i)
   local ol, thick = nil, 2
   if gc then
     local lvl = .85
