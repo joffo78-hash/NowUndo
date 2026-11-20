@@ -18,6 +18,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
   | `twisterinoutreset.lua` | Midi Fighter Twister v3.5 (8 pages, page 7 Custom, page 8 Display, sélection d'effet FX Router). |
   | `nowundo_midi_learn.lua` | MIDI Learn v2.8 + raccourcis clavier (js_ReaScriptAPI), cumul clavier/MIDI, double appui. |
   | `NowUndo_8Looper_Panel.lua` | Panneau 8 loopers + import de fichiers audio (glisser-déposer, modes Adapter / Indépendant / Étirer). |
+  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, cadres sélection / groupe). Pas de paramètres, sources, boutons ni glisser-déposer. Fenêtre `NowUndo_8Waves`. |
   | `NowUndo_Scenario.lua` | Séquenceur de scénarios + **Rushes** (ex « macros ») : éditeur, assistant, palette. |
   | `NowUndo_Twister_Web.lua` | Pont gmem ↔ ExtState pour l'onglet Twister In/Out et l'onglet **Loopers** du web. |
   | `NowUndo_Latency.lua` | Réglage global de la compensation de latence (V3.23). |
