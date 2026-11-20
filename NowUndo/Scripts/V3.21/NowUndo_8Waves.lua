@@ -142,6 +142,13 @@ local function draw_row(i, x, y, w, h, now_t, s)
     end
   end
 
+  -- parties exclues de In / Out : grisees (voile par-dessus la forme d'onde)
+  if length > 0 and lw > 0 then
+    local gx0 = wx + math.max(0, math.min(1, ls / length)) * ww
+    local gx1 = wx + math.max(0, math.min(1, math.min(ls + lw, length) / length)) * ww
+    if gx0 - wx >= 1 then rect(wx, wy, gx0 - wx, wh, .13, .13, .15, .72, 1) end
+    if wx + ww - gx1 >= 1 then rect(gx1, wy, wx + ww - gx1, wh, .13, .13, .15, .72, 1) end
+  end
   if length > 0 and lw > 0 then
     -- slices (jaune), comme le panneau : seulement si l'analyse correspond a la fenetre In/Out actuelle
     local sb = SLICE_GMEM_BASE + ((i * 3) + p) * SLICE_GMEM_STRIDE
