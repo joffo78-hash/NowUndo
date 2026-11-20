@@ -88,21 +88,6 @@ local function draw_row(i, x, y, w, h, now_t, s)
   if cloud_on and state == 2 then wc = {.35, .70, 1} end
   if is_stop then wc = {hc[1] * .55, hc[2] * .55, hc[3] * .55} end
 
-  -- zone des grains du Cloud (+178 / +179 en % de la longueur), repliee dans la fenetre In/Out
-  if cloud_on and not is_stop and length > 0 then
-    local z0, z1 = read(gb, 178) * .01 * length, read(gb, 179) * .01 * length
-    local wl = math.max(1, lw)
-    local function band(a, b)
-      local x0 = wx + math.max(0, math.min(1, a / length)) * ww; local x1 = wx + math.max(0, math.min(1, b / length)) * ww
-      if x1 - x0 >= 1 then setc(.35, .70, 1, .22); gfx.rect(x0, wy, x1 - x0, wh, 1); setc(.55, .82, 1, .85); gfx.line(x0, wy, x0, wy + wh); gfx.line(x1, wy, x1, wy + wh) end
-    end
-    if z1 > z0 then
-      if z1 - z0 >= wl then band(ls, ls + wl)
-      else local a = z0 - ls; a = a - math.floor(a / wl) * wl; local b = a + (z1 - z0)
-        if b <= wl then band(ls + a, ls + b) else band(ls + a, ls + wl); band(ls, ls + b - wl) end end
-    end
-  end
-
   -- forme d'onde : 100 points publies par le looper, interpoles sur toute la largeur (colonnes de 2 px)
   local wv = WV_CACHE[i]
   if not wv or wv.g ~= gb or now_t - wv.t > .05 then
@@ -118,6 +103,22 @@ local function draw_row(i, x, y, w, h, now_t, s)
     local v = a[k] * (1 - t) + (a[math.min(99, k + 1)] or 0) * t
     local hh = v * amp
     if hh >= .5 then gfx.rect(wx + px, mid - hh, step - .5, hh * 2, 1) end
+  end
+
+  -- zone des grains du Cloud (+178 / +179 en % de la longueur), repliee dans la fenetre In/Out.
+  -- Peinte PAR-DESSUS la forme d'onde (pleine largeur, elle la recouvrirait sinon) : voile bleu + bords
+  if cloud_on and not is_stop and length > 0 then
+    local z0, z1 = read(gb, 178) * .01 * length, read(gb, 179) * .01 * length
+    local wl = math.max(1, lw)
+    local function band(a, b)
+      local x0 = wx + math.max(0, math.min(1, a / length)) * ww; local x1 = wx + math.max(0, math.min(1, b / length)) * ww
+      if x1 - x0 >= 1 then setc(.35, .70, 1, .28); gfx.rect(x0, wy, x1 - x0, wh, 1); setc(.60, .85, 1, 1); gfx.line(x0, wy, x0, wy + wh); gfx.line(x1, wy, x1, wy + wh) end
+    end
+    if z1 > z0 then
+      if z1 - z0 >= wl then band(ls, ls + wl)
+      else local a = z0 - ls; a = a - math.floor(a / wl) * wl; local b = a + (z1 - z0)
+        if b <= wl then band(ls + a, ls + b) else band(ls + a, ls + wl); band(ls, ls + b - wl) end end
+    end
   end
 
   if length > 0 and lw > 0 then
