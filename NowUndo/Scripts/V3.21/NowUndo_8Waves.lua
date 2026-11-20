@@ -86,7 +86,17 @@ local function draw_row(i, x, y, w, h, now_t, s)
   else rect(x, y, w, h, .075 + hc[1] * .13, .075 + hc[2] * .13, .085 + hc[3] * .13, 1, 1) end
   local wx, wy, ww, wh = x + 4, y + 3, w - 8, h - 6
   if is_stop then rect(wx, wy, ww, wh, .05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10, 1, 1) else rect(wx, wy, ww, wh, .025, .027, .035, 1, 1) end
-  if tc then rect(x, y, w, h, tc[1], tc[2], tc[3], tk, 1) end      -- voile de la couleur du groupe / de la selection
+  if tc then
+    rect(x, y, w, h, tc[1], tc[2], tc[3], tk, 1)                    -- voile de la couleur du groupe / de la selection
+    if length > 0 and lw > 0 then                                    -- ... sauf hors de In / Out : fond normal (non selectionne)
+      local ix = wx + math.max(0, math.min(1, ls / length)) * ww
+      local ox = wx + math.max(0, math.min(1, math.min(ls + lw, length) / length)) * ww
+      local br, bg, bb = .025, .027, .035
+      if is_stop then br, bg, bb = .05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10 end
+      if ix - wx >= 1 then rect(wx, wy, ix - wx, wh, br, bg, bb, 1, 1) end
+      if wx + ww - ox >= 1 then rect(ox, wy, wx + ww - ox, wh, br, bg, bb, 1, 1) end
+    end
+  end
   rect(x, y, 4, h, is_stop and hc[1] * DIM or hc[1], is_stop and hc[2] * DIM or hc[2], is_stop and hc[3] * DIM or hc[3], 1, 1)   -- liseré couleur du looper
   if slicer_on then rect(wx - 1, wy - 1, ww + 2, wh + 2, .96, .78, .12, 1, 0) end
   if cloud_on then rect(wx - 2, wy - 2, ww + 4, wh + 4, .35, .70, 1, 1, 0) end
