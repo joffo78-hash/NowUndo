@@ -194,6 +194,9 @@ local function draw_row(i, x, y, w, h, now_t, s)
   if read(gb, 17) > .5 then parts[#parts + 1] = {"REVERSE", .82, .78, .95} end
   if slicer_on then parts[#parts + 1] = {"SLICE", .98, .83, .22} end
   if cloud_on then parts[#parts + 1] = {"CLOUD", .45, .75, 1} end
+  local spd, pch = read(gb, 3), read(gb, 4)                       -- vitesse / pitch publies par le looper (+3 / +4)
+  if spd > 0 and math.abs(spd - 1) > .005 then parts[#parts + 1] = {string.format("SP x%.2f", spd), .95, .55, .82} end
+  if math.abs(pch) > .05 then parts[#parts + 1] = {string.format("PS %+.1f", pch), .95, .55, .82} end
   local fxm = math.floor(read(DASH_BASE, 30 + ds_i) + .5)       -- slots FX actifs (publie par le Launchpad)
   if fxm > 0 then
     local l = {}
