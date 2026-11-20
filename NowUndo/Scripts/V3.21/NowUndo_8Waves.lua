@@ -119,7 +119,11 @@ local function draw_row(i, x, y, w, h, now_t, s)
     local wl = math.max(1, lw)
     local function band(a, b)
       local x0 = wx + math.max(0, math.min(1, a / length)) * ww; local x1 = wx + math.max(0, math.min(1, b / length)) * ww
-      if x1 - x0 >= 1 then setc(.35, .70, 1, .28); gfx.rect(x0, wy, x1 - x0, wh, 1); setc(.60, .85, 1, 1); gfx.line(x0, wy, x0, wy + wh); gfx.line(x1, wy, x1, wy + wh) end
+      if x1 - x0 >= 1 then
+        setc(.35, .70, 1, .28); gfx.rect(x0, wy, x1 - x0, wh, 1)
+        local bh = math.max(3, math.floor(wh * .06))                 -- barres pleines haut / bas : visibles quoi qu'il arrive
+        setc(.40, .75, 1, 1); gfx.rect(x0, wy, x1 - x0, bh, 1); gfx.rect(x0, wy + wh - bh, x1 - x0, bh, 1)
+        setc(.60, .85, 1, 1); gfx.line(x0, wy, x0, wy + wh); gfx.line(x1, wy, x1, wy + wh) end
     end
     if z1 > z0 then
       if z1 - z0 >= wl then band(ls, ls + wl)
@@ -167,6 +171,10 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local nm = "L" .. math.floor(alias + .5) .. "  " .. PART_NAME[ap]
   setfont(math.floor(fs), true); local nw = gfx.measurestr(nm)
   local sn = STATE_NAME[state] or "STOP"
+  if cloud_on then                                                  -- temoin : zone recue du looper (diagnostic)
+    local q0, q1 = read(gb, 178), read(gb, 179)
+    sn = sn .. ((q1 > q0) and string.format("   CLOUD %.0f-%.0f %%", q0, q1) or "   CLOUD (zone non recue)")
+  end
   local snw = gfx.measurestr(sn)
   rect(wx + 2, wy + 2, nw + snw + 22, fs + 6, 0, 0, 0, .55, 1)
   text(wx + 6, wy + 4, nm, fs, .94, .94, .96, true)
