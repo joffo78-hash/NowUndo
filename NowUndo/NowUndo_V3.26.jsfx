@@ -379,6 +379,7 @@ ar_hold = floor(srate * 0.03); ar_up = 1.0 / (srate * 0.003); ar_dn = 1.0 / (sra
 //  position ; Diffuse = diffusion / espace en sortie du Cloud (allpass + boucle de reinjection amortie).
 // Le moteur a son propre pool de 32 grains (le moteur de time-stretch garde le sien).
 cl_mem = 120000500; cl_max = 32; cl_stride = 16; memset(cl_mem, 0, cl_max * cl_stride);
+cl_zspray = 0; cl_zspan = 0;   // V3.26 : zone jouee par les grains (affichage du 8 Panel)
 cl_timer = 0; cl_N = 2; cl_a = 0; cl_center = 0; cl_g = 1; cl_out_l = 0; cl_out_r = 0; cl_act = 0;
 frz_l = 120100000; frz_max = 3600000; frz_r = frz_l + frz_max; frz_len = 0; frz_i = 0; frz_copying = 0; frz_ready = 0; frz_prev = -1; frz_center = 0;
 // diffuseur : 4 allpass en serie + ligne de reinjection, par canal (tailles a 48 kHz, mises a l'echelle)
@@ -1125,7 +1126,7 @@ function cl_spawn() local(gi, gb, fs, a, sz, off, r, dir, ws, we, wl, spray, st,
     spray = min(wl * 0.5, srate * 0.005 + (cloud_spread + a * a) * wl * 0.5);              // 5 ms mini : anti "bourdonnement" en freeze
     st = cl_center + (rand(2.0) - 1.0) * spray;
     st -= ws; st -= floor(st / wl) * wl; st += ws;
-    span = r * sz;
+    span = r * sz; cl_zspray = spray; cl_zspan = span;
     span < wl * 0.98 ? ( dir > 0 ? ( st + span >= we ? st = we - span - 1; ) : ( st - span < ws ? st = ws + span + 1; ); st = max(ws, min(we - 1, st)); );  // le grain ne traverse pas la jointure
     sh = max(0, min(1, (a - 0.5) * 2));
     pn = (rand(2.0) - 1.0) * stereo_width; pa = (pn + 1.0) * 0.25 * $pi;
@@ -2533,6 +2534,9 @@ loop(3,
     gmem[gmem_base + 22] = out_vol;
     gmem[gmem_base + 23] = length > 0 ? (master_pos / length) * 100.0 : 0;
     gmem[gmem_base + 24] = cloud_on;
+    // V3.26 : zone ou jouent les grains, en % de la longueur (peut deborder de la fenetre : le 8 Panel la replie)
+    gmem[gmem_base + 178] = (cloud_on && length > 0) ? (cloud_center_draw - cl_zspray - (effective_rev ? cl_zspan : 0)) / length * 100 : -1;
+    gmem[gmem_base + 179] = (cloud_on && length > 0) ? (cloud_center_draw + cl_zspray + (effective_rev ? 0 : cl_zspan)) / length * 100 : -1;
     gmem[gmem_base + 25] = loop_quant;
     gmem[gmem_base + 26] = cloud_density;
     gmem[gmem_base + 27] = cloud_chaos;

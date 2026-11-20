@@ -33,7 +33,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `+2` état (0 stop, 1 rec, 2 play, 3 dub, 4 replace, 5 auto-rep, 6 multiply, 7 attente, 8 sync) · `+42` part active ·
 `+44/+45/+46` loop start / width / length · `+47` pos % · `+48` **commande** · `+49` argument ·
 `+50..149` forme d'onde · `+155` BPM estimé · `+160..162` édition In/Out/Width · `+172/+173` VU in/out ·
-`+180` id de paramètre à écrire, `+181` valeur (V3.25 : 2 boîtes de plus `+195/+196` et `+197/+198`) · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
+`+178/+179` zone des grains du Cloud en % (V3.26) · `+180` id de paramètre à écrire, `+181` valeur (V3.25 : 2 boîtes de plus `+195/+196` et `+197/+198`) · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
 `+182..184` sync point / ref / len du maître. Global : `0..24` Master Sync par part (`[o]==1` maître looper, `==2` Host,
 `[o+2]` longueur, `[o+3]` position), `100+i` vivant, `130+i` heartbeat, `950/951` heure de l'appui + adresse cible (V3.22),
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
@@ -265,6 +265,13 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - `clcic_decall__gauche_ref_droite_looper.wav` : clic 117,4 BPM ; le looper joue des coups espacés de 499,3 ms (120 BPM)
   et saute de ~35 ms à chaque mesure de REAPER (2,044 s) = la boucle dure ~2,0 s au lieu de 2,044 → recalage Host à chaque
   mesure (le « saut sur la 1re attaque »). Cause non trouvée : questions posées (tempo REAPER, Master Sync, Speed, Loop Beats).
+
+## 20 nov. : 8 Panel — Cloud en bleu + zone des grains
+
+- JSFX publie la zone jouée par les grains en % de la longueur : `+178` début, `+179` fin (-1 si Cloud off) =
+  `cloud_center_draw` ± dispersion (`cl_zspray`, dernière valeur de `spray`) + longueur d'un grain (`cl_zspan`, du côté
+  de la lecture). Le 8 Panel : forme d'onde **bleue** en lecture Cloud, bande bleue translucide + bords sur la zone,
+  repliée dans la fenêtre In/Out. Non testé dans REAPER.
 
 ## 19 nov. : démarrage du Twister, Scenario fermé, verrou des pages, source du FX Router
 

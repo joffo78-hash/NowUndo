@@ -359,6 +359,26 @@ local function draw_column(inst_idx,x,top,cw,ch,now_t,mouse_click,mouse_down)
   if cloud_on then rect(wx-2,wy-2,ww+4,wh+4,.35,.70,1,1,0) end
   local mid=wy+wh*.5; local step=ww/100
   local wc=(state==2) and {.20,.82,.38} or state_col      -- forme d'onde verte en lecture
+  if cloud_on and state==2 then wc={.35,.70,1} end          -- V3.26 : bleue en Cloud
+  -- V3.26 : zone ou jouent les grains (publiee par le JSFX en % de la longueur, +178 / +179), repliee dans la fenetre In/Out
+  if cloud_on and not is_stop and length>0 then
+    local z0=read(gbase,178)*.01*length; local z1=read(gbase,179)*.01*length
+    local ws=loop_start; local wl=math.max(1,loop_width)
+    if z1>z0 then
+      local function band(a,b)
+        local x0=wx+math.max(0,math.min(1,a/length))*ww; local x1=wx+math.max(0,math.min(1,b/length))*ww
+        if x1-x0>=1 then
+          setc(.35,.70,1,.22); gfx.rect(x0,wy,x1-x0,wh,1)
+          setc(.55,.82,1,.85); gfx.line(x0,wy,x0,wy+wh); gfx.line(x1,wy,x1,wy+wh)
+        end
+      end
+      if z1-z0>=wl then band(ws,ws+wl)
+      else
+        local a=z0-ws; a=a-math.floor(a/wl)*wl; local b=a+(z1-z0)
+        if b<=wl then band(ws+a,ws+b) else band(ws+a,ws+wl); band(ws,ws+b-wl) end
+      end
+    end
+  end
   if is_stop then wc={hc[1]*.55,hc[2]*.55,hc[3]*.55} end   -- STOP : couleur du looper, eteinte
   setc(wc[1],wc[2],wc[3],.95)
   local wv=WV_CACHE[inst_idx]
