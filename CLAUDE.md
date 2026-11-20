@@ -254,6 +254,18 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   Corrigé : `hermite` borne `frac` à [0,1] (protège les 11 lectures) + vrai modulo pour `safe_pos` / `old_safe_pos`.
   0 saut dans toutes les combinaisons ; tbr / twarp / tseam / tcorec / trec / tdrop inchangés.
 
+## 20 nov. : boucle en retard de la latence + saut à chaque mesure
+
+- `clcic_decall_.wav` (clic à droite, boucle à gauche) : boucle **en retard de ~16 ms** (latence aller-retour non
+  compensée). Cause : la rotation de latence V3.23 ne se faisait que si le 1er REC suivait une référence
+  (`rec_ref_kind > 0`) ; un 1er REC **libre** (REAPER qui joue le clic) restait en retard. Corrigé : rotation de
+  `lat_samps` pour tout 1er REC (`finish_rec`). Test `tools/thost.py . f.jsfx <lat> [host|libre]` → 0,0 ms dans les deux cas.
+  `tools/tlat2.py` corrigé : le musicien de l'overdub joue sur les coups **réels** de la boucle (avant : positions codées
+  en dur = non rotées) ; ancienne et nouvelle version donnent le même écart.
+- `clcic_decall__gauche_ref_droite_looper.wav` : clic 117,4 BPM ; le looper joue des coups espacés de 499,3 ms (120 BPM)
+  et saute de ~35 ms à chaque mesure de REAPER (2,044 s) = la boucle dure ~2,0 s au lieu de 2,044 → recalage Host à chaque
+  mesure (le « saut sur la 1re attaque »). Cause non trouvée : questions posées (tempo REAPER, Master Sync, Speed, Loop Beats).
+
 ## 19 nov. : démarrage du Twister, Scenario fermé, verrou des pages, source du FX Router
 
 - **Twister inactif au démarrage tant qu'on n'avait pas ouvert le MIDI Learn** : cause probable = les affectations

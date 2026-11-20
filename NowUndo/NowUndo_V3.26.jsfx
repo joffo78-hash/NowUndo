@@ -814,8 +814,10 @@ function seam_apply() local(k, i, w) (
 function finish_rec(new_state) local(ms_off, k) (
   seam_apply();   // V3.26 : avant la rotation de latence (elle est circulaire : le raccord soude reste continu)
   // V3.23 : 1er REC joue en ecoutant une reference (maitre / Host) -> contenu avance de la latence (rotation)
+  // V3.26 : aussi pour un 1er REC LIBRE : ce qu'on joue arrive en retard de l'aller-retour, avec ou sans reference
+  // (clic de REAPER, autre looper, ou le geste lui-meme) -> sans ca la boucle sortait en retard de toute la latence.
   k = floor(min(lat_samps, pos * 0.25));
-  (rec_ref_kind > 0 && k > 0 && pos + k <= buf_len) ? (
+  (k > 0 && pos + k <= buf_len) ? (
     memcpy(left_buf + pos, left_buf, k); memcpy(right_buf + pos, right_buf, k);
     memcpy(left_buf, left_buf + k, pos); memcpy(right_buf, right_buf + k, pos);
   );

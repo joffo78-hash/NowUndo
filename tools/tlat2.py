@@ -3,7 +3,7 @@ sys.path.insert(0, sys.argv[1])
 import bench
 from bench import *
 LAT = 400
-ST = {'F': None, 'Len': None, 'mode': 'rec'}
+ST = {'F': None, 'Len': None, 'mode': 'rec', 'P0': []}
 CL = [int(SR*0.3), int(SR*0.8), int(SR*1.3)]   # instants des clics pendant le 1er REC (rec demarre a 1024)
 def burst(d, f=900): return 0.6 * math.exp(-d/60.0) * math.sin(2*math.pi*f*d/SR) if 0 <= d < 400 else 0.0
 def sig(n):
@@ -11,7 +11,7 @@ def sig(n):
         return sum(burst(n - c) for c in CL)
     if ST['mode'] == 'dub':
         ph = (n - ST['F']) % ST['Len']
-        return sum(burst(ph - (c - 1024 + LAT), 600) for c in CL)   # joue en ecoutant : arrive LAT apres la tete
+        return sum(burst(ph - (c + LAT), 600) for c in ST['P0'])   # joue sur les coups qu'il ENTEND (ceux de la boucle) : arrive LAT apres la tete
     return 0.0
 def peaks(buf):
     out = []; i = 0
@@ -28,7 +28,7 @@ for tag, path in (('322','v322.jsfx'), ('323','v323.jsfx')):
     r.run(1024); r.set(rec_cmd=1); r.run(SR*2 - 1024); r.set(rec_cmd=1); r.run(1)
     ST['F'] = r.n; ST['Len'] = int(m.v_length)
     L = ST['Len']; lb = int(m.v_left_buf)
-    b0 = list(m.M[lb:lb+L]); p0 = peaks(b0)
+    b0 = list(m.M[lb:lb+L]); p0 = peaks(b0); ST['P0'] = [p - 60 for p in p0]
     ST['mode'] = 'dub'
     r.set(state_target=3); r.run(L + 2000); r.set(state_target=2); r.run(10)
     ST['mode'] = 'off'
