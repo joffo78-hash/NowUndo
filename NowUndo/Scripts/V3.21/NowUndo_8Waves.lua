@@ -185,7 +185,14 @@ local function draw_row(i, x, y, w, h, now_t, s)
   setc(.95, .55, .82, 1); gfx.line(px, wy, px, wy + wh); gfx.line(px + 1, wy, px + 1, wy + wh)
 
   -- nom et etat, discrets, en haut a gauche
-  local nm = "L" .. math.floor(alias + .5) .. "  " .. PART_NAME[ap]
+  -- nom (+ partie seulement si ce n'est pas MAIN) et sources qui entrent dans le looper (I = inputs, L = loopers)
+  local nm = "L" .. math.floor(alias + .5) .. ((ap ~= 1) and ("  " .. PART_NAME[ap]) or "")
+  do
+    local im, lm, src = math.floor(read(DASH_BASE, 10 + ds_i) + .5), math.floor(read(DASH_BASE, 20 + ds_i) + .5), {}
+    for k = 0, 7 do if (im >> k) & 1 == 1 then src[#src + 1] = "I" .. (k + 1) end end
+    for k = 0, 7 do if (lm >> k) & 1 == 1 then src[#src + 1] = "L" .. (k + 1) end end
+    if #src > 0 then nm = nm .. "  (" .. table.concat(src, " ") .. ")" end
+  end
   setfont(math.floor(fs), true); local nw = gfx.measurestr(nm)
   -- etiquette : nom, etat, puis modes (REVERSE / SLICE / CLOUD) et effets actifs (FX n, en rose)
   local parts = {{nm, .94, .94, .96}}
@@ -208,6 +215,20 @@ local function draw_row(i, x, y, w, h, now_t, s)
   rect(wx + 2, wy + 2, tw + 10, fs + 6, 0, 0, 0, .55, 1)
   local tx = wx + 6
   for _, pt in ipairs(parts) do text(tx, wy + 4, pt[1], fs, pt[2], pt[3], pt[4], true); tx = tx + pt.w + gapw end
+
+  -- tout a droite : M (maitre), S (esclave) ou F (libre), meme logique que le 8 Panel
+  do
+    local sy_master = read(gb, 187) > .5
+    local tag, cr, cg, cb = "F", .60, .62, .68
+    if sy_id > 0 and sy_pos >= 0 then
+      if sy_master then tag, cr, cg, cb = "M", 1, .82, .30
+      else tag, cr, cg, cb = "S", .48, .68, .95; if not sy_live then cr, cg, cb = .90, .62, .25 end end
+    end
+    local bf = math.max(10, math.min(22, h * .26))
+    setfont(math.floor(bf), true); local tgw = gfx.measurestr(tag)
+    rect(wx + ww - tgw - 12, wy + 2, tgw + 10, bf + 6, 0, 0, 0, .55, 1)
+    text(wx + ww - tgw - 7, wy + 4, tag, bf, cr, cg, cb, true)
+  end
 
   -- cadre de selection / groupe (meme code que le Launchpad et le panneau)
   local ol, thick = nil, 2
