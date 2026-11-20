@@ -197,7 +197,16 @@ local function draw_row(i, x, y, w, h, now_t, s)
     if is_sel then lvl = (math.floor(now_t * 4) % 2 == 0) and 1.0 or .45; thick = 3 end
     ol = {gc[1] * lvl, gc[2] * lvl, gc[3] * lvl}
   elseif is_sel then ol = {.98, .83, .22}; thick = 3 end
-  if ol then for k = 0, thick - 1 do rect(x + k, y + k, w - 2 * k, h - 2 * k, ol[1], ol[2], ol[3], 1, 0) end end
+  if ol then
+    -- le cadre entoure la zone In / Out (toute la ligne si la boucle est vide)
+    local fx0, fx1 = x, x + w
+    if length > 0 and lw > 0 then
+      fx0 = wx + math.max(0, math.min(1, ls / length)) * ww - thick
+      fx1 = wx + math.max(0, math.min(1, math.min(ls + lw, length) / length)) * ww + thick
+      fx0 = math.max(x, fx0); fx1 = math.min(x + w, fx1)
+    end
+    for k = 0, thick - 1 do rect(fx0 + k, y + k, fx1 - fx0 - 2 * k, h - 2 * k, ol[1], ol[2], ol[3], 1, 0) end
+  end
 end
 
 local function main()
