@@ -3016,6 +3016,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
   );
   
   (rev_on != prev_rev_on || pingpong_on != prev_pingpong_on) ? (
+    pingpong_on != prev_pingpong_on ? ping_pong_dir = 1;   // V3.27 : ping-pong on/off = repart vers l'avant (sens perime = saut au miroir)
     prev_pingpong_on = pingpong_on;
     sync_hard_resync = 1;
   );
@@ -3066,7 +3067,10 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       sync_exp = sync_expected(); 
       sync_dev = pos - sync_exp; 
       sync_dev -= loop_width * floor(sync_dev / loop_width + 0.5); 
-      abs(sync_dev) > 1 ? ( abs(sync_dev) > 64 ? xf_begin(xf_len_rs, 1) : pd_arm = 1; trigger_pos_jump(sync_exp); );
+      // V3.27 : en ping-pong, recalage du cote ou est la tete (au rebond, l'equivalent "modulo" est a l'autre bout de la
+      // fenetre : y sauter refaisait demi-tour -> la boucle restait en reverse pour toujours)
+      abs(sync_dev) > 1 ? ( abs(sync_dev) > 64 ? xf_begin(xf_len_rs, 1) : pd_arm = 1;
+        trigger_pos_jump(pingpong_on ? max(eff_start, min(eff_end - 0.0001, pos - sync_dev)) : sync_exp); );
     ); 
   );
   

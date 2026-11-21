@@ -308,6 +308,14 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
 
+## 21 nov. : ping-pong qui restait en reverse (JSFX V3.27, corrigé en place)
+
+- Symptôme : PP activé (rush ou Launchpad) = parfois juste du reverse, un coup sur deux selon le moment de l'appui.
+  Cause : au rebond du début, le recalage sur l'horloge (`is_normal_playback && wrapped`, écart ~1 sample avant que le
+  maître boucle) sautait à l'équivalent « modulo » = l'autre bout de la fenêtre → nouveau rebond → reverse pour toujours.
+  Corrigé : en ping-pong le recalage reste du côté de la tête (`pos - sync_dev` borné) ; PP on/off remet `ping_pong_dir = 1`.
+  Test `tools/tpp.py` (4 activations : toutes rebondissent) ; thost / tseam inchangés.
+
 ## 21 nov. (suite) : liste des rushes en pages, bouton POSER, palette après une cible
 
 - Liste de l'onglet Rushes = **pages de 64** (2 colonnes × 32, `H._lp`, boutons `< LISTE n/N >` en haut à droite) ; un rush
