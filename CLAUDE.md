@@ -321,6 +321,8 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   vérifie 1,5 s après (`H._dropchk`) et dit « posé en c1.3 » ou « le Launchpad n'a pas pris le rush ».
 - **Rush toggle `a` / `d` = interrupteur A / D** : `mac_check` réécrit un toggle `a` (ou `l1 a`, `all a`, 1re action) en `d` ;
   pad allumé = **D**, miroir de l'état réel (`H._mirror`). Test `tools/trush_ad.lua`.
+- Palette de l'éditeur : rangée **« Cible »** (l1..l8, g1..g4, all). Cible cliquée après une cible seule = combinée
+  (`l1` + `l3` → `l1/l3`, `all` remplace) ; puis le mot d'action est collé par une espace (`l1/l3 rec`).
 - `ED.add` : après une cible seule (`all`, `l3`, `g2`, `in1`) ou `… to`, le mot de la palette est collé par une espace (`all a`), plus par une virgule.
 
 ## 21 nov. : page 4 = pages de rushes, `to g`, `go`

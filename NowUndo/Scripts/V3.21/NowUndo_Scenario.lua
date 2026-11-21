@@ -1807,6 +1807,7 @@ ED.ONOFF = { rec = 1, replace = 1, autorep = 1, multiply = 1, rev = 1, pp = 1, s
 -- { libelle de categorie, { mot, ... } } ; un mot suivi de "..." ouvre un menu de valeurs
 ED.CATS = {
   { "Derniere action", { "off", "*" } },          -- off : ajoute / retire "off" ; * : armee au point de synchro
+  { "Cible",          { "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "g1", "g2", "g3", "g4", "all" } },   -- rien = selection
   { "Enregistrement", { "rec", "replace", "autorep", "multiply", "rerec", "auto" } },
   { "Lecture",        { "play", "stop", "restart", "rev", "pp", "oneshot", "fullloop", "part..." } },
   { "Modes",          { "slicer", "cloud", "br", "brf...", "link", "mute", "a", "d" } },
@@ -1900,6 +1901,15 @@ function ED.mod_last(kind)
 end
 function ED.pick(word, as_off)
   if word == "off" or word == "*" then ED.mod_last(word) return end
+  if is_tgt(word) and not word:find("%.") then                     -- cible : apres une cible seule, on l'ajoute (l1/l3) ; all remplace
+    local a, b = ED.text:sub(1, ED.cur):gsub("[%s,]+$", ""), ED.text:sub(ED.cur + 1)
+    local head, seg = a:match("^(.*,%s*)(.-)$"); if not seg then head, seg = "", a end
+    if seg ~= "" and not seg:find("%s") and is_tgt(seg:lower()) then
+      seg = (word == "all" or seg:lower() == "all") and word or (seg .. "/" .. word)
+      ED.text = head .. seg .. b; ED.cur = #head + #seg
+      return
+    end
+  end
   local key = word:gsub("%.%.%.$", "")
   local tok = key
   if word:sub(-3) == "..." then
