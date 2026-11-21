@@ -1,0 +1,4 @@
+# fichiers generes par les bancs de test (tools/bench.py)
+tools/__pycache__/
+tools/_gen_*.py
+tools/*.jsfx
