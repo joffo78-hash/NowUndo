@@ -1629,7 +1629,7 @@ end
 local function mac_serialize()
   local t = { "NOWUNDO_MACROS 1" }
   for _, m in ipairs(macros) do
-    t[#t + 1] = table.concat({ "M", m.id, m.color, m.name, m.text, m.toggle and 1 or 0, m.all and 1 or 0, m.gate and 1 or 0, m.midi or "" }, "\t")
+    t[#t + 1] = table.concat({ "M", m.id, m.color, m.name, m.text, m.toggle and 1 or 0, m.all and 1 or 0, m.gate and 1 or 0, m.midi or "", m.rom and "R" or "" }, "\t")
   end
   local cells = {}
   for c in pairs(layout) do cells[#cells + 1] = c end
@@ -1647,7 +1647,7 @@ local function mac_deserialize(txt)
       local id = math.floor(tonumber(f[2]))
       if not seen[id] then
         seen[id] = true
-        list[#list + 1] = { id = id, color = math.floor(tonumber(f[3]) or 0xAAAAAA), name = f[4] or "", text = f[5] or "", toggle = (f[6] == "1"), all = (f[7] == "1"), gate = (f[8] == "1"), midi = f[9] or "" }
+        list[#list + 1] = { id = id, color = math.floor(tonumber(f[3]) or 0xAAAAAA), name = f[4] or "", text = f[5] or "", toggle = (f[6] == "1"), all = (f[7] == "1"), gate = (f[8] == "1"), midi = f[9] or "", rom = (f[10] == "R") }
       end
     elseif f[1] == "L" and tonumber(f[2]) and tonumber(f[3]) then
       lay[math.floor(tonumber(f[2]))] = math.floor(tonumber(f[3]))
@@ -1674,43 +1674,86 @@ local function mac_apply(list, lay, pages)
     if m.id >= mac_next_id then mac_next_id = m.id + 1 end
     mac_check(m)
   end
+  if H._rom_fix then H._rom_fix() end
   msel, mcur, manchor = {}, 0, 0
 end
 -- V3.27 : rushes de la page RC-505 (une colonne par looper, de BAS en HAUT : Rec, Clear, Replace, Restart, Rev,
 -- Ping-pong, Slicer, Cloud), poses sur la sous-page a (cases 1..64)
-H._rc505 = function()
+-- V3.27 : RUSHES D'USINE (ROM, lecture seule) : page RC-505 (une colonne par looper, de BAS en HAUT : Rec, Clear, Replace,
+-- Restart, Rev, Ping-pong, Slicer, Cloud) et page Effets (rangees 1-4 = FX 1-4 des entrees IN1..IN8, 5-8 = FX 1-4 des
+-- loopers). Ni effacables, ni modifiables (Ctrl+D = copie perso modifiable) ; toujours rangees APRES les rushes perso.
+H._fdefs = function()
+  if H._fd then return H._fd end
+  local d = {}
   local ROWS = { { "cloud", "CLOUD", 0x3A7BFF, true }, { "slicer", "SLICER", 0xFFD320, true }, { "pp", "PING PONG", 0xE040FF, true },
                  { "rev", "REVERSE", 0xFF66AA, true }, { "restart", "RESTART", 0x40D0D0, false }, { "replace", "REPLACE", 0xFF9040, true },
                  { "clear", "CLEAR", 0xDDDDDD, false }, { "rec", "REC", 0xFF4040, true } }
-  for r, d in ipairs(ROWS) do
+  for r, x in ipairs(ROWS) do
+    for col = 1, 8 do d[#d + 1] = { pg = "rc", cell = (r - 1) * 8 + col, name = "L" .. col .. " " .. x[2], color = x[3], text = "l" .. col .. " " .. x[1], toggle = x[4] } end
+  end
+  for r = 1, 8 do
     for col = 1, 8 do
-      local id = mac_next_id; mac_next_id = id + 1
-      local m = { id = id, name = "L" .. col .. " " .. d[2], color = d[3], text = "l" .. col .. " " .. d[1], toggle = d[4] }
-      mac_check(m)
-      macros[#macros + 1] = m
-      layout[(r - 1) * 8 + col] = id
+      local inp, sl = r <= 4, (r - 1) % 4 + 1
+      d[#d + 1] = { pg = "fx", cell = (r - 1) * 8 + col, name = (inp and "IN" or "L") .. col .. " FX" .. sl, color = inp and 0x99FF66 or 0xFFFF99,
+                    text = (inp and "in" or "l") .. col .. " fx " .. sl, toggle = true }
     end
   end
+  for k, x in ipairs(d) do x.k = k end
+  H._fd = d
+  return d
 end
--- V3.27 : ancienne couche Effects en rushes (ajoutee une fois, en derniere page) : rangees 1-4 = FX 1-4 des entrees
--- IN1..IN8 (colonnes), rangees 5-8 = FX 1-4 des loopers L1..L8 ; toggle, pad allume = effet actif
+H._fnew = function(x)
+  local id = mac_next_id; mac_next_id = id + 1
+  local m = { id = id, name = x.name, color = x.color, text = x.text, toggle = x.toggle, rom = true }
+  mac_check(m)
+  macros[#macros + 1] = m
+  return m
+end
+H._rc505 = function()
+  for _, x in ipairs(H._fdefs()) do if x.pg == "rc" then layout[x.cell] = H._fnew(x).id end end
+end
+-- ancienne couche Effects en rushes (ajoutee une fois, en derniere page)
 H._fxpage = function()
   if #H._pages >= H._PMAX then return end
   H._pages[#H._pages + 1] = "Effets"
   local p0 = (#H._pages - 1) * 64
-  for r = 1, 8 do
-    for col = 1, 8 do
-      local inp, sl = r <= 4, (r - 1) % 4 + 1
-      local id = mac_next_id; mac_next_id = id + 1
-      local m = { id = id, name = (inp and "IN" or "L") .. col .. " FX" .. sl, color = inp and 0x99FF66 or 0xFFFF99,
-                  text = (inp and "in" or "l") .. col .. " fx " .. sl, toggle = true }
-      mac_check(m)
-      macros[#macros + 1] = m
-      layout[p0 + (r - 1) * 8 + col] = id
-    end
+  for _, x in ipairs(H._fdefs()) do if x.pg == "fx" then layout[p0 + x.cell] = H._fnew(x).id end end
+end
+-- au chargement : les rushes d'usine deja crees (avant la ROM) sont reconnus a leur nom + texte d'origine ; ceux qui
+-- manquent sont recrees (non poses) ; puis tri
+H._rom_fix = function()
+  local key, have = {}, {}
+  for _, x in ipairs(H._fdefs()) do key[x.name .. "\t" .. x.text] = x end
+  for _, m in ipairs(macros) do
+    local x = key[(m.name or "") .. "\t" .. (m.text or "")]
+    if x and not have[x.k] then m.rom = true; m.fk = x.k; have[x.k] = true else m.rom = false end
   end
+  if reaper.GetExtState(MAC_EXT, "fx_page") == "1" then         -- migration deja faite : l'usine est complete
+    for _, x in ipairs(H._fdefs()) do if not have[x.k] and #macros < MAC_MAX then H._fnew(x).fk = x.k end end
+  end
+  H._msort()
+end
+-- ordre de la liste : rushes perso (ordre choisi avec haut / bas), puis l'usine dans son ordre fixe
+H._msort = function()
+  local fk = {}
+  for _, x in ipairs(H._fdefs()) do fk[x.name .. "\t" .. x.text] = x.k end
+  local perso, rom = {}, {}
+  for _, m in ipairs(macros) do
+    if m.rom then m.fk = m.fk or fk[(m.name or "") .. "\t" .. (m.text or "")] or 999; rom[#rom + 1] = m else perso[#perso + 1] = m end
+  end
+  table.sort(rom, function(a, b) if a.fk ~= b.fk then return a.fk < b.fk end return a.id < b.id end)
+  for _, m in ipairs(rom) do perso[#perso + 1] = m end
+  macros = perso
+end
+-- lecture seule : refuse si un rush d'usine est dans la liste ms (ou m seul)
+H._ro = function(ms)
+  for _, m in ipairs(ms) do
+    if m.rom then msg = "Rush d'usine (" .. mac_label(m) .. ") : lecture seule. Ctrl+D = copie perso modifiable."; msg_err = true; return true end
+  end
+  return false
 end
 local function mac_save()
+  H._msort()                                      -- perso d'abord, usine ensuite (ordre fixe)
   local txt = mac_serialize()
   reaper.SetExtState(MAC_EXT, "set", txt, true)
   mac_my_rev = string.format("%.4f", reaper.time_precise())
@@ -1783,6 +1826,7 @@ local ED = { on = false }
 local function mac_edit()
   local m = mac_find(mcur)
   if not m then msg = "Selectionne un rush."; msg_err = true; return end
+  if H._ro({ m }) then return end
   ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, m.id, false, m.text or "", false, false
   ED.cur, ED.sug, ED.si, ED.view = #ED.text, {}, 1, 0
   ED.refocus()
@@ -2062,6 +2106,7 @@ end
 local function mac_rename()
   local m = mac_find(mcur)
   if not m then msg = "Selectionne un rush."; msg_err = true; return end
+  if H._ro({ m }) then return end
   local ok, ret = reaper.GetUserInputs("Nommer le rush", 1, "Nom (vide = afficher l'action) :,extrawidth=240", (m.name ~= "") and m.name or ED.title(m.text))
   if ok then m.name = mac_clean(ret); mac_save(); msg = (m.name == "") and "Nom efface : le pad affichera l'action." or "Rush renomme."; msg_err = false end
 end
@@ -2093,6 +2138,7 @@ end
 local function mac_recolor()
   local ms = sel_ids()
   if #ms == 0 then msg = "Selectionne un rush."; msg_err = true; return end
+  if H._ro(ms) then return end
   local ok, res, col = pcall(reaper.GR_SelectColor)
   if ok and res ~= 0 and col then
     local r, g, b = reaper.ColorFromNative(col)
@@ -2104,6 +2150,7 @@ end
 local function mac_delete()
   local ms = sel_ids()
   if #ms == 0 then return end
+  if H._ro(ms) then return end
   if #ms > 1 and reaper.MB("Supprimer " .. #ms .. " rushes ?", "NowUndo - rushes", 4) ~= 6 then return end
   local rm = {}
   for _, m in ipairs(ms) do rm[m.id] = true end
@@ -2127,6 +2174,7 @@ function ED.mcopy(quiet)
   return true
 end
 function ED.mcut()
+  if H._ro(sel_ids()) then return end
   if not ED.mcopy(true) then return end
   local rm = {}
   for _, m in ipairs(sel_ids()) do rm[m.id] = true end
@@ -2183,6 +2231,7 @@ function ED.mdup()
   ED.mpaste(src)
 end
 local function mac_move(d)                           -- decale la selection d'un cran (les blocs se deplacent ensemble)
+  if H._ro(sel_ids()) then return end
   local n = #macros
   if d < 0 then
     for i = 2, n do
@@ -2196,6 +2245,7 @@ local function mac_move(d)                           -- decale la selection d'un
   mwant = true; mac_save()
 end
 local function mac_move_sel(set, to_idx)            -- glisser-deposer : la selection va a la place de la macro visee
+  for id in pairs(set) do local m = mac_find(id); if m and H._ro({ m }) then return end end
   local target = macros[to_idx]
   if not target or set[target.id] then return end
   local moving, rest, first = {}, {}, nil
@@ -2670,6 +2720,7 @@ local function mac_key(c)
   elseif c == 69 then                                                      -- Maj+E : boite REAPER a l'ancienne
     local m = mac_find(mcur)
     if not m then msg = "Selectionne un rush."; msg_err = true
+    elseif H._ro({ m }) then
     else
       local t = ED.classic(m.text)
       if t then
@@ -2680,6 +2731,7 @@ local function mac_key(c)
   elseif c == 110 or c == 78 then mac_rename()
   elseif c == 103 or c == 71 then                                          -- G : mode GATE de la selection
     local ms = sel_ids()
+    if H._ro(ms) then return end
     if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true
     else
       local nv = not ms[1].gate
@@ -2688,6 +2740,7 @@ local function mac_key(c)
     end
   elseif c == 97 or c == 65 then                                           -- A : mode ALL de la selection
     local ms = sel_ids()
+    if H._ro(ms) then return end
     if #ms > 0 then
       local nv = not ms[1].all
       for _, o in ipairs(ms) do o.all = nv end
@@ -2695,6 +2748,7 @@ local function mac_key(c)
     end
   elseif c == 116 or c == 84 then                                          -- T : mode toggle de la selection
     local ms = sel_ids()
+    if H._ro(ms) then return end
     if #ms > 0 then
       local nv = not ms[1].toggle
       for _, o in ipairs(ms) do o.toggle = nv; mac_check(o) end
@@ -2825,6 +2879,7 @@ local function mac_draw(W, Hh, down)
       if m then
         local y = LY + (r - 1) * RH
         if msel[m.id] then gfx.set(0.40, 0.28, 0.08, 1); gfx.rect(x0, y, cw, RH)
+        elseif m.rom then gfx.set(0.09, 0.08, 0.12, 1); gfx.rect(x0, y, cw, RH)     -- usine : fond gris-bleu
         elseif r % 2 == 0 then gfx.set(0.13, 0.05, 0.06, 1); gfx.rect(x0, y, cw, RH) end
         if m.id == mcur then gfx.set(0.9, 0.8, 0.2, 0.9); gfx.rect(x0, y, cw, RH, 0) end
         if H._pend and H._pend[m.id] and math.floor(reaper.time_precise() * 4) % 2 == 0 then   -- en attente du point de synchro : clignote
@@ -2884,13 +2939,19 @@ local function mac_draw(W, Hh, down)
         -- suppression de cette macro
         local dx = x0 + cw - 20
         local dh = mx >= dx and mx < dx + 16 and my >= y and my < y + RH
-        gfx.setfont(2, "Arial", 14, 'b')
-        if dh then gfx.set(1, 0.4, 0.4, 1) else gfx.set(1, 1, 1, 0.35) end
-        gfx.x, gfx.y = dx + 3, y + 4; gfx.drawstr("×")
+        if m.rom then                                                   -- usine : pas de croix, etiquette ROM
+          gfx.setfont(2, "Arial", 10, 'b'); gfx.set(0.6, 0.7, 1, 0.7); gfx.x, gfx.y = dx - 6, y + 7; gfx.drawstr("ROM")
+        else
+          gfx.setfont(2, "Arial", 14, 'b')
+          if dh then gfx.set(1, 0.4, 0.4, 1) else gfx.set(1, 1, 1, 0.35) end
+          gfx.x, gfx.y = dx + 3, y + 4; gfx.drawstr("×")
+        end
 
         if click and mx >= x0 and mx < x0 + cw and my >= y and my < y + RH then
           local t = reaper.time_precise()
-          if mx >= x0 + 26 and mx < x0 + 40 then                         -- pastille : couleur suivante de la palette
+          if mx >= x0 + 26 and mx < x0 + 102 and H._ro(msel[m.id] and sel_ids() or { m }) then
+            -- rush d'usine : couleur / T / G / A verrouilles (message affiche par H._ro)
+          elseif mx >= x0 + 26 and mx < x0 + 40 then                     -- pastille : couleur suivante de la palette
             local k = 0
             for q, col in ipairs(PALETTE) do if col == m.color then k = q end end
             m.color = PALETTE[k % #PALETTE + 1]; mac_save()
@@ -2914,7 +2975,7 @@ local function mac_draw(W, Hh, down)
             mcur = m.id
             run_macro(m, sel_targets())
           elseif mx >= dx and mx < dx + 16 then                          -- × : supprimer cette macro
-            if reaper.MB("Supprimer le rush '" .. mac_label(m) .. "' ?", "NowUndo - rushes", 4) == 6 then
+            if not H._ro({ m }) and reaper.MB("Supprimer le rush '" .. mac_label(m) .. "' ?", "NowUndo - rushes", 4) == 6 then
               msel = { [m.id] = true }; mcur = m.id; mac_delete()
             end
           elseif mac_last_click_id == m.id and t - mac_last_click_t < 0.35 then

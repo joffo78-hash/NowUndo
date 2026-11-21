@@ -308,6 +308,15 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
 
+## 21 nov. : rushes d'usine = ROM + ordre de la liste
+
+- Usine (64 RC-505 + 64 Effets, `H._fdefs`) : **lecture seule** (`m.rom`, 10e champ `R` de la ligne `M`, le Launchpad
+  l'ignore) : pas d'effacement / édition / nom / couleur / T-G-A / déplacement (`H._ro`) ; MIDI Learn, pose sur le LP et
+  Ctrl+D (copie perso) permis. Au chargement (`H._rom_fix`) : anciens rushes d'usine reconnus à nom + texte d'origine,
+  manquants recréés (non posés) si la migration est faite (`fx_page` = 1). Ordre (`H._msort`, appelé par `mac_save`) :
+  perso d'abord (ordre choisi), puis usine dans l'ordre fixe. Lignes d'usine : fond gris-bleu, « ROM » à la place de ×.
+  Test `tools/trush_rom.lua`.
+
 ## 21 nov. : onglet Rushes réorganisé (l'utilisateur : « aucune hiérarchie »)
 
 - Haut, au-dessus de la liste (`LY = LIST_Y + 30`) : `< RUSHES 1-64 sur 134 >` à gauche, `● CAPTURE` (`■ VALIDER` en
