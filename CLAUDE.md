@@ -18,7 +18,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
   | `twisterinoutreset.lua` | Midi Fighter Twister v3.5 (8 pages, page 7 Custom, page 8 Display, sélection d'effet FX Router). |
   | `nowundo_midi_learn.lua` | MIDI Learn v2.8 + raccourcis clavier (js_ReaScriptAPI), cumul clavier/MIDI, double appui. |
   | `NowUndo_8Looper_Panel.lua` | Panneau 8 loopers + import de fichiers audio (glisser-déposer, modes Adapter / Indépendant / Étirer). |
-  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées ; étiquette : L n (partie seulement si ≠ MAIN) + sources entre parenthèses + état + REVERSE / SLICE / CLOUD + SP (speed ≠ 1) / PS (pitch ≠ 0) + « FX n » en rose ; M / S / F tout à droite). Pas de paramètres, sources, boutons ni glisser-déposer. Fenêtre `NowUndo_8Waves`. |
+  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées ; étiquette : L n (partie seulement si ≠ MAIN) + sources entre parenthèses + état + REVERSE / SLICE / CLOUD + SP (speed ≠ 1) / PS (pitch ≠ 0) + « FX n » en rose ; M / S / F tout à droite ; VU vertical d'entrée à gauche (`+172`) et de sortie à droite (`+173`) ; état MUTE (`+199`) ; saturation des couleurs = Out Vol (`+22`) : 0 dB couleur pleine → -80 dB noir et blanc, Mute = noir et blanc). Pas de paramètres, sources, boutons ni glisser-déposer. Fenêtre `NowUndo_8Waves`. |
   | `NowUndo_Scenario.lua` | Séquenceur de scénarios + **Rushes** (ex « macros ») : éditeur, assistant, palette. |
   | `NowUndo_Twister_Web.lua` | Pont gmem ↔ ExtState pour l'onglet Twister In/Out et l'onglet **Loopers** du web. |
   | `NowUndo_Latency.lua` | Réglage global de la compensation de latence (V3.23). |
@@ -266,6 +266,11 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - `clcic_decall__gauche_ref_droite_looper.wav` : clic 117,4 BPM ; le looper joue des coups espacés de 499,3 ms (120 BPM)
   et saute de ~35 ms à chaque mesure de REAPER (2,044 s) = la boucle dure ~2,0 s au lieu de 2,044 → recalage Host à chaque
   mesure (le « saut sur la 1re attaque »). Cause non trouvée : questions posées (tempo REAPER, Master Sync, Speed, Loop Beats).
+
+## 21 nov. : 8Waves VU / Mute / saturation + bouton Mute du JSFX
+
+- `NowUndo_8Waves.lua` : VU d'entrée / sortie verticaux, état MUTE, saturation selon Out Vol (voir tableau). `NowUndo_V3.26.jsfx` :
+  bouton **Mute** dans le panneau Transport (6 boutons, `lp_mute`). Non testé dans REAPER.
 
 ## 20 nov. : 8 Panel — Cloud en bleu + zone des grains
 

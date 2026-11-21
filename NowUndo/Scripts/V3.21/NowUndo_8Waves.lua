@@ -19,6 +19,18 @@ local SEL_LOOPER = 0
 local WV_CACHE, SL_CACHE = {}, {}
 
 local function read(base, off) return reaper.gmem_read(base + off) or 0 end
+-- Saturation de l'affichage d'un looper : Out Vol 0 dB (ou plus) = pleine couleur, -80 dB = noir et blanc ; MUTE = noir et
+-- blanc direct. VU-metres verticaux : entree (+172) avant la forme d'onde, sortie (+173) apres.
+local VIS = {}
+function VIS.sat(out_vol, muted)
+  if muted then return 0 end
+  local db = 20 * math.log(math.max(0.000001, out_vol), 10)
+  return math.max(0, math.min(1, (db + 80) / 80))
+end
+function VIS.desat(c, s)
+  local g = c[1] * .30 + c[2] * .59 + c[3] * .11
+  return {g + (c[1] - g) * s, g + (c[2] - g) * s, g + (c[3] - g) * s}
+end
 local function setc(r, g, b, a) gfx.set(r, g, b, a or 1) end
 local function rect(x, y, w, h, r, g, b, a, fill) setc(r, g, b, a); gfx.rect(x, y, w, h, fill == nil and 1 or fill) end
 local FONT_SLOT, FONT_N, CUR_FONT = {}, 9, nil
@@ -28,6 +40,17 @@ local function setfont(sz, bold)
     FONT_N = FONT_N + 1; if FONT_N > 120 then FONT_N = 10; FONT_SLOT = {}; CUR_FONT = nil end
     slot = FONT_N; FONT_SLOT[key] = slot; gfx.setfont(slot, "Arial", sz, bold and "b" or ""); CUR_FONT = slot
   elseif CUR_FONT ~= slot then gfx.setfont(slot); CUR_FONT = slot end
+end
+function VIS.vmeter(x, y, w, h, val)                               -- dB -48 .. 0, du bas vers le haut
+  rect(x, y, w, h, .055, .06, .07, 1, 1)
+  local db = 20 * math.log(math.max(0.00001, val), 10)
+  local ratio = math.max(0, math.min(1, (db + 48) / 48))
+  if ratio > 0 then
+    local mr, mg, mb = .20, .82, .42
+    if ratio > .82 then mr, mg, mb = .95, .30, .20 elseif ratio > .62 then mr, mg, mb = .95, .70, .20 end
+    local hh = (h - 2) * ratio
+    rect(x + 1, y + h - 1 - hh, w - 2, hh, mr, mg, mb, .95, 1)
+  end
 end
 local function text(x, y, str, size, r, g, b, bold)
   setfont(math.max(7, math.floor(size)), bold); setc(r, g, b, 1); gfx.x = x; gfx.y = y; gfx.drawstr(tostring(str))
@@ -73,6 +96,9 @@ local function draw_row(i, x, y, w, h, now_t, s)
   if length <= 0 then sy_pos = -1 end
   local st_col = STATE_COL[state] or {.035, .035, .04}
   local is_stop = STATE_COL[state] == nil
+  local muted = read(gb, 199) > .5                                 -- mute du looper
+  local vsat = VIS.sat(read(gb, 22), muted)                        -- saturation selon le volume de sortie
+  hc = VIS.desat(hc, vsat); st_col = VIS.desat(st_col, vsat)
   local slicer_on, cloud_on = read(gb, 8) == 1, read(gb, 24) > .5
   -- selection / groupe : teinte legere de tout le fond (couleur du groupe, sinon jaune si selectionne) + cadre
   local ds_i = math.floor(alias + .5); if ds_i < 1 or ds_i > 8 then ds_i = i + 1 end
@@ -84,7 +110,9 @@ local function draw_row(i, x, y, w, h, now_t, s)
   -- fond de la ligne (teinte du looper) et fond de la forme d'onde (gris clair a l'arret, comme le panneau)
   if is_stop then rect(x, y, w, h, .07 + hc[1] * .07, .07 + hc[2] * .07, .08 + hc[3] * .07, 1, 1)
   else rect(x, y, w, h, .075 + hc[1] * .13, .075 + hc[2] * .13, .085 + hc[3] * .13, 1, 1) end
-  local wx, wy, ww, wh = x + 4, y + 3, w - 8, h - 6
+  local VW = math.max(4, math.min(8, math.floor(h * .07)))       -- VU d'entree (avant) / de sortie (apres)
+  local wx, wy, ww, wh = x + 6 + VW, y + 3, w - 12 - 2 * VW, h - 6
+  VIS.vmeter(x + 5, wy, VW, wh, read(gb, 172)); VIS.vmeter(x + w - 2 - VW, wy, VW, wh, read(gb, 173))
   if is_stop then rect(wx, wy, ww, wh, .05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10, 1, 1) else rect(wx, wy, ww, wh, .025, .027, .035, 1, 1) end
   if tc then
     rect(x, y, w, h, tc[1], tc[2], tc[3], tk, 1)                    -- voile de la couleur du groupe / de la selection
@@ -104,6 +132,7 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local wc = (state == 2) and {.20, .82, .38} or st_col
   if cloud_on and state == 2 then wc = {.35, .70, 1} end
   if is_stop then wc = {hc[1] * .55, hc[2] * .55, hc[3] * .55} end
+  wc = VIS.desat(wc, vsat)
 
   -- forme d'onde : 100 points publies par le looper, interpoles sur toute la largeur (colonnes de 2 px)
   local wv = WV_CACHE[i]
@@ -197,7 +226,8 @@ local function draw_row(i, x, y, w, h, now_t, s)
   -- etiquette : nom, etat, puis modes (REVERSE / SLICE / CLOUD) et effets actifs (FX n, en rose)
   local parts = {{nm, .94, .94, .96}}
   local sn = STATE_NAME[state] or "STOP"
-  if is_stop then parts[#parts + 1] = {sn, .62, .64, .68} else parts[#parts + 1] = {sn, st_col[1] + .15, st_col[2] + .15, st_col[3] + .15} end
+  if muted then parts[#parts + 1] = {"MUTE", .70, .70, .74}
+  elseif is_stop then parts[#parts + 1] = {sn, .62, .64, .68} else parts[#parts + 1] = {sn, st_col[1] + .15, st_col[2] + .15, st_col[3] + .15} end
   if read(gb, 17) > .5 then parts[#parts + 1] = {"REVERSE", .82, .78, .95} end
   if slicer_on then parts[#parts + 1] = {"SLICE", .98, .83, .22} end
   if cloud_on then parts[#parts + 1] = {"CLOUD", .45, .75, 1} end
