@@ -35,7 +35,8 @@
     l1 in 0.25 out 0.5, l4 vol -6db;
     l1 in/out reset, l1 slicer/cloud off;
 
-  RUSHES (ex macros, onglet MACROS) : chutier de 128 actions, partage avec la page 4 du Launchpad. V3.27 : meme syntaxe que
+  RUSHES (ex macros, onglet MACROS) : chutier d'actions, partage avec la page 4 du Launchpad (V3.27 : sous-pages a..z de 64
+  pads, boutons + PAGE / NOM PAGE / SUPPR PAGE ; l3 to g2 = groupe ; go lp 2 | go 4c | go t3 = pages LP / rushes / Twister). V3.27 : meme syntaxe que
   les pas, la CIBLE est facultative : sans cible = looper / groupe selectionne ("rec"), sinon l1 | l(1/3) | g2 | g(1/3) | all
   ("g2 rec", "all stop", "rec, l3 play" : l3 seulement pour play). Voir le lexique (?) pour le detail.
 
@@ -389,6 +390,28 @@ local function parse_target(s)
 end
 
 local PRESET_MAX = 8      -- presets de routing / de groupe du Launchpad (NPRESET)
+-- V3.27 : go lp 1..4 (page du Launchpad) | go 4c / go lp 4c (sous-page c de la page 4 = rushes) | go t1..8 (page du Twister)
+-- renvoie le nom de commande pour le Launchpad (NowUndo_VLcmd/q), ou nil, erreur ; nil, nil si ce n'est pas un "go"
+H._go = function(a)
+  if not a:match("^go%f[%A]") then return nil end
+  local r = a:gsub("^go", ""):gsub("%s+", "")
+  local tw = r:match("^t(%d+)$")
+  if tw then
+    tw = tonumber(tw)
+    if tw < 1 or tw > 8 then return nil, "page du Twister 1-8" end
+    return "twpage_" .. tw
+  end
+  r = r:gsub("^lp", "")
+  local lp, sub = r:match("^(%d)(%a?)$")
+  if not lp then return nil, "go lp 1 | go 4c | go t1 attendu" end
+  lp = tonumber(lp)
+  if sub ~= "" then
+    if lp ~= 4 then return nil, "seule la page 4 a des sous-pages (go 4a .. go 4z)" end
+    return "p4page_" .. (sub:byte() - 96)
+  end
+  if lp < 1 or lp > 4 then return nil, "page du Launchpad 1-4" end
+  return "lppage_" .. lp
+end
 -- sync / unsync : synchro Master Sync de la part en cours (comme le pad SYNC/UNSYNC) ; syncall / unsyncall : les 3 parts
 local SYNC_WORDS = { sync = { true, false }, unsync = { false, false }, syncall = { true, true }, unsyncall = { false, true } }
 
@@ -406,7 +429,28 @@ local function compile(text, forced, toggle, gate_off)
     if act:sub(-1) == "*" and #act > 1 then sync = true; act = trim(act:sub(1, -2)) end
     local pk, pn = act:lower():match("^([rg])%s*%(%s*(%d+)%s*%)$")
     local sc = SYNC_WORDS[(act:lower():gsub("%s+", ""))]
-    if (sc or pk) and H._omode then
+    local gq, gerr = H._go(act:lower())                 -- V3.27 : go lp 2 | go 4c | go t3
+    local tgs, tgn = act:lower():match("^(.-)%s*%f[%a]to%s+g%s*%(?%s*(%d+)%s*%)?$")   -- V3.27 : l3 to g2 (g0 = sans groupe)
+    if gq or gerr then
+      if gerr then errs[#errs + 1] = "[" .. act .. "] " .. gerr
+      elseif not H._omode then items[#items + 1] = { glob = "go", qname = gq } end
+    elseif tgn then
+      tgn = tonumber(tgn)
+      local tt, te
+      if tgs == "" then tt = last_targets or forced; te = "cible manquante (l3 to g2)"
+      else tt, te = parse_target(tgs:gsub("%s+", "")) end
+      if tgn > 4 then errs[#errs + 1] = "[" .. act .. "] groupe " .. tgn .. " inexistant (g1-g4, g0 = sans groupe)"
+      elseif not tt then errs[#errs + 1] = "[" .. act .. "] " .. te
+      else
+        if tgs ~= "" then last_targets = tt end
+        for _, i in ipairs(tt) do
+          local qn
+          if H._omode then qn = (tgn > 0) and string.format("grpoff_%d_%d", i, tgn) or nil   -- relachement / OFF : sort du groupe
+          else qn = string.format("grp_%d_%d", i, tgn) end
+          if qn then items[#items + 1] = { glob = "grp", qname = qn } end
+        end
+      end
+    elseif (sc or pk) and H._omode then
       -- GATE, relachement : pas de rappel de preset ni de synchro
     elseif sc then
       items[#items + 1] = { glob = "sync", on = sc[1], parts_all = sc[2] }
@@ -563,6 +607,8 @@ local function pump()
         elseif slot_free(op.ch, b) then
           if op.ch == "cmd" then
             if c ~= nil then wr(b + 49, c) end
+            -- V3.27 : REC / Re-Rec d'un rush calé sur l'APPUI du pad (comme le Launchpad : heure gmem 950, cible 951)
+            if (a == 1 or a == 17) and not op.sync then wr(950, op.t0); wr(951, b + 48) end
             wr(b + 48, a)
           elseif op.ch == "param" then
             wr(b + 181, c); wr(b + 180, a)
@@ -643,6 +689,8 @@ local function fire_glob(it)
     name = string.format("fx_%d_%d_%s", it.i, it.slot, it.want == nil and "tog" or (it.want and "on" or "off"))
   elseif it.glob == "sync" then
     name = "sync_" .. (it.parts_all and "all_" or "") .. (it.on and "on" or "off")
+  elseif it.qname then
+    name = it.qname                       -- V3.27 : grp_<l>_<g>, grpoff_<l>_<g>, lppage_<n>, p4page_<k>, twpage_<n>
   else
     name = string.format("preset_%s_%d", it.glob, it.n)
   end
@@ -852,6 +900,8 @@ local HELP = {
   { ".", "separateur decimal (0.25) : la virgule separe les actions" },
   { "//", "commentaire jusqu'a la fin de la ligne" },
   { "R(n)  G(n)", "rappelle le preset de ROUTING (R) / de GROUPE (G) n°1-8 de la page principale du Launchpad  (r(2), g(3))" },
+  { "l3 to g2", "met L3 dans le groupe 2 (il quitte son ancien groupe) ; to g0 = sans groupe. En toggle / gate : OFF = sort du groupe" },
+  { "go lp 2  go 4c  go t3", "appelle la page 2 du Launchpad | la page de rushes c (page 4) | la page 3 du Twister" },
   { "double-clic", "sur un pas de la liste : l'editer   (GO / Espace : l'executer)" },
   { "" },
   { "CIBLES" },
@@ -1515,7 +1565,9 @@ end
 -- Partage avec le Launchpad (page 4, couche "Action macros") par l'ExtState "NowUndo_Macros" :
 --   set = macros + disposition sur le Launchpad ; rev = numero de version (le Launchpad recharge quand il change).
 --------------------------------------------------------------------------
-local MAC_EXT, MAC_MAX = "NowUndo_Macros", 128   -- V3.25 : 2 pages de rushes sur le Launchpad (Rushes + Rushes 2)
+local MAC_EXT, MAC_MAX = "NowUndo_Macros", 26 * 64   -- V3.27 : page 4 du Launchpad = sous-pages de rushes a..z (64 pads chacune)
+-- V3.27 : sous-pages de la page 4 : H._pages = noms (1 = a ... 26 = z), H._pg = page affichee ici ; case c du LP -> page ceil(c/64)
+H._pages, H._pg, H._PMAX = { "RC-505" }, 1, 26
 local MDIR = reaper.GetResourcePath() .. "/Data/NowUndo_Macros/"
 local PALETTE = { 0xFF4040, 0xFF9040, 0xFFD320, 0x99FF66, 0x30E060, 0x40D0D0, 0x66CCFF, 0x3A7BFF, 0x9933FF, 0xE040FF, 0xFF66AA, 0xDDDDDD }
 local macros, layout, mac_next_id = {}, {}, 1
@@ -1551,10 +1603,11 @@ local function mac_serialize()
   for c in pairs(layout) do cells[#cells + 1] = c end
   table.sort(cells)
   for _, c in ipairs(cells) do t[#t + 1] = "L\t" .. c .. "\t" .. layout[c] end
+  for k, nm in ipairs(H._pages) do t[#t + 1] = "P\t" .. k .. "\t" .. nm end
   return table.concat(t, "\n")
 end
 local function mac_deserialize(txt)
-  local list, lay, seen = {}, {}, {}
+  local list, lay, seen, pages = {}, {}, {}, nil
   for line in (txt or ""):gmatch("[^\r\n]+") do
     local f = {}
     for w in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = w end
@@ -1566,20 +1619,46 @@ local function mac_deserialize(txt)
       end
     elseif f[1] == "L" and tonumber(f[2]) and tonumber(f[3]) then
       lay[math.floor(tonumber(f[2]))] = math.floor(tonumber(f[3]))
+    elseif f[1] == "P" and tonumber(f[2]) then
+      local k = math.floor(tonumber(f[2]))
+      if k >= 1 and k <= H._PMAX then pages = pages or {}; pages[k] = mac_clean(f[3]) end
     end
   end
-  for c, id in pairs(lay) do                       -- disposition : seulement des macros existantes, 64 cases
-    if c < 1 or c > 128 or not seen[id] then lay[c] = nil end
+  local maxc = 0
+  for c, id in pairs(lay) do                       -- disposition : seulement des macros existantes
+    if c < 1 or c > H._PMAX * 64 or not seen[id] then lay[c] = nil elseif c > maxc then maxc = c end
   end
-  return list, lay
+  local had_p = pages ~= nil
+  pages = pages or {}
+  local np = #pages; for k in pairs(pages) do if k > np then np = k end end
+  np = math.max(np, math.ceil(maxc / 64), 1)
+  for k = 1, np do if not pages[k] or pages[k] == "" then pages[k] = (k == 1 and not had_p) and "Rushes" or ("Rushes " .. k) end end
+  return list, lay, pages, had_p
 end
-local function mac_apply(list, lay)
+local function mac_apply(list, lay, pages)
   macros, layout, mac_next_id = list, lay, 1
+  if pages then H._pages = pages; H._pg = math.min(H._pg, #pages) end
   for _, m in ipairs(macros) do
     if m.id >= mac_next_id then mac_next_id = m.id + 1 end
     mac_check(m)
   end
   msel, mcur, manchor = {}, 0, 0
+end
+-- V3.27 : rushes de la page RC-505 (une colonne par looper, de BAS en HAUT : Rec, Clear, Replace, Restart, Rev,
+-- Ping-pong, Slicer, Cloud), poses sur la sous-page a (cases 1..64)
+H._rc505 = function()
+  local ROWS = { { "cloud", "CLOUD", 0x3A7BFF, true }, { "slicer", "SLICER", 0xFFD320, true }, { "pp", "PING PONG", 0xE040FF, true },
+                 { "rev", "REVERSE", 0xFF66AA, true }, { "restart", "RESTART", 0x40D0D0, false }, { "replace", "REPLACE", 0xFF9040, true },
+                 { "clear", "CLEAR", 0xDDDDDD, false }, { "rec", "REC", 0xFF4040, true } }
+  for r, d in ipairs(ROWS) do
+    for col = 1, 8 do
+      local id = mac_next_id; mac_next_id = id + 1
+      local m = { id = id, name = "L" .. col .. " " .. d[2], color = d[3], text = "l" .. col .. " " .. d[1], toggle = d[4] }
+      mac_check(m)
+      macros[#macros + 1] = m
+      layout[(r - 1) * 8 + col] = id
+    end
+  end
 end
 local function mac_save()
   local txt = mac_serialize()
@@ -1596,8 +1675,20 @@ do                                                  -- chargement au demarrage
     local f = io.open(MDIR .. "_autosave.txt", "r")
     if f then txt = f:read("*a") or ""; f:close() end
   end
-  local list, lay = mac_deserialize(txt)
-  mac_apply(list, lay)
+  local list, lay, pages, had_p = mac_deserialize(txt)
+  if not had_p then
+    -- V3.27 : ancienne disposition (Rushes / Rushes 2) -> sous-pages b, c ; la page a = RC-505 en rushes (cree une fois)
+    local nl = {}
+    for c, id in pairs(lay) do nl[c + 64] = id end
+    lay = nl
+    local np = { "RC-505" }
+    if next(lay) then for k = 1, #pages do np[k + 1] = (k == 1) and "Rushes" or ("Rushes " .. k) end end
+    pages = np
+    mac_apply(list, lay, pages)
+    H._rc505()
+  else
+    mac_apply(list, lay, pages)
+  end
   mac_save()                                        -- publie tout de suite pour le Launchpad
 end
 mac_count = function() return #macros end
@@ -1610,7 +1701,7 @@ end
 local function sel_count() local n = 0; for _ in pairs(msel) do n = n + 1 end; return n end
 local function lp_count() local n = 0; for _ in pairs(layout) do n = n + 1 end; return n end
 local function lp_cell_of(id) for c, i in pairs(layout) do if i == id then return c end end end
-local function lp_name(c) return string.format("%d.%d", math.ceil(c / 8), (c - 1) % 8 + 1) end
+local function lp_name(c) local k = (c - 1) % 64; return string.format("%s%d.%d", string.char(96 + math.ceil(c / 64)), k // 8 + 1, k % 8 + 1) end
 
 -- pose des macros sur le Launchpad : a la suite, dans les premieres cases libres (rien n'est ecrase)
 local function lp_place(ms)
@@ -1618,16 +1709,16 @@ local function lp_place(ms)
   for _, m in ipairs(ms) do
     if lp_cell_of(m.id) then already = already + 1
     else
-      local c = 1
-      while c <= 128 and layout[c] do c = c + 1 end
-      if c > 128 then full = true; break end
+      local c, c1 = (H._pg - 1) * 64 + 1, H._pg * 64         -- V3.27 : dans la sous-page affichee
+      while c <= c1 and layout[c] do c = c + 1 end
+      if c > c1 then full = true; break end
       layout[c] = m.id; placed = placed + 1
     end
   end
   if placed > 0 then mac_save() end
-  msg = placed .. " rush(es) pose(s) sur le Launchpad"
+  msg = placed .. " rush(es) pose(s) sur la page 4" .. string.char(96 + H._pg) .. " du Launchpad"
         .. (already > 0 and ("  (" .. already .. " deja presente(s))") or "")
-        .. (full and "  -  Launchpad plein (2 x 64 pads)" or "")
+        .. (full and "  -  page pleine (64 pads) : ajoute une page (+ PAGE)" or "")
   msg_err = full
 end
 local function lp_remove(ms)
@@ -1640,7 +1731,7 @@ local function lp_remove(ms)
 end
 
 local function mac_add(text, name, color)
-  if #macros >= MAC_MAX then msg = "128 rushes maximum : supprimes-en un d'abord."; msg_err = true; return nil end
+  if #macros >= MAC_MAX then msg = MAC_MAX .. " rushes maximum : supprimes-en un d'abord."; msg_err = true; return nil end
   local id = mac_next_id; mac_next_id = id + 1
   local nm = mac_clean(name)
   local txt = (text or ""):gsub(";", ",")
@@ -1690,6 +1781,7 @@ ED.CATS = {
   { "Cloud",          { "cdens...", "cchaos...", "cspread...", "cpitch...", "cpos...", "clfo...", "clfodepth..." } },
   { "Slicer",         { "ssteps...", "srate...", "sgrid...", "sdecay...", "sattack...", "spitch...", "smax..." } },
   { "Global",         { "clearall", "clearallfull", "sync", "unsync", "syncall", "unsyncall", "r(n)...", "g(n)..." } },
+  { "Groupes / pages", { "to...", "go..." } },     -- V3.27 : l3 to g2 | go lp 1, go 4c, go t1
 }
 ED.VALS = {
   vol = { "0db", "-3db", "-6db", "-12db", "-24db", "50%", "reset" }, speed = { "0.5", "0.75", "1", "1.5", "2", "reset" },
@@ -1703,6 +1795,8 @@ ED.VALS = {
   clfodepth = { "0", "25", "50", "100", "reset" }, ssteps = { "4", "8", "16", "32", "reset" }, srate = { "0", "1", "2", "3", "4", "5", "reset" },
   sgrid = { "0", "1", "2", "3", "5", "7", "reset" }, sdecay = { "20", "50", "150", "500", "2000", "reset" },
   sattack = { "0", "10", "50", "100", "reset" }, spitch = { "0", "25", "50", "100", "reset" }, smax = { "4", "8", "16", "32", "reset" },
+  ["to"] = { "g1", "g2", "g3", "g4", "g0" },
+  ["go"] = { "lp 1", "lp 2", "lp 3", "4a", "4b", "4c", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8" },
   ["r(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" }, ["g(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" },
 }
 function ED.add(tok)                       -- ajoute une action (apres une virgule) a l'emplacement du curseur
@@ -1924,7 +2018,7 @@ local function mac_rename()
   if ok then m.name = mac_clean(ret); mac_save(); msg = (m.name == "") and "Nom efface : le pad affichera l'action." or "Rush renomme."; msg_err = false end
 end
 local function mac_new()                    -- ADD : ouvre l'editeur (assistant + palette) sur une macro vide
-  if #macros >= MAC_MAX then msg = "128 rushes maximum."; msg_err = true; return end
+  if #macros >= MAC_MAX then msg = MAC_MAX .. " rushes maximum."; msg_err = true; return end
   ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, nil, true, "", false, false
   ED.cur, ED.sug, ED.si, ED.view = 0, {}, 1, 0
   ED.refocus()
@@ -2110,7 +2204,7 @@ H._rush_live = function(m, targets, on)
   end
   return out
 end
-local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro GATE (appui / relachement du pad)
+local function run_macro(m, targets, gst, press_t)   -- gst : "on" / "off" pour une macro GATE (appui / relachement du pad) ; press_t : heure de l'appui
   if m.err then msg = "Rush '" .. mac_label(m) .. "' invalide : " .. m.err; msg_err = true; return end
   reaper.gmem_attach(GMEM)
   if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end       -- mode ALL : action collective sur les 8 loopers
@@ -2127,7 +2221,7 @@ local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro
     items = compile(m.text, targets, false)
   end
   grp_counter = grp_counter + 1
-  local t0 = reaper.time_precise()
+  local t0 = math.min(reaper.time_precise(), press_t or 1e12)
   local dead, seen, nsync, nglob = {}, {}, 0, 0
   for _, it in ipairs(items) do
     if it.glob then
@@ -2166,6 +2260,13 @@ local function mac_active(m, targets)
   if not m.toggle or m.err then return false end
   local s = m.text:lower():gsub("à", " "):gsub("[=:]", " ")
   local act = s:match("^[^,]*") or ""
+  local tgs, tgn = trim(act):match("^(.-)%s*%f[%a]to%s+g%s*%(?%s*(%d+)%s*%)?$")   -- V3.27 : "l3 to g2" allume = L3 dans le groupe 2
+  if tgn then
+    local tt = (tgs ~= "") and parse_target(tgs:gsub("%s+", "")) or targets
+    if not tt or #tt == 0 then return false end
+    for _, i in ipairs(tt) do if rd(6000 + i) ~= tonumber(tgn) then return false end end
+    return true
+  end
   local t = {}
   for w in act:gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
   if #t == 0 then return false end
@@ -2202,6 +2303,7 @@ end
 H._mac_active = mac_active
 H._probe_ok = function(m)
   local s = m.text:lower():gsub("à", " "):gsub("[=:]", " ")
+  if trim(s:match("^[^,]*") or ""):match("%f[%a]to%s+g%s*%(?%s*%d+%s*%)?$") then return true end   -- V3.27 : l3 to g2
   local t = {}
   for w in (s:match("^[^,]*") or ""):gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
   if t[1] and is_tgt(t[1]) and #t > 1 then table.remove(t, 1) end   -- V3.27 : cible ecrite dans le rush
@@ -2241,8 +2343,9 @@ local function mac_poll()
     reaper.SetExtState(CAPEXT, "alive", string.format("%.3f", t), false)
   end
   if reaper.GetExtState(MAC_EXT, "rev") ~= mac_my_rev then       -- modifie ailleurs (Ctrl+clic sur un pad du Launchpad)
-    local list, lay = mac_deserialize(reaper.GetExtState(MAC_EXT, "set"))
+    local list, lay, pages = mac_deserialize(reaper.GetExtState(MAC_EXT, "set"))
     macros, layout = list, lay
+    H._pages = pages; H._pg = math.min(H._pg, #pages)
     mac_next_id = 1
     for _, m in ipairs(macros) do
       if m.id >= mac_next_id then mac_next_id = m.id + 1 end
@@ -2265,7 +2368,7 @@ local function mac_poll()
           local k = tonumber(n)
           if k >= 1 and k <= NLOOP then targets[#targets + 1] = k end
         end
-        if #targets > 0 then run_macro(m, targets, gst) end
+        if #targets > 0 then run_macro(m, targets, gst, tonumber(ts)) end
       end
     end
   end
@@ -2304,13 +2407,51 @@ local function mac_import()
   local f = io.open(file, "r")
   if not f then msg = "Lecture impossible"; msg_err = true; return end
   local txt = f:read("*a"); f:close()
-  local list, lay = mac_deserialize(txt)
+  local list, lay, pages = mac_deserialize(txt)
   if #list == 0 then msg = "Aucun rush dans ce fichier."; msg_err = true; return end
   if #macros > 0 and reaper.MB("Remplacer les " .. #macros .. " macros actuelles (et leur disposition) par les " .. #list .. " du fichier ?", "NowUndo - rushes", 4) ~= 6 then return end
-  mac_apply(list, lay); mac_save()
+  mac_apply(list, lay, pages); mac_save()
   last_export = file:match("([^/\\]+)$") or last_export
   msg = "Importe : " .. last_export .. "  (" .. #list .. " rushes)"; msg_err = false
 end
+
+-- V3.27 : sous-pages de la page 4 (a..z) : ajouter / renommer / supprimer / choisir
+H._pg_label = function(k) return string.char(96 + k) .. "  " .. (H._pages[k] or "") end
+H._pg_add = function()
+  if #H._pages >= H._PMAX then msg = H._PMAX .. " pages maximum (a..z)."; msg_err = true; return end
+  local ok, nm = reaper.GetUserInputs("Nouvelle page de rushes", 1, "Nom de la page :,extrawidth=150", "Rushes " .. (#H._pages + 1))
+  if not ok then return end
+  H._pages[#H._pages + 1] = mac_clean(nm) ~= "" and mac_clean(nm) or ("Rushes " .. (#H._pages + 1))
+  H._pg = #H._pages; mac_save()
+  msg = "Page 4" .. string.char(96 + H._pg) .. " creee : " .. H._pages[H._pg] .. "  (go 4" .. string.char(96 + H._pg) .. ")"; msg_err = false
+end
+H._pg_ren = function()
+  local ok, nm = reaper.GetUserInputs("Renommer la page", 1, "Nom de la page :,extrawidth=150", H._pages[H._pg])
+  if not ok or mac_clean(nm) == "" then return end
+  H._pages[H._pg] = mac_clean(nm); mac_save(); msg = "Page renommee."; msg_err = false
+end
+H._pg_del = function()
+  if #H._pages <= 1 then msg = "Il faut garder au moins une page."; msg_err = true; return end
+  local k = H._pg
+  if reaper.MB("Supprimer la page " .. H._pg_label(k) .. " ? Ses pads sont retires du Launchpad (les rushes restent dans la liste) ; les pages suivantes remontent d'une lettre.", "NowUndo - pages de rushes", 4) ~= 6 then return end
+  local nl = {}
+  for c, id in pairs(layout) do
+    local pg = math.ceil(c / 64)
+    if pg < k then nl[c] = id elseif pg > k then nl[c - 64] = id end
+  end
+  layout = nl
+  table.remove(H._pages, k)
+  H._pg = math.min(k, #H._pages); mac_save()
+  msg = "Page supprimee."; msg_err = false
+end
+H._pg_menu = function(x, y)
+  local items = {}
+  for k = 1, #H._pages do items[k] = (k == H._pg and "!" or "") .. H._pg_label(k) end
+  gfx.x, gfx.y = x, y
+  local pick = gfx.showmenu(table.concat(items, "|"))
+  if pick and pick > 0 then H._pg = pick end
+end
+H._pg_count = function(k) local n = 0; for c in pairs(layout) do if math.ceil(c / 64) == k then n = n + 1 end end; return n end
 
 local function mac_status()
   return string.format("%d/%d rushes | %d sur le LP%s", #macros, MAC_MAX, lp_count(), msel and (sel_count() > 0 and (" | " .. sel_count() .. " sel.") or "") or "")
@@ -2418,7 +2559,7 @@ end
 local MPC = 32                                         -- macros par colonne : la 33e repart en haut de la 2e colonne
 local mflash = {}
 local function mac_draw(W, Hh, down)
-  local list_h = Hh - LIST_Y - 134
+  local list_h = Hh - LIST_Y - 162   -- V3.27 : + la rangee des pages
   local rows = math.max(1, math.min(MPC, math.floor(list_h / RH)))
   local cw = math.floor((W - 24 - 6) / 2)
   local function colx(c) return 12 + c * (cw + 6) end
@@ -2627,7 +2768,7 @@ local function mac_draw(W, Hh, down)
   end
 
   -- message
-  local my0 = Hh - 128
+  local my0 = Hh - 156
   gfx.setfont(2, "Arial", 12)
   if msg_err then gfx.set(1, 0.4, 0.4, 1) else gfx.set(0.6, 0.9, 0.6, 1) end
   gfx.x, gfx.y = 14, my0
@@ -2643,6 +2784,18 @@ local function mac_draw(W, Hh, down)
 
   -- boutons
   if capturing then cap_panel(W, Hh) else
+    -- V3.27 : pages de la page 4 du Launchpad
+    gfx.setfont(2, "Arial", 12, 'b')
+    local py, pw = Hh - 128, 26
+    local bwp = math.max(60, W - 24 - 2 * pw - 3 * 70 - 5 * 4)
+    if btn(12, py, pw, 22, "<", 0.20, 0.25, 0.35) then H._pg = (H._pg - 2) % #H._pages + 1 end
+    if btn(12 + pw + 4, py, bwp, 22, "PAGE 4" .. H._pg_label(H._pg) .. "   (" .. H._pg_count(H._pg) .. "/64)   v", 0.15, 0.30, 0.45) then H._pg_menu(12 + pw + 4, py + 22) end
+    local xx = 12 + pw + 4 + bwp + 4
+    if btn(xx, py, pw, 22, ">", 0.20, 0.25, 0.35) then H._pg = H._pg % #H._pages + 1 end
+    xx = xx + pw + 4
+    if btn(xx, py, 70, 22, "+ PAGE", 0.15, 0.40, 0.25) then H._pg_add() end
+    if btn(xx + 74, py, 70, 22, "NOM PAGE", 0.20, 0.25, 0.35) then H._pg_ren() end
+    if btn(xx + 148, py, 70, 22, "SUPPR PAGE", 0.45, 0.15, 0.15) then H._pg_del() end
     gfx.setfont(2, "Arial", 14, 'b')
     local w2 = math.floor((W - 24 - 4) / 2)
     if btn(12, Hh - 100, w2, 40, "● CAPTURE / VALIDER", 0.55, 0.15, 0.15) then mac_capture_toggle() end
@@ -2665,9 +2818,11 @@ local function mac_draw(W, Hh, down)
       local ms = sel_ids()
       if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_remove(ms) end
     end
-    if btn(x4(4), Hh - 26, w4, 22, "VIDER LE LP", 0.45, 0.15, 0.15) then
-      if lp_count() > 0 and reaper.MB("Retirer les " .. lp_count() .. " rushes du Launchpad ? (ils restent dans le chutier)", "NowUndo - rushes", 4) == 6 then
-        layout = {}; mac_save(); msg = "Launchpad vide."; msg_err = false
+    if btn(x4(4), Hh - 26, w4, 22, "VIDER LA PAGE", 0.45, 0.15, 0.15) then
+      local n = H._pg_count(H._pg)
+      if n > 0 and reaper.MB("Retirer les " .. n .. " rushes de la page " .. H._pg_label(H._pg) .. " ? (ils restent dans la liste)", "NowUndo - rushes", 4) == 6 then
+        for c in pairs(layout) do if math.ceil(c / 64) == H._pg then layout[c] = nil end end
+        mac_save(); msg = "Page videe."; msg_err = false
       end
     end
   end

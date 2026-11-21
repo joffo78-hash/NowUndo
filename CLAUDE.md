@@ -53,10 +53,10 @@ du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 a
 
 **ExtState** : `nowundo_vl` (état partagé du Launchpad : `state` + `rev`, `web_cmd`/`web_ack`, `web_frame/labels/meta`,
 `fx_source`, `fx_slot`, `sel_looper`, `fighter_page`, `active_page`) · `NowUndo_VLcmd/q` (file de commandes externes vers le
-Launchpad : lignes `nom\ttemps`, ex. `fxg_<looper>_<slot>_tog`, `fx_…`, `fxin_…`, `preset_…`, `sync_on`, `rec_dub_toggle`, `drop_group`) ·
+Launchpad : lignes `nom\ttemps`, ex. `fxg_<looper>_<slot>_tog`, `fx_…`, `fxin_…`, `preset_…`, `sync_on`, `rec_dub_toggle`, `drop_group`, V3.27 : `grp_<l>_<g>`, `grpoff_<l>_<g>`, `lppage_<n>`, `p4page_<k>`, `twpage_<n>`) ·
 `nowundo_tw` (Twister + web : `tw_*`, `lv_fast`, `lv_wave`, `web_cmd`) · `NowUndo_MIDILearn` (maps, `custom`, `maps_kbd`,
 `kbd_intercept`) · `NowUndo_Scn` (`mcr` déclenchements de rushes `id\tcibles\ttemps\ton|off`, `alive`, `typing`) ·
-`NowUndo_Macros` (rushes partagés : `set`, `rev`, `on`, `pend`) · `NowUndo_Latency` (`on`, `offset_ms`) · `NowUndo_Clock/align`.
+`NowUndo_Macros` (rushes partagés : `set` = lignes `M` rushes, `L case id` (case = (page-1)*64 + 1..64), `P n nom` sous-pages (V3.27) ; `rev`, `on`, `pend`) · `NowUndo_Latency` (`on`, `offset_ms`) · `NowUndo_Clock/align`.
 
 **Web Launchpad** : commandes numérotées `@sid;#n:cmd;…` + accusé `web_ack` (repli automatique sur l'ancien format si
 pas d'accusé). Commandes : `P/R/D,row,col`, `H,0|1`, `L,layer`, `PAGE,n`, `SEL,i`, `ACT,i,action`. La page web a **sa
@@ -136,7 +136,7 @@ propre page Launchpad** (`VL.web_with_page`).
 - **Mute de looper (V3.25)** : dans le JSFX (fondu ~5 ms, la boucle tourne, l'entrée n'est pas coupée, la piste non
   plus) ; action Launchpad `mute` (bascule, groupe), MIDI Learn « Mute », mot de rush `mute` / `mute off`, bouton MUTE
   (modes) de l'onglet Loopers du web. Pas de pad sur la page 1 (pleine).
-- **Page 4 : couche Loop remplacée par « Rushes 2 »** (cases 65-128) ; 128 rushes max dans le Scenario.
+- **Page 4 : couche Loop remplacée par « Rushes 2 »** (cases 65-128) ; 128 rushes max dans le Scenario. (Remplacé en V3.27 : sous-pages a..z.)
 - **Co-enregistrement (V3.25)** : plusieurs loopers en REC sans synchro, sortie ensemble : le 1er qui sort devient maître ;
   un autre qui voit ce maître apparaître avec la même durée (±0,3 s) sort **avec lui** (même longueur, sync point 0,
   repart avancé du temps écoulé) au lieu d'attendre le tour suivant (`try_finish_rec`, `co_rec`, `tools/tcorec.py`).
@@ -281,6 +281,25 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - Ajouté par Claude : bouton **Mute** du Transport (venu de la V3.26) ; parenthèses autour d'un `? :` à affectations
   (`rw_pos`, sens inchangé). Test `tools/traw.py . [0|1] [rev|speed]` : A = impulsion revient à sa place, D = relue en
   reverse / à la vitesse ; pas de NaN. Non testé dans REAPER.
+
+## 21 nov. : page 4 = pages de rushes, `to g`, `go`
+
+- **Page 4 du Launchpad = sous-pages de rushes a..z** (couches `rp1`..`rp26`, `VL.p4_moff()`, menu = pages existantes
+  avec leur nom, PAGE 4 = page suivante). **Couches Effects / Groups / RC-505 / Rushes / Rushes 2 retirées.**
+  Pages créées / nommées / supprimées / choisies dans le Scenario (onglet Rushes : `<` `PAGE 4x (n/64) v` `>` `+ PAGE`
+  `NOM PAGE` `SUPPR PAGE` ; « → LAUNCHPAD » pose dans la page affichée ; « VIDER LA PAGE »). `H._pages`, `H._pg`,
+  `H._pg_*`, lignes `P` ; 26 × 64 rushes max. Supprimer une page : ses pads sont retirés, les suivantes remontent.
+- **Migration (une fois, set sans ligne `P`)** : page a = **RC-505** en 64 rushes (`H._rc505` : `l<n> rec` / replace / rev /
+  pp / slicer / cloud en toggle, `l<n> clear` / `restart` simples ; bas → haut comme avant), anciens Rushes → b,
+  Rushes 2 → c (cases +64). Import d'un ancien fichier : pages déduites des cases, sans RC-505.
+- Mots : **`l3 to g2`** (groupe, exclusif ; `to g0` = sans groupe ; sans cible = sélection ; toggle / gate OFF = sort
+  du groupe ; pad toggle allumé = membre) → `grp_` / `grpoff_` ; **`go lp 2`**, **`go 4c`** / `go lp 4c` (sous-page),
+  **`go t3`** (Twister) → `lppage_` / `p4page_` / `twpage_` (`H._go`). Palette « Groupes / pages ».
+- REC / Re-Rec d'un rush : heure de l'appui du pad écrite en gmem 950/951 (comme le Launchpad) → REC calé sur l'appui
+  aussi via les rushes (`run_macro(..., press_t)`, pas pour `*`).
+- Limites connues : LED des pads RC-505 = allumé / éteint (plus de rouge / orange / clignotant du REC) ; Restart n'est plus
+  en gate ; effets des **entrées** (ancienne couche Effects, rangées 1-4) : plus de pad (FX Router + D5-D8, ou web).
+- Tests : mocks lupa (`tools/trush_tgt.lua` + scénario pages / commandes) ; non testé dans REAPER.
 
 ## 21 nov. : cibles dans les rushes (préparation du chantier « tout est rush »)
 

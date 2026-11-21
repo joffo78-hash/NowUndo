@@ -16,13 +16,10 @@
      row 1..8     : grille 8x8      -> depend de la page              (col 1..8)
      col 9        : colonne droite  -> row 1..4 groupes, row 5..8 pages
   PAGES : 1 Main | 2 Routing in (IN1-8 -> loopers) | 3 Routing loopers (L -> L)
-          4 Page d'EXTENSION a COUCHES (menu deroulant de la fenetre, ou rappuyer sur PAGE 4) :
-              fx     : effets en insert, bypass par slot (4 par input colonnes 1-8 haut, 4 par looper bas)
-              groups : grille d'affectation looper -> groupe (rows 1-4), rappel des presets de groupe (row 5),
-                       puis les 3 dernieres lignes de la page Main (rows 6-8, memes pads, memes cibles)
-              rc505  : une colonne par looper, de BAS en HAUT : Rec, Clear, Replace, Restart (gate : appui + relachement), Rev, Ping-pong, Slicer, Cloud
-              macros : 64 macros d'action creees dans NowUndo_Scenario (onglet MACROS), appliquees au looper / groupe selectionne
-              loop   : vrais In / Out (-/+), quantise in/out, full loop + selecteur de pas
+          4 Page de RUSHES (V3.27) : sous-pages a..z de 64 rushes (menu deroulant de la fenetre, ou rappuyer sur PAGE 4),
+              creees / nommees / supprimees dans NowUndo_Scenario (onglet Rushes). Page a par defaut = RC-505 en rushes
+              (l1 rec, l1 clear...). Les anciennes couches Effects / Groups / RC-505 sont retirees : rushes e1..e4,
+              l3 to g2, g(n), go lp 1 / go 4c / go t1 les remplacent.
             Nouvelle couche = VL.register_layer({ id, name, cell(row, col) -> spec }) sans toucher au coeur.
             (les sequenceurs sont des JSFX MIDI a part, hors de ce script)
   GROUPES : plus de grille d'appartenance : on maintient GROUP n (ou HOLD, ou la touche CTRL du clavier avec
@@ -196,7 +193,7 @@ local function new_state()
       input  = new_matrix(NIN, NSLOT, false),   -- input[IN][slot]
       looper = new_matrix(NLOOP, NSLOT, false), -- looper[looper][slot]
     },
-    p4_layer = "fx",                -- couche courante de la page 4 (partagee : survit au changement de page)
+    p4_layer = "rp1",               -- couche courante de la page 4 = sous-page de rushes (V3.27 : rp1 = a ... rp26 = z)
     layer_cfg = { interval = 12, vol_sel = 2, nudge = 3 },   -- indices : octave / 1 dB / 1 %   -- selecteurs globaux des couches tune / loop
     fx_present = {                  -- le slot contient-il un effet ? (feedback du backend ; vrai par defaut)
       input  = new_matrix(NIN, NSLOT, true),
@@ -2631,6 +2628,21 @@ function VL.ext_cmd_poll()
         VL._scn_quiet = false
       end
     end
+    -- V3.27 (rushes) : grp_<l>_<g> = looper l dans le groupe g (0 = sans groupe) ; grpoff_<l>_<g> = sort du groupe g s'il y est
+    --                  lppage_<n> = page n du Launchpad ; p4page_<k> = sous-page k de la page 4 ; twpage_<n> = page n du Twister
+    if name and ts and t - tonumber(ts) < 2 then
+      local gl, gg = name:match("^grp_(%d+)_(%d+)$")
+      local ol, og = name:match("^grpoff_(%d+)_(%d+)$")
+      gl, gg, ol, og = tonumber(gl), tonumber(gg), tonumber(ol), tonumber(og)
+      if gl and gg and gl >= 1 and gl <= NLOOP and gg >= 0 and gg <= NGROUP then VL.assign_group(gl, gg) end
+      if ol and og and ol >= 1 and ol <= NLOOP and S.group_of[ol] == og then VL.assign_group(ol, 0) end
+      local lp = tonumber(name:match("^lppage_(%d+)$"))
+      if lp and lp >= 1 and lp <= NPAGE and S.page ~= lp then VL.set_page(lp) end
+      local pk = tonumber(name:match("^p4page_(%d+)$"))
+      if pk and VL.set_layer("rp" .. pk) and S.page ~= 4 then VL.set_page(4) end
+      local tw = tonumber(name:match("^twpage_(%d+)$"))
+      if tw and tw >= 1 and tw <= 8 then VL.set_fighter_page(tw) end
+    end
     -- fxin_<n>_<slot>_<on|off|tog> : effet d'une ENTREE (page web Twister / Effets)
     local ii, is_, ia = (name or ""):match("^fxin_(%d+)_(%d+)_(%a+)$")
     if ii and ts and t - tonumber(ts) < 2 then
@@ -2772,6 +2784,7 @@ function VL.register_layer(def)
 end
 
 local function cur_layer() return LAYER_BY_ID[S.p4_layer] or LAYERS[1] end
+LPF.npages = function() return math.max(1, math.min(#LAYERS, #((VL.macros and VL.macros.pages) or {}))) end
 setmetatable(BIND[4], { __index = function(_, key)               -- la grille de la page 4 vient de la couche courante
   local spec = cur_layer().cells[key]
   return spec and spec.bind
@@ -2779,18 +2792,20 @@ end })
 
 function VL.layers()
   local out = {}
-  for _, l in ipairs(LAYERS) do out[#out + 1] = { id = l.id, name = l.name } end
+  for k = 1, LPF.npages() do local l = LAYERS[k]; out[#out + 1] = { id = l.id, name = l.name } end   -- V3.27 : pages existantes
   return out
 end
 function VL.set_layer(id)
   if not LAYER_BY_ID[id] then return false end
+  local k = tonumber(id:match("^rp(%d+)$"))
+  if k and k > LPF.npages() then return false end
   S.p4_layer = id
   VL.hooks.layer_changed(id)
   log("info", "page 4 : couche %s", id)
   return true
 end
 function VL.cycle_layer()
-  local n = #LAYERS
+  local n = LPF.npages()
   if n == 0 then return end
   local idx = 0
   for i, l in ipairs(LAYERS) do if l.id == S.p4_layer then idx = i; break end end
@@ -2881,46 +2896,11 @@ local function p1col(key, fallback) return PAD_RGB[1][key] or fallback or COL.de
 local function ui_sel(fnc) return fn(fnc) end
 
 -- Couche EFFETS : insert, bypass par slot
-VL.register_layer({ id = "fx", name = "Effects", cell = function(row, col)
-  local kind, id, slot = "looper", col, row - 4
-  if row <= 4 then
-    if col > NIN then return nil end
-    kind, id, slot = "input", col, row
-  end
-  local sh = fn(function() VL.toggle_fx(kind, id, slot); VL.fx_nav(kind, id, slot) end)
-  -- l'appui sur un pad de matrice passe par ce "geste de peinture" (pas par fn) : la navigation y est aussi
-  sh.paint = { get = function() return S.fx[kind][id][slot] end, set = function(v) VL.set_fx(kind, id, slot, v); VL.fx_nav(kind, id, slot) end }
-  return { short = sh, hex = (row <= 4) and 0x99FF66 or 0xFFFF99,
-           state = function()
-             if not S.fx_present[kind][id][slot] then return "off" end        -- slot vide : eteint
-             return S.fx[kind][id][slot] and "on" or "idle"                   -- dispo : attenue / actif : allume
-           end,
-           label = (row <= 4) and ("IN" .. col .. " FX" .. row) or ("L" .. col .. " FX" .. (row - 4)) }
-end })
+-- (V3.27 : couche retiree, la page 4 n'a plus que des pages de rushes)
 
 -- Couche GROUPS : affectation des loopers aux groupes (comme la page d'origine), presets de groupe,
 -- et rappel des 3 dernieres lignes de la page Main (memes pads : memes cibles looper / groupe actif)
-VL.register_layer({ id = "groups", name = "Groups", cell = function(row, col)
-  if row <= 4 then                                              -- ligne = groupe, colonne = looper (exclusif par colonne)
-    local sh = fn(function() VL.set_membership(col, row) end)
-    sh.paint = { get = function() return S.group_of[col] == row end,
-                 set = function(v)
-                   if v then VL.assign_group(col, row) elseif S.group_of[col] == row then VL.assign_group(col, 0) end
-                 end }
-    return { short = sh, hex = GROUP_COL[row], label = "L" .. col .. " GRP" .. row,
-             state = function() return S.group_of[col] == row and "on" or "idle" end }
-  elseif row == 5 then                                          -- rappel des presets de groupe (ligne 4 de la page Main)
-    local b = BIND[1]["4," .. col]
-    return { short = b.short, long = b.long, hex = PAD_RGB[1]["4," .. col] or COL.default,
-             label = PAD_LABEL[1]["4," .. col], state = function() return main_state(b) end }
-  else                                                          -- lignes 6-8 : repliquees de la page Main
-    local key = row .. "," .. col
-    local b = BIND[1][key]
-    if not b then return nil end
-    return { short = b.short, long = b.long, hex = PAD_RGB[1][key] or COL.default,
-             label = PAD_LABEL[1][key], state = function() return main_state(b) end }
-  end
-end })
+-- (V3.27 : couche retiree, la page 4 n'a plus que des pages de rushes)
 
 -- Couche RC-505 : une colonne par looper, les fonctions majeures de BAS en HAUT (Rec en bas)
 local RC_ROWS = {
@@ -2929,24 +2909,7 @@ local RC_ROWS = {
   { "reverse",     "REVERSE",   p1col("7,4") },  { "auto_rev", "PING PONG", p1col("7,4") },
   { "slicer",      "SLICER",    p1col("7,6") },  { "cloud",  "CLOUD",     p1col("7,5") },
 }
-VL.register_layer({ id = "rc505", name = "RC-505", cell = function(row, col)
-  local fnrow = RC_ROWS[9 - row]                                -- ligne 8 = Rec (bas), ligne 1 = Cloud (haut)
-  local action, name, hex = fnrow[1], fnrow[2], fnrow[3]
-  local def = ACTIONS[action]
-  -- RESTART en GATE : relance le looper a l'appui ET au relachement
-  local gate_release = (action == "restart") and act_on(col, action) or nil
-  return { short = act_on(col, action), release = gate_release, hex = hex, label = "L" .. col .. " " .. name,
-           state = function()
-             local L = S.loopers[col]
-             if action == "rec_overdub" then
-               if L.wait_sync then return "armed" end  -- clignote
-               if L.overdub then return "warn" end     -- orange
-               if L.rec_led then return "on" end       -- rouge
-               return "idle"
-             end
-             return (def.key and L[def.key]) and "on" or "idle"
-           end }
-end })
+-- (V3.27 : couche retiree, la page 4 n'a plus que des pages de rushes)
 
 -- Pads "-/+" : 2 pads par looper et par parametre ; rangee impaire = loopers 1-4, rangee paire = loopers 5-8
 local function pair_cell(row, col)
@@ -2966,7 +2929,7 @@ local MACRO_EXT = "NowUndo_Macros"
 VL.macros = { by_id = {}, layout = {}, rev = nil, last_poll = -1e9, last_rev = -1e9, flash = {}, on = {}, on_s = nil }
 
 function LPF.macros_parse(txt)
-  local by_id, layout = {}, {}
+  local by_id, layout, pages = {}, {}, {}
   for line in (txt or ""):gmatch("[^\r\n]+") do
     local f = {}
     for w in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = w end
@@ -2974,9 +2937,13 @@ function LPF.macros_parse(txt)
       by_id[math.floor(tonumber(f[2]))] = { id = math.floor(tonumber(f[2])), color = math.floor(tonumber(f[3]) or 0xAAAAAA), name = f[4] or "", text = f[5] or "", toggle = (f[6] == "1"), all = (f[7] == "1"), gate = (f[8] == "1") }
     elseif f[1] == "L" and tonumber(f[2]) and tonumber(f[3]) then
       layout[math.floor(tonumber(f[2]))] = math.floor(tonumber(f[3]))
+    elseif f[1] == "P" and tonumber(f[2]) then
+      pages[math.floor(tonumber(f[2]))] = f[3] or ""
     end
   end
-  return by_id, layout
+  local np = 0; for k in pairs(pages) do if k > np then np = k end end
+  for k = 1, math.min(np, 26) do pages[k] = pages[k] or "" end
+  return by_id, layout, pages
 end
 
 function VL.macros_poll(t)
@@ -3000,7 +2967,10 @@ function VL.macros_poll(t)
   local rev = reaper.GetExtState(MACRO_EXT, "rev")
   if rev == M.rev then return end
   M.rev = rev
-  M.by_id, M.layout = LPF.macros_parse(reaper.GetExtState(MACRO_EXT, "set"))
+  M.by_id, M.layout, M.pages = LPF.macros_parse(reaper.GetExtState(MACRO_EXT, "set"))
+  if #M.pages == 0 then M.pages = { "Rushes" } end
+  for k = 1, 26 do LAYERS[k].name = string.char(96 + k) .. " " .. (M.pages[k] or "") end   -- nom affiche dans le menu
+  if not VL.p4_moff() or (VL.p4_moff() // 64 + 1) > #M.pages then S.p4_layer = "rp1" end
 end
 
 -- libelle d'un pad : le nom, sinon l'action elle-meme (jamais "Macro 3")
@@ -3049,7 +3019,8 @@ end
 function VL.macro_drop(ids, cell)
   VL.macros_layout_edit(function(lay)
     local function cell_of(id) for c, i in pairs(lay) do if i == id then return c end end end
-    local function free_from(c) while c <= 64 and lay[c] do c = c + 1 end; return c end
+    local p0 = ((cell - 1) // 64) * 64                 -- V3.27 : on reste dans la sous-page visee
+    local function free_from(c) while c <= p0 + 64 and lay[c] do c = c + 1 end; return c end
     local nextc = cell
     for n, id in ipairs(ids) do
       local old = cell_of(id)
@@ -3058,14 +3029,14 @@ function VL.macro_drop(ids, cell)
         if old then lay[old] = nil end
         if occ and occ ~= id then
           if old then lay[old] = occ
-          else local c = free_from(1); if c <= 64 then lay[c] = occ end end
+          else local c = free_from(p0 + 1); if c <= p0 + 64 then lay[c] = occ end end
         end
         lay[cell] = id
       else
         if old then lay[old] = nil end
         local c = free_from(nextc + 1)
-        if c > 64 then c = free_from(1) end
-        if c <= 64 then lay[c] = id; nextc = c end
+        if c > p0 + 64 then c = free_from(p0 + 1) end
+        if c <= p0 + 64 then lay[c] = id; nextc = c end
       end
     end
   end)
@@ -3137,16 +3108,22 @@ function VL.macro_cell_def(cell)
       return "on"
     end }
 end
-VL.register_layer({ id = "macros", name = "Rushes", cell = function(row, col)
-  return VL.macro_cell_def((row - 1) * 8 + col)
-end })
+-- V3.27 : page 4 = sous-pages de rushes a..z (id "rp1".."rp26", cases (k-1)*64 + 1..64). Les pages existantes, leurs
+-- noms et leur ordre viennent du script Scenario (lignes P de NowUndo_Macros/set) ; seules celles-ci sont proposees.
+for k = 1, 26 do
+  VL.register_layer({ id = "rp" .. k, name = string.char(96 + k), cell = function(row, col)
+    return VL.macro_cell_def((k - 1) * 64 + (row - 1) * 8 + col)
+  end })
+end
+function VL.p4_moff()                       -- 1re case de la sous-page courante - 1 (nil si la couche n'est pas une page de rushes)
+  local k = tonumber((S.p4_layer or ""):match("^rp(%d+)$"))
+  return k and (k - 1) * 64 or nil
+end
 
 -- Couche LOOP : vrais In / Out (le lien In/Width de l'interface du looper n'est pas utilise),
 -- quantise in/out, full loop, et selecteur de pas (% de la boucle ; si quantisee : une division par appui)
 -- Couche RUSHES 2 (remplace l'ancienne couche Loop, V3.25) : cases 65..128 de la disposition des rushes, meme fonctionnement
-VL.register_layer({ id = "macros2", name = "Rushes 2", cell = function(row, col)
-  return VL.macro_cell_def(64 + (row - 1) * 8 + col)
-end })
+-- (V3.27 : couche retiree, la page 4 n'a plus que des pages de rushes)
 
 -- Dispatch (appui court / long)
 local function dispatch(b)
@@ -4956,8 +4933,8 @@ local HOLD = {
           for n in ids_s:gmatch("%d+") do ids[#ids + 1] = tonumber(n) end
           local r, c = pad_at(cx, cy, CELL, OX, OY)
           local cell
-          local moff = (S.p4_layer == "macros2") and 64 or 0
-          if S.page == 4 and (S.p4_layer == "macros" or S.p4_layer == "macros2") and r and r >= 1 and c <= 8 then cell = moff + (r - 1) * 8 + c
+          local moff = VL.p4_moff()
+          if S.page == 4 and moff and r and r >= 1 and c <= 8 then cell = moff + (r - 1) * 8 + c
           else
             cell = 1
             while cell <= 128 and VL.macros.layout[cell] do cell = cell + 1 end       -- pas sur une case : a la suite
@@ -5020,8 +4997,8 @@ local HOLD = {
 
     elseif edge_up and down_pad then
       local r, c = down_pad[1], down_pad[2]
-      local moff = (S.p4_layer == "macros2") and 64 or 0
-      if S.page == 4 and (S.p4_layer == "macros" or S.p4_layer == "macros2") and r >= 1 and c <= 8 and VL.macro_at(moff + (r - 1) * 8 + c) then
+      local moff = VL.p4_moff()
+      if S.page == 4 and moff and r >= 1 and c <= 8 and VL.macro_at(moff + (r - 1) * 8 + c) then
         local r2, c2 = pad_at(gfx.mouse_x, gfx.mouse_y, CELL, OX, OY)             -- relache sur un autre pad : on DEPLACE la macro
         if r2 and r2 >= 1 and c2 <= 8 and (r2 ~= r or c2 ~= c) then
           local dd = down[r .. "," .. c]
