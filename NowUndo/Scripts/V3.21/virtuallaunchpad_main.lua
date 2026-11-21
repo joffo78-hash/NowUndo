@@ -2266,7 +2266,7 @@ PAD_LABEL[1]["5,2"] = "SYNC/UNSYNC"; PAD_RGB[1]["5,2"] = 0x40C0FF   -- court = p
 -- sa boucle la plus longue (voir VL.drop_group). Allume pendant le calcul. Quantise reste dispo par MIDI Learn / Twister.
 bind(1, 5, 7, fn(function() if pedal_capture_action("drop_group") then return end VL.drop_group() end,
                  function() return VL.DROP.run and "on" or "idle" end))
-PAD_LABEL[1]["5,7"] = "DROP (mixdown du groupe dans la boucle la plus longue)"; PAD_RGB[1]["5,7"] = 0xFF66CC
+PAD_LABEL[1]["5,7"] = "DROP (groupe : mixdown dans la boucle la plus longue ; sans groupe : le looper seul, a plat)"; PAD_RGB[1]["5,7"] = 0xFF66CC
 bind(1, 5, 8, act("full_loop"))
 -- Miroirs FX : helpers (les binds sont UNIQUEMENT sur D5-D8 = 5,5..5,8 plus bas).
 -- Maintenir PAGE 1 (5,9) puis appuyer sur D5-D8 pour changer le mode Toggle/Gate du slot.
@@ -2473,9 +2473,12 @@ function VL.drop_group()
   if VL.mirror_mode or not (reaper and reaper.gmem_attach and reaper.gmem_read and reaper.gmem_write) then return end
   if D.run then VL.drop_note("deja en cours") return end
   local g = S.sel_group or 0
-  if g == 0 or (VL.group_inhibit and VL.group_inhibit()) then VL.drop_note("selectionne un groupe d'abord") return end
+  if VL.group_inhibit and VL.group_inhibit() then g = 0 end
+  -- V3.27 : sans groupe = DROP SOLO du looper selectionne (il enregistre ce qu'il fait entendre : vitesse, reverse, slicer,
+  -- cloud, effets de sa piste... puis le rejoue a plat). Un groupe ou un seul looper joue = drop solo, le groupe reste.
+  local members = (g > 0) and VL.group_members(g) or { S.sel_looper or 0 }
   local cand, tgt, tp = {}, nil, -1
-  for _, i in ipairs(VL.group_members(g)) do
+  for _, i in ipairs(members) do
     local L = S.loopers[i]
     if L and L.playing and (L.length or 0) > 0 then
       cand[#cand + 1] = i
@@ -2483,7 +2486,11 @@ function VL.drop_group()
       if p > tp + 0.5 or (math.abs(p - tp) <= 0.5 and i == S.sel_looper) then tgt, tp = i, p end
     end
   end
-  if #cand < 2 then VL.drop_note("il faut au moins 2 loopers qui jouent dans le groupe %d", g) return end
+  if #cand == 0 then
+    if g > 0 then VL.drop_note("aucun looper ne joue dans le groupe %d", g) else VL.drop_note("le looper selectionne ne joue pas") end
+    return
+  end
+  local solo = (#cand == 1)
   if tp > D.CAP - 4800 then VL.drop_note("boucle trop longue pour le drop (max %.0f s)", D.CAP / 48000) return end
   local tracks = VL.resolve_tracks(true)
   for _, i in ipairs(cand) do
@@ -2496,7 +2503,7 @@ function VL.drop_group()
     VL.drop_note("JSFX 'NU_DropCapture.jsfx' introuvable (dossier Effects de REAPER) ou piste du looper %d pleine", tgt)
     return
   end
-  local R = { phase = "arm", g = g, tgt = tgt, cand = cand, src = {}, tt = tt, ch = ch, nch = nch0, sends = {}, t0 = now() }
+  local R = { phase = "arm", g = solo and 0 or g, tgt = tgt, cand = cand, src = {}, tt = tt, ch = ch, nch = nch0, sends = {}, t0 = now() }
   for _, i in ipairs(cand) do if i ~= tgt then R.src[#R.src + 1] = i end end
   -- sends post-fader temporaires des autres loopers vers les 2 canaux ajoutes de la piste cible
   local pdc = 0
@@ -2571,9 +2578,13 @@ function VL.drop_tick(t)
   if R.phase == "done" then
     if VL.drop_rd(R.tgt, 0) ~= tok + 0.5 and t - R.t1 < 1 then return end
     VL.drop_unsend(R)
+    D.run = nil
+    if R.g == 0 then
+      VL.drop_note("drop solo : le looper %d rejoue a plat ce qu'il faisait entendre (UNDO = sa boucle d'avant)", R.tgt)
+      return
+    end
     for _, i in ipairs(VL.group_members(R.g)) do VL.assign_group(i, 0) end   -- le groupe est supprime
     VL._chord_group[R.g] = nil
-    D.run = nil
     VL.drop_note("%d boucle(s) enregistree(s) dans le looper %d, les autres sont effacees, groupe %d supprime (UNDO sur le looper %d = sa boucle d'avant)",
       #R.cand, R.tgt, R.g, R.tgt)
   end

@@ -149,7 +149,7 @@ local acts = {
   A("act:scn_capture", "Scenario : Capture on/off", "Scenario", "scn_capture"),
   A("act:rec_dub", "Rec -> Overdub (mode, sortie du 1er rec)", "Transport", "rec_dub_toggle"),
   A("act:mute", "Mute (looper, sans couper la piste)", "Transport", "mute"),
-  A("act:drop_group", "Drop de groupe (mixdown dans la boucle la plus longue)", "Transport", "drop_group"),
+  A("act:drop_group", "Drop (groupe : mixdown dans la boucle la plus longue ; sans groupe : looper seul a plat)", "Transport", "drop_group"),
   A("act:warp", "Warp ON/OFF (attaques calees sur la grille)", "Modes", "warp", nil, true),   -- V3.26
   A("act:dub_raw", "Dub A / D (bascule : A compense / D brut)", "Modes", "dub_raw", nil, true),   -- V3.27
 }

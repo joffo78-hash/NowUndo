@@ -308,6 +308,13 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
 
+## 21 nov. : DROP SOLO
+
+- `VL.drop_group()` : **sans groupe sélectionné** (ou groupe où un seul looper joue) = drop du looper seul : il enregistre
+  un passage de ce qu'il fait entendre (vitesse, reverse, slicer, cloud, effets de sa piste) puis le rejoue à plat ; aucun
+  send, rien d'effacé, le groupe éventuel est **gardé** (`R.g = 0`). Même pad B2 / bouton web / MIDI Learn / pédalier.
+  Test `tools/tdrop.py . solo` (A seul en reverse : écart 0 après la bascule, B intact, Undo OK).
+
 ## 21 nov. : page Cloud du Twister refaite + LFO Random / Smooth (JSFX V3.27 en place)
 
 - Page 5 (disposition de l'utilisateur), A en haut : **A** Pos (push = Link/Free) | Density | Size | Agitation ;

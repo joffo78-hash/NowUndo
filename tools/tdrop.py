@@ -5,7 +5,8 @@ Apres la bascule, A seul (sans effet, B efface) doit sonner comme A + effet(B) d
 Usage : cd tools && cp ../NowUndo/NowUndo_V3.25.jsfx v325.jsfx && cp ../NowUndo/NU_DropCapture.jsfx cap.jsfx
         && python3 tdrop.py . [base|arev|gran|speed]
   base  : B normal + effet          arev : A en reverse (la cible est remise a plat apres le drop)
-  gran  : B vitesse x2 SANS Link (granulaire)      speed : A vitesse x2 avec Link (passage = moitie de sa boucle)"""
+  gran  : B vitesse x2 SANS Link (granulaire)      speed : A vitesse x2 avec Link (passage = moitie de sa boucle)
+  solo  : DROP SOLO (V3.27) : A seul en reverse, pas de send ni de source ; B continue sans etre touche"""
 import sys, math
 sys.path.insert(0, sys.argv[1])
 import bench
@@ -40,6 +41,7 @@ class R(Run):
 ra, rb, rc = R(A, sigA, 1, path), R(B, sigB, 2, path), R(C, lambda n: 0.0, 0, 'cap.jsfx')
 feed = {'A': True, 'B': True}
 fx = {'on': True, 'z': [0.0, 0.0]}
+SOLO = len(sys.argv) > 2 and sys.argv[2] == 'solo'      # drop solo : aucun send vers la piste cible
 outB = []          # sortie de la piste B APRES son effet
 
 def fxB(x, ch):
@@ -70,7 +72,7 @@ def step(nblk=1):
         for i in range(BLK):
             A._clock[0] = (n0 + i) / SR
             m.v_spl0 = ra.out[n0 + i][0]; m.v_spl1 = ra.out[n0 + i][1]          # piste cible (apres ses effets)
-            m.v_spl2 = outB[n0 + i][0]; m.v_spl3 = outB[n0 + i][1]              # autres loopers (sends, canaux ajoutes)
+            m.v_spl2 = 0.0 if SOLO else outB[n0 + i][0]; m.v_spl3 = 0.0 if SOLO else outB[n0 + i][1]   # autres loopers (sends)
             m.sec_sample()
         rc.n = n0 + BLK
         A._clock[0] = ra.n / SR
@@ -92,7 +94,7 @@ def scenario(which):
     cmd(B, 1); step(secs(0.9)); cmd(B, 1); step(secs(1.2))
     feed['B'] = False
     print('A length', A.v_length, '| B length', B.v_length, 'state', B.v_state)
-    if which == 'arev': cmd(A, 4); step(2)
+    if which in ('arev', 'solo'): cmd(A, 4); step(2)
     if which == 'gran': B.v_speed = 2.0; B.sec_slider()
     if which == 'speed': A.v_speed = 2.0; A.v_link_on = 1.0; A.sec_slider()
     step(secs(1.5))
@@ -104,7 +106,9 @@ def scenario(which):
     # ---- DROP (comme le script) ----
     tok = 11
     GM[380] = 0; GM[381] = 1; GM[395] = 1.0; GM[396] = 0
-    cmd(A, 34, tok); cmd(B, 35, tok); step(1)
+    cmd(A, 34, tok)
+    if not SOLO: cmd(B, 35, tok)
+    step(1)
     print('arm : A', GM[300], 'L', GM[305], '| B', GM[310])
     GM[393] = tok
     print('debut de capture : instant', GM[301])
@@ -127,14 +131,14 @@ def scenario(which):
     for n in range(s0, s0 + LA):
         nb = n - ((n - nref) // LA) * LA
         for ch in (0, 1):
-            want = ra.out[nb][ch] + rb.out[nb][ch]
+            want = ra.out[nb][ch] + (0.0 if SOLO else rb.out[nb][ch])
             d = abs(ra.out[n][ch] - want)
             if d > err: err = d; at = n
             ref = max(ref, abs(want))
     cl = []; prev = None
     for n in range(s0, s0 + LA):
         nb = n - ((n - nref) // LA) * LA
-        if abs(ra.out[n][0] - ra.out[nb][0] - rb.out[nb][0]) > 0.002:
+        if abs(ra.out[n][0] - ra.out[nb][0] - (0.0 if SOLO else rb.out[nb][0])) > 0.002:
             if prev is None or n - prev > 64: cl.append([n, n])
             cl[-1][1] = n; prev = n
     print('zones d\'ecart (debut, longueur, index de A) :', [(c[0] - s0, c[1] - c[0], int((A_pos_sw + c[0] - nsw) % LA)) for c in cl][:3], 'nb zones', len(cl), 'derniere', (cl[-1][0]-s0, cl[-1][1]-cl[-1][0]) if cl else None)
@@ -151,7 +155,7 @@ def scenario(which):
         e = 0.0
         for n in range(s0 + 2000, s0 + LA - 2000):
             nb = n - ((n - nref) // LA) * LA + lag
-            e = max(e, abs(ra.out[n][0] - ra.out[nb][0] - rb.out[nb][0]))
+            e = max(e, abs(ra.out[n][0] - ra.out[nb][0] - (0.0 if SOLO else rb.out[nb][0])))
         print('  lag', lag, 'ecart %.5f' % e)
     if which == 'speed':
         LD = 1000000; T0 = int(round(GM[301]))
