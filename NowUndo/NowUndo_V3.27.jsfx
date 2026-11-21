@@ -1730,7 +1730,9 @@ function dr_tau(p) local(s, w, d, r, t) (
   s = loop_width > 0 ? floor(loop_start) : 0; w = loop_width > 0 ? floor(loop_width) : floor(length);
   s + w > length ? w = floor(length) - s;
   d = effective_rev ? -1 : 1; r = max(0.01, link_eff ? varispeed : sm_speed);
-  t = d * (p - s) + delay_len - (delay_len - 1) * r; t -= w * floor(t / w);
+  // V3.27 : en reverse l'horloge place la tete a s + w - o - 1 (sync_expected) : -1 pour que l'instant = celui de l'horloge
+  // (sinon, apres la bascule, le recalage sur l'horloge decalait la boucle droppee d'un echantillon)
+  t = d * (p - s) + delay_len - (delay_len - 1) * r - (d < 0 ? 1 : 0); t -= w * floor(t / w);
   t / r;
 );
 function dr_arm_target(tok) local(b, s, w, r, sp, slc) (

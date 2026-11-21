@@ -122,6 +122,7 @@ def scenario(which):
     L0 = int(GM[305]); step(int(math.ceil(2.5 * L0 / BLK)))   # ~2,5 tours captures avant DROP OFF
     GM[380] = tok + 0.25
     k = wait(lambda: GM[300] == tok + 0.5); print('DROP OFF -> bascule %d blocs plus tard | nouvelle longueur %d = %.2f tours | B state %d' % (k, int(A.v_length), A.v_length / L0, B.v_state))
+    print('   debug : js %s t0 %.3f cnt %d cp %d L %d K %d pos %.3f | 301 %.3f' % (A.v_dr_js, A.v_dr_t0, A.v_dr_cnt, A.v_dr_cp, L0, A.v_length, A.v_pos, GM[301]))
     fx['on'] = False                      # le script coupe les effets de la piste cible apres l'accuse
     GM[380] = tok + 0.5
     nsw = ra.n - BLK                      # la cible a bascule au debut du dernier bloc
