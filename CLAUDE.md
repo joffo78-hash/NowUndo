@@ -308,6 +308,13 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
 
+## 21 nov. (suite) : liste des rushes en pages, bouton POSER, palette après une cible
+
+- Liste de l'onglet Rushes = **pages de 64** (2 colonnes × 32, `H._lp`, boutons `< LISTE n/N >` en haut à droite) ; un rush
+  sélectionné / créé ouvre sa page (`mwant`). Avant : seuls les 64 premiers étaient visibles.
+- « → LAUNCHPAD » renommé **« POSER LA SELECTION SUR 4x »** (1/3 de largeur, couleur neutre) ; rangée des pages = « LAUNCHPAD PAGE 4x ».
+- `ED.add` : après une cible seule (`all`, `l3`, `g2`, `in1`) ou `… to`, le mot de la palette est collé par une espace (`all a`), plus par une virgule.
+
 ## 21 nov. : page 4 = pages de rushes, `to g`, `go`
 
 - **Page 4 du Launchpad = sous-pages de rushes a..z** (couches `rp1`..`rp26`, `VL.p4_moff()`, menu = pages existantes

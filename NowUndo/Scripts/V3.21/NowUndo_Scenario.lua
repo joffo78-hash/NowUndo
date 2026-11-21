@@ -1030,7 +1030,8 @@ local HELP = {
   { "DEL  (Suppr)", "supprime la selection (retire aussi les pads du Launchpad)" },
   { "selection", "clic ; Ctrl/Cmd+clic = ajouter / retirer ; Maj+clic = plage ; Ctrl+A = tout" },
   { "glisser", "hors de la fenetre sur le Launchpad = pose a la suite (cases libres, rien n'est ecrase) ; sur un autre rush = reordonner" },
-  { "→ LAUNCHPAD", "bouton : meme effet que le glisser vers le Launchpad (utile pour le Launchpad web)" },
+  { "POSER ... SUR 4x", "bouton : pose les rushes selectionnes sur la page 4x affichee (= glisser hors de la fenetre vers le Launchpad)" },
+  { "LISTE 1/2  < >", "pages de la liste des rushes (64 par page) ; un rush selectionne / cree ouvre sa page" },
   { "RETIRER DU LP / VIDER", "retire la selection / tout du Launchpad (les rushes restent dans le chutier)" },
   { "▶ TESTER  (Espace)", "execute la selection sur le looper / groupe choisi sur le Launchpad" },
   { "EXPORT / IMPORT", "fichier .txt dans Data/NowUndo_Macros : rushes + disposition Launchpad" },
@@ -2717,11 +2718,15 @@ local function mac_draw(W, Hh, down)
   local rows = math.max(1, math.min(MPC, math.floor(list_h / RH)))
   local cw = math.floor((W - 24 - 6) / 2)
   local function colx(c) return 12 + c * (cw + 6) end
+  -- pages de la LISTE : 64 rushes par page (2 colonnes de 32) ; H._lp = page affichee
+  local npg = math.max(1, math.ceil(#macros / (2 * MPC)))
+  H._lp = math.max(1, math.min(npg, H._lp or 1))
+  local base = (H._lp - 1) * 2 * MPC
   local function idx_at(px, py)                        -- macro sous la souris (liste a 2 colonnes)
     if py < LIST_Y or py >= LIST_Y + rows * RH then return nil end
     local c
     if px >= colx(0) and px < colx(0) + cw then c = 0 elseif px >= colx(1) and px < colx(1) + cw then c = 1 else return nil end
-    local i = c * MPC + mscroll + math.floor((py - LIST_Y) / RH) + 1
+    local i = base + c * MPC + mscroll + math.floor((py - LIST_Y) / RH) + 1
     return macros[i] and i or nil
   end
   -- clic droit sur une ligne : menu Copier / Couper / Coller / Dupliquer / Supprimer / Editer / Renommer
@@ -2750,7 +2755,9 @@ local function mac_draw(W, Hh, down)
   local _, ci = mac_find(mcur)
   if mwant then
     if ci then
-      local r = (ci - 1) % MPC + 1
+      local lp = math.ceil(ci / (2 * MPC))                           -- rush sur une autre page de la liste : on y va
+      if lp ~= H._lp then H._lp = lp; base = (lp - 1) * 2 * MPC; mscroll = 0 end
+      local r = (ci - 1 - base) % MPC + 1
       if r - 1 < mscroll then mscroll = r - 1 end
       if r > mscroll + rows then mscroll = r - rows end
     end
@@ -2761,7 +2768,15 @@ local function mac_draw(W, Hh, down)
     mscroll = mscroll - (wheel > 0 and 1 or -1) * 2
     gfx.mouse_wheel = 0
   end
-  mscroll = math.max(0, math.min(math.max(0, math.min(MPC, #macros) - rows), mscroll))
+  mscroll = math.max(0, math.min(math.max(0, math.min(MPC, #macros - base) - rows), mscroll))
+  if npg > 1 or #macros > 0 then                                   -- pages de la liste (en haut a droite)
+    gfx.setfont(2, "Arial", 12, 'b')
+    local x1 = W - 204 - 8 - 26
+    local function go_lp(k) H._lp = (H._lp - 1 + k) % npg + 1; mscroll = 0 end
+    if btn(x1, 6, 26, 22, ">", 0.20, 0.25, 0.35) and npg > 1 then go_lp(1) end
+    if btn(x1 - 4 - 104, 6, 104, 22, "LISTE " .. H._lp .. "/" .. npg, 0.15, 0.30, 0.45) and npg > 1 then go_lp(1) end
+    if btn(x1 - 8 - 104 - 26, 6, 26, 22, "<", 0.20, 0.25, 0.35) and npg > 1 then go_lp(-1) end
+  end
   local cap_mod = gfx.mouse_cap
   local ctrl = (cap_mod & 4) ~= 0 or (OSX and (cap_mod & 32) ~= 0)
   local shift = (cap_mod & 8) ~= 0
@@ -2777,7 +2792,7 @@ local function mac_draw(W, Hh, down)
   for c = 0, 1 do
     local x0 = colx(c)
     for r = 1, rows do
-      local i = c * MPC + mscroll + r
+      local i = base + c * MPC + mscroll + r
       local m = macros[i]
       if m then
         local y = LIST_Y + (r - 1) * RH
@@ -2927,7 +2942,7 @@ local function mac_draw(W, Hh, down)
     end
   end
   if over then
-    local oc, orow = math.floor((over - 1) / MPC), (over - 1) % MPC - mscroll
+    local oc, orow = math.floor((over - 1 - base) / MPC), (over - 1 - base) % MPC - mscroll
     gfx.set(1, 1, 1, 0.9); gfx.rect(colx(oc), LIST_Y + orow * RH, cw, RH, 0)
   end
 
@@ -2954,7 +2969,7 @@ local function mac_draw(W, Hh, down)
     local py, pw = Hh - 128, 26
     local bwp = math.max(60, W - 24 - 2 * pw - 3 * 70 - 5 * 4)
     if btn(12, py, pw, 22, "<", 0.20, 0.25, 0.35) then H._pg = (H._pg - 2) % #H._pages + 1 end
-    if btn(12 + pw + 4, py, bwp, 22, "PAGE 4" .. H._pg_label(H._pg) .. "   (" .. H._pg_count(H._pg) .. "/64)   v", 0.15, 0.30, 0.45) then H._pg_menu(12 + pw + 4, py + 22) end
+    if btn(12 + pw + 4, py, bwp, 22, "LAUNCHPAD PAGE 4" .. H._pg_label(H._pg) .. "   (" .. H._pg_count(H._pg) .. "/64)   v", 0.15, 0.30, 0.45) then H._pg_menu(12 + pw + 4, py + 22) end
     local xx = 12 + pw + 4 + bwp + 4
     if btn(xx, py, pw, 22, ">", 0.20, 0.25, 0.35) then H._pg = H._pg % #H._pages + 1 end
     xx = xx + pw + 4
@@ -2962,9 +2977,10 @@ local function mac_draw(W, Hh, down)
     if btn(xx + 74, py, 70, 22, "NOM PAGE", 0.20, 0.25, 0.35) then H._pg_ren() end
     if btn(xx + 148, py, 70, 22, "SUPPR PAGE", 0.45, 0.15, 0.15) then H._pg_del() end
     gfx.setfont(2, "Arial", 14, 'b')
-    local w2 = math.floor((W - 24 - 4) / 2)
+    local w2 = math.floor((W - 24 - 4) * 2 / 3)
     if btn(12, Hh - 100, w2, 40, "● CAPTURE / VALIDER", 0.55, 0.15, 0.15) then mac_capture_toggle() end
-    if btn(12 + w2 + 4, Hh - 100, W - 12 - (12 + w2 + 4), 40, "→ LAUNCHPAD", 0.15, 0.35, 0.60) then
+    gfx.setfont(2, "Arial", 12, 'b')                                -- pose la selection sur la page 4x affichee (sans glisser, ex. LP web)
+    if btn(12 + w2 + 4, Hh - 100, W - 12 - (12 + w2 + 4), 40, "POSER LA SELECTION SUR 4" .. string.char(96 + H._pg), 0.20, 0.25, 0.35) then
       local ms = sel_ids()
       if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_place(ms) end
     end
