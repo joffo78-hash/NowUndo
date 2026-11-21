@@ -2851,21 +2851,95 @@ local function mac_key(c)
   elseif c == 24 then ED.mcut()                                            -- Ctrl+X : couper
   elseif c == 22 then ED.mpaste()                                          -- Ctrl+V : coller (apres la selection)
   elseif c == 4 then ED.mdup()                                             -- Ctrl+D : dupliquer
-  elseif c == 1 then for _, m in ipairs(macros) do msel[m.id] = true end   -- Ctrl+A
+  elseif c == 1 then for _, k in ipairs(H._view()) do msel[macros[k].id] = true end   -- Ctrl+A (rushes affiches par le filtre)
   elseif c == 30064 or c == 1685026670 then
+    local V = H._view()                                                    -- V3.27 : on se deplace dans la liste filtree
     local _, i = mac_find(mcur)
-    i = i or 0
-    local ni = math.max(1, math.min(#macros, i + (c == 30064 and -1 or 1)))
-    if macros[ni] then
+    local vp = (i and H._vpos[i]) or 0
+    local nv = math.max(1, math.min(#V, vp + (c == 30064 and -1 or 1)))
+    local ni = V[nv]
+    if ni and macros[ni] then
       local id = macros[ni].id
       if (gfx.mouse_cap & 8) ~= 0 then
-        local _, a = mac_find(manchor); a = a or ni
+        local _, a = mac_find(manchor); a = (a and H._vpos[a]) or nv
         msel = {}
-        for k = math.min(a, ni), math.max(a, ni) do msel[macros[k].id] = true end
+        for k = math.min(a, nv), math.max(a, nv) do msel[macros[V[k]].id] = true end
       else msel = { [id] = true }; manchor = id end
       mcur = id; mwant = true
     end
   end
+end
+
+-- V3.27 : FILTRE de la liste des rushes (demande de l'utilisateur) : H._flt.pg = nil (toutes les pages) | 0 (pas poses sur
+-- le Launchpad) | k (poses sur la sous-page 4k) ; H._flt.tg = nil | "tgt" (cible ecrite : l1, g2, in1...) | "all" | "none"
+-- (sans cible = looper / groupe selectionne). H._view() = indices des rushes affiches, H._vpos[i] = leur rang dans la vue.
+H._flt, H._tcl, H._vpos = {}, {}, {}
+H._tclass = function(m)
+  if m.all then return "all" end
+  local c = H._tcl[m.text]; if c then return c end
+  c = "none"
+  local s = H._norm(m.text):lower():gsub("//.*$", ""):gsub("à", " "):gsub("[=:]", " ")
+  for act in (s .. ","):gmatch("([^,]*),") do
+    act = trim(act):gsub("%s*%*%s*[%d%./]*$", "")
+    local tgs = act:match("^(.-)%s*%f[%a]to%s+g%s*%(?%s*%d+%s*%)?$")      -- l3 to g2
+    local w = (tgs or act:match("^%S+") or ""):gsub("%s+", "")
+    if w ~= "" and not act:match("^go%f[%A]") and not act:match("^[rg]%s*%(%s*%d+%s*%)$") and is_tgt(w) then
+      if w == "all" or w == "tous" or w == "*" then c = "all"; break end
+      c = "tgt"
+    end
+  end
+  H._tcl[m.text] = c
+  return c
+end
+H._view = function()
+  local f, V, P, pc = H._flt, {}, {}, nil
+  if f.pg then pc = {}; for cell, id in pairs(layout) do pc[id] = math.ceil(cell / 64) end end
+  for i, m in ipairs(macros) do
+    local ok = true
+    if f.pg then local p = pc[m.id]; if f.pg == 0 then ok = (p == nil) else ok = (p == f.pg) end end
+    if ok and f.tg then ok = (H._tclass(m) == f.tg) end
+    if ok then V[#V + 1] = i; P[i] = #V end
+  end
+  H._vpos = P
+  return V
+end
+H._TGN = { tgt = "cibles", all = "all", none = "non cibles" }
+H._flt_txt = function()
+  local f, t = H._flt, {}
+  if f.pg == 0 then t[#t + 1] = "pas poses" elseif f.pg then t[#t + 1] = "page 4" .. string.char(96 + f.pg) end
+  if f.tg then t[#t + 1] = H._TGN[f.tg] end
+  return table.concat(t, ", ")
+end
+H._flt_menu = function(x, y)
+  local f, np = H._flt, #H._pages
+  local it = { "Tout afficher", "", ">Page du Launchpad", (f.pg == nil and "!" or "") .. "Toutes les pages",
+               (f.pg == 0 and "!" or "") .. "Pas poses sur le Launchpad", "" }
+  for k = 1, np do
+    it[#it + 1] = ((k == np) and "<" or "") .. ((f.pg == k) and "!" or "") .. "4" .. H._pg_label(k) .. "   (" .. H._pg_count(k) .. ")"
+  end
+  it[#it + 1] = ">Cible"
+  it[#it + 1] = (f.tg == nil and "!" or "") .. "Toutes"
+  it[#it + 1] = (f.tg == "tgt" and "!" or "") .. "Cibles  (l1, l2/l3, g2, in1 ...)"
+  it[#it + 1] = (f.tg == "all" and "!" or "") .. "All  (les 8 loopers)"
+  it[#it + 1] = "<" .. (f.tg == "none" and "!" or "") .. "Non cibles  (= looper / groupe selectionne)"
+  gfx.x, gfx.y = x + (H._ox or 0), y
+  local k = gfx.showmenu(table.concat(it, "|"))
+  if k <= 0 then return end
+  if k == 1 then H._flt = {}
+  elseif k == 2 then f.pg = nil elseif k == 3 then f.pg = 0
+  elseif k <= 3 + np then f.pg = k - 3
+  else
+    local tg = ({ false, "tgt", "all", "none" })[k - 3 - np]
+    f.tg = tg or nil
+  end
+  H._lp = 1; mscroll = 0
+end
+-- clic sur "LP c1.3" d'un rush : la page 4 du Launchpad affiche cette sous-page, et les boutons du bas la gerent
+H._show_pg = function(cell)
+  local k = math.ceil(cell / 64)
+  H._pg = k
+  fire_glob({ qname = "p4page_" .. k })
+  msg = "Launchpad : page 4" .. string.char(96 + k) .. " (" .. (H._pages[k] or "") .. ") affichee, rush en " .. lp_name(cell) .. "."; msg_err = false
 end
 
 local MPC = 32                                         -- macros par colonne : la 33e repart en haut de la 2e colonne
@@ -2886,15 +2960,16 @@ local function mac_draw(W, Hh, down)
   local cw = math.floor((W - 24 - 6 * (NC - 1)) / NC)
   local function colx(c) return 12 + c * (cw + 6) end
   -- pages de la LISTE : NC colonnes de 32 rushes ; H._lp = page affichee
-  local npg = math.max(1, math.ceil(#macros / PG))
+  local V = H._view()                                  -- V3.27 : rushes affiches (filtre page / cible)
+  local NV = #V
+  local npg = math.max(1, math.ceil(NV / PG))
   H._lp = math.max(1, math.min(npg, H._lp or 1))
   local base = (H._lp - 1) * PG
-  local function idx_at(px, py)                        -- macro sous la souris (liste a 2 colonnes)
+  local function idx_at(px, py)                        -- macro sous la souris (liste a 2 colonnes) : indice dans macros
     if py < LY or py >= LY + rows * RH then return nil end
     local c
     if px >= colx(0) and px < colx(0) + cw then c = 0 elseif NC > 1 and px >= colx(1) and px < colx(1) + cw then c = 1 else return nil end
-    local i = base + c * MPC + mscroll + math.floor((py - LY) / RH) + 1
-    return macros[i] and i or nil
+    return V[base + c * MPC + mscroll + math.floor((py - LY) / RH) + 1]
   end
   -- clic droit sur une ligne : menu Copier / Couper / Coller / Dupliquer / Supprimer / Editer / Renommer
   local rdn = (gfx.mouse_cap & 2) == 2
@@ -2921,6 +2996,7 @@ local function mac_draw(W, Hh, down)
   ED.mrwas = rdn
   local _, ci = mac_find(mcur)
   if mwant then
+    ci = ci and H._vpos[ci]                                          -- rang dans la liste filtree (nil = cache par le filtre)
     if ci then
       local lp = math.ceil(ci / PG)                                  -- rush sur une autre page de la liste : on y va
       if lp ~= H._lp then H._lp = lp; base = (lp - 1) * PG; mscroll = 0 end
@@ -2935,18 +3011,28 @@ local function mac_draw(W, Hh, down)
     mscroll = mscroll - (wheel > 0 and 1 or -1) * 2
     gfx.mouse_wheel = 0
   end
-  mscroll = math.max(0, math.min(math.max(0, math.min(MPC, #macros - base) - rows), mscroll))
+  mscroll = math.max(0, math.min(math.max(0, math.min(MPC, NV - base) - rows), mscroll))
   do                                                               -- en-tete de la liste
     local hy = LIST_Y + 2
     gfx.setfont(2, "Arial", 12, 'b')
     local function go_lp(k) H._lp = (H._lp - 1 + k) % npg + 1; mscroll = 0 end
-    local a1, a2 = base + 1, math.min(#macros, base + PG)
+    local a1, a2 = base + 1, math.min(NV, base + PG)
     if btn(12, hy, 26, 22, "<", 0.20, 0.25, 0.35) and npg > 1 then go_lp(-1) end
     gfx.set(1, 1, 1, 0.85); gfx.x, gfx.y = 46, hy + 5
-    gfx.drawstr(#macros == 0 and "RUSHES : aucun" or string.format("RUSHES %d-%d sur %d", a1, a2, #macros))
+    gfx.drawstr(NV == 0 and "RUSHES : aucun" or string.format("RUSHES %d-%d sur %d", a1, a2, NV))
     local tx = gfx.x + 8
     if btn(tx, hy, 26, 22, ">", 0.20, 0.25, 0.35) and npg > 1 then go_lp(1) end
-    local bw3 = math.min(120, math.floor((W - 24 - (tx + 34 - 12) - 8) / 3))
+    tx = tx + 34                                                   -- V3.27 : FILTRE (page du Launchpad / cible)
+    local ft = H._flt_txt()
+    local flbl = ft == "" and "FILTRE  v" or ("FILTRE : " .. ft .. "  v")
+    local fw = math.min(230, gfx.measurestr(flbl) + 20)
+    if btn(tx, hy, fw, 22, flbl, ft == "" and 0.20 or 0.15, ft == "" and 0.25 or 0.40, ft == "" and 0.35 or 0.55) then H._flt_menu(tx, hy + 22) end
+    tx = tx + fw + 4
+    if ft ~= "" then
+      if btn(tx, hy, 22, 22, "×", 0.35, 0.18, 0.18) then H._flt = {}; H._lp = 1; mscroll = 0 end
+      tx = tx + 26
+    end
+    local bw3 = math.min(120, math.floor((W - 24 - (tx - 12) - 8) / 3))
     local x3 = W - 12 - 3 * bw3 - 8
     if btn(x3, hy, bw3, 22, capturing and "■ VALIDER" or "● CAPTURE RUSH", 0.55, 0.15, 0.15) then mac_capture_toggle() end
     if not capturing then
@@ -2964,13 +3050,18 @@ local function mac_draw(W, Hh, down)
     gfx.setfont(2, "Arial", 13); gfx.set(1, 1, 1, 0.45)
     gfx.x, gfx.y = 24, LY + 10
     gfx.drawstr("Aucun rush : ● CAPTURE (fais l'action puis VALIDER) ou ADD (ecris la syntaxe, sans looper).")
+  elseif NV == 0 then
+    gfx.setfont(2, "Arial", 13); gfx.set(1, 1, 1, 0.45)
+    gfx.x, gfx.y = 24, LY + 10
+    gfx.drawstr("Aucun rush pour ce filtre (" .. H._flt_txt() .. ").  × a cote de FILTRE = tout afficher.")
   end
   local now_t = reaper.time_precise()
   for c = 0, NC - 1 do
     local x0 = colx(c)
     for r = 1, rows do
-      local i = base + c * MPC + mscroll + r
-      local m = macros[i]
+      local vi = base + c * MPC + mscroll + r
+      local i = V[vi]
+      local m = i and macros[i]
       if m then
         local y = LY + (r - 1) * RH
         if msel[m.id] then gfx.set(0.40, 0.28, 0.08, 1); gfx.rect(x0, y, cw, RH)
@@ -3026,8 +3117,11 @@ local function mac_draw(W, Hh, down)
         end
         -- case de destination sur le Launchpad (ex. 3.5) a la place de l'ancien label secondaire
         local lc = lp_cell_of(m.id)
-        if lc then
-          gfx.setfont(2, "Arial", 11, 'b'); gfx.set(0.4, 0.9, 1, 1)
+        local lph = lc and mx >= x0 + cw - 84 and mx < x0 + cw - 22 and my >= y and my < y + RH
+        if lc then                                                     -- V3.27 : clic = affiche cette page sur le Launchpad
+          gfx.setfont(2, "Arial", 11, 'b')
+          if lph then gfx.set(0.2, 0.45, 0.55, 1); gfx.rect(x0 + cw - 84, y + 3, 62, RH - 6) end
+          gfx.set(0.4, 0.9, 1, 1)
           gfx.x, gfx.y = x0 + cw - 82, y + 6
           gfx.drawstr("LP " .. lp_name(lc))
         end
@@ -3073,13 +3167,15 @@ local function mac_draw(W, Hh, down)
             if not H._ro({ m }) and reaper.MB("Supprimer le rush '" .. mac_label(m) .. "' ?", "NowUndo - rushes", 4) == 6 then
               msel = { [m.id] = true }; mcur = m.id; mac_delete()
             end
+          elseif lph then                                                -- LP c1.3 : affiche la sous-page sur le Launchpad
+            mcur = m.id; msel = { [m.id] = true }; H._show_pg(lc)
           elseif mac_last_click_id == m.id and t - mac_last_click_t < 0.35 then
             mcur = m.id; msel = { [m.id] = true }; drag = nil; mac_edit()
           else
             if shift then
-              local _, a = mac_find(manchor); a = a or i
+              local _, a = mac_find(manchor); a = (a and H._vpos[a]) or vi
               if not ctrl then msel = {} end
-              for k = math.min(a, i), math.max(a, i) do msel[macros[k].id] = true end
+              for k = math.min(a, vi), math.max(a, vi) do msel[macros[V[k]].id] = true end
               mcur = m.id
             elseif ctrl then
               if msel[m.id] then msel[m.id] = nil else msel[m.id] = true end
@@ -3127,7 +3223,8 @@ local function mac_draw(W, Hh, down)
     end
   end
   if over then
-    local oc, orow = math.floor((over - 1 - base) / MPC), (over - 1 - base) % MPC - mscroll
+    local ov = H._vpos[over] or 1
+    local oc, orow = math.floor((ov - 1 - base) / MPC), (ov - 1 - base) % MPC - mscroll
     gfx.set(1, 1, 1, 0.9); gfx.rect(colx(oc), LY + orow * RH, cw, RH, 0)
   end
 

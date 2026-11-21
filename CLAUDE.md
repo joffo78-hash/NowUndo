@@ -325,6 +325,17 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   Export : le fichier garde le texte des rushes (`# nom` au-dessus) ; Import : reconvertit. Exemple de scénario supprimé
   (l'ancien exemple enregistré est vidé). Test `tools/tscn.lua`.
 
+## 21 nov. : FILTRE de la liste des rushes + clic sur « LP c1.3 »
+
+- Bouton **FILTRE ▾** en haut de la liste (à côté de `< RUSHES … >`), menu `gfx.showmenu` : **Page du Launchpad** (toutes /
+  pas posés / 4a..4z avec le nombre de rushes) et **Cible** (toutes / **ciblés** = cible écrite `l1`, `l2/l3`, `g2`, `in1`,
+  `l3 to g2` / **all** = `all` écrit ou case A / **non ciblés** = sélection du LP ; `go`, `g(2)`, `sync` = non ciblés).
+  Les deux se combinent ; bouton bleu avec le résumé + `×` pour tout afficher. `H._flt`, `H._tclass` (cache par texte),
+  `H._view()` (indices affichés), `H._vpos` ; flèches, Maj+clic, Ctrl+A, glisser suivent la liste filtrée ; le numéro de
+  ligne reste celui du rush.
+- **Clic sur « LP c1.3 »** d'un rush : la page 4 du Launchpad passe sur cette sous-page (`p4page_k` dans `NowUndo_VLcmd/q`,
+  va aussi en page 4) et les boutons LAUNCHPAD PAGE 4 du bas la gèrent (`H._show_pg`). Test `tools/tflt.lua`.
+
 ## 21 nov. : `*` quantise sur le cycle du looper (demande de l'utilisateur)
 
 - `*` = prochain début de cycle **du looper visé** (sa position +47 dans In/Out, sens de lecture compris : en reverse le
