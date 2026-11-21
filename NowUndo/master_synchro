@@ -6,10 +6,16 @@ slider2:host_sync_chorus=0<0,1,1>-Host Sync (Chorus)
 slider3:host_sync_bridge=0<0,1,1>-Host Sync (Bridge)
 slider4:host_sync_meas=1<1,16,1>-Host Sync Measures (Reaper)
 slider5:ui_scale=100<25,150,25>UI Zoom (%)
+slider6:sync_grid=0<0,4,1{Bar,Beat,1/8,Triplet,1/16}>Exit Grid (Loop Sync)
+slider7:sync_start=0<0,1,1{Off,On}>Start Sync (wait grid before REC)
+slider8:rephase_on=1<0,1,1{Off,On}>Re-phase Host loops
+slider9:rephase_ms=2<0.5,20,0.5>Re-phase tolerance (ms)
 
 @init
 ext_noinit = 1;
 max_instances = 5;
+ep_prev = 100;   // memoire des etats Host precedents (3 cases)
+ep_prev[0] = 0; ep_prev[1] = 0; ep_prev[2] = 0;
 
 // Réinitialise à 100 si la valeur en mémoire est hors-bornes (notamment l'ancien 1)
 (slider5 < 25 || slider5 > 150) ? slider5 = 100;
@@ -56,6 +62,11 @@ function handle_host_sync_all() local(beats_meas, host_bpm, b_len, m_len, total_
     loop(3,
         offset = (p - 1) * 10;
         enabled = (p == 1 ? slider1 : (p == 2 ? slider2 : slider3));
+        // epoch de synchro Host (gmem[914..916]) : +1 a chaque (re)activation. Les loopers enregistres sous un epoch
+        // anterieur ne sont plus re-phases (ils n'ont plus de rapport avec la nouvelle synchro).
+        // +1 a chaque (re)prise du Host : front montant du slider OU slot repris par autre chose (looper maitre...) puis rendu
+        (enabled > 0.5 && (ep_prev[p - 1] == 0 || gmem[offset] != 2)) ? gmem[913 + p] = gmem[913 + p] + 1;
+        ep_prev[p - 1] = enabled > 0.5 ? 1 : 0;
 
         enabled ? (
             gmem[offset] = 2; 
@@ -97,10 +108,14 @@ function handle_host_sync_all() local(beats_meas, host_bpm, b_len, m_len, total_
         m_active_part < 1 ? m_active_part = 1;
         
         m_part_base = master_gmem_base + (m_active_part - 1) * 200;
-        master_bpm_val = gmem[m_part_base + 150];
+        master_bpm_val = gmem[m_part_base + 155];
     );
 
     gmem[912] = master_bpm_val;
+    gmem[99] = max(0, min(4, floor(slider6 + 0.5)));
+    gmem[94] = slider7 > 0.5 ? 1 : 0;
+    gmem[93] = rephase_on > 0.5 ? 1 : 0;
+    gmem[92] = rephase_ms;
 );
 
 @slider
@@ -113,7 +128,7 @@ handle_host_sync_all();
 
 @sample
 
-@gfx 330 210
+@gfx 330 300
 gfx_clear = 35 + 12 * 256 + 15 * 65536;
 
 (slider5 < 25 || slider5 > 150) ? slider5 = 100;
@@ -232,7 +247,7 @@ function draw_slot(part_name, offset, y) local(locked, mid, mlen, btn_x, hov, sl
             s_part = gmem[s_base + 42];
             s_part < 1 ? s_part = 1;
             s_part_base = s_base + (s_part - 1) * 200;
-            slot_bpm = gmem[s_part_base + 150];
+            slot_bpm = gmem[s_part_base + 155];
         );
     );
 
@@ -322,4 +337,67 @@ draw_slot("MAIN", 0, 40);
 draw_slot("CHORUS", 10, 95);
 draw_slot("BRIDGE", 20, 150);
 
+// --- SELECTEUR DE GRILLE DE SORTIE (sync looper : mesure / temps / croche / triolet / double) ---
+gfx_setfont(4, "Arial", f_ui_sz);
+gfx_set(0.9, 0.8, 0.2, 1);
+set_pos(12, 200);
+gfx_drawstr("Sortie Loop Sync : mesure / temps / subdivision");
+gi_ = 0;
+loop(5,
+    gx_ = 10 + gi_ * 62; gy_ = 214; gw_ = 58; gh_ = 22;
+    ghov_ = mx >= gx_ && mx <= gx_ + gw_ && my >= gy_ && my <= gy_ + gh_;
+    floor(slider6 + 0.5) == gi_ ? gfx_set(0.55, 0.40, 0.08, 1) : gfx_set(0.20, 0.25, 0.35, 1);
+    ghov_ ? ( floor(slider6 + 0.5) == gi_ ? gfx_set(0.65, 0.48, 0.12, 1) : gfx_set(0.28, 0.35, 0.48, 1); );
+    draw_rect(gx_, gy_, gw_, gh_);
+    gfx_set(1, 1, 1, 0.2); draw_frame(gx_, gy_, gw_, gh_);
+    gfx_setfont(2, "Arial", f_ui_sz, 'b');
+    gfx_set(1, 1, 1, 0.9);
+    set_pos(gx_ + 8, gy_ + 6);
+    gi_ == 0 ? gfx_drawstr("BAR") : gi_ == 1 ? gfx_drawstr("BEAT") : gi_ == 2 ? gfx_drawstr("1/8") : gi_ == 3 ? gfx_drawstr("TRIPLET") : gfx_drawstr("1/16");
+    mouse_click && ghov_ ? (
+        slider6 = gi_;
+        sliderchange(32);
+        slider_automate(32);
+        gmem[99] = gi_;
+    );
+    gi_ += 1;
+);
+
+// --- OPTION : ATTENDRE LE POINT DE SYNCHRO AVANT D'ENTRER EN REC (meme grille que la sortie) ---
+sx_ = 10; sy_ = 242; sw_ = 310; sh_ = 22;
+shov_ = mx >= sx_ && mx <= sx_ + sw_ && my >= sy_ && my <= sy_ + sh_;
+slider7 > 0.5 ? gfx_set(0.15, 0.50, 0.30, 1) : gfx_set(0.20, 0.25, 0.35, 1);
+shov_ ? ( slider7 > 0.5 ? gfx_set(0.20, 0.60, 0.38, 1) : gfx_set(0.28, 0.35, 0.48, 1); );
+draw_rect(sx_, sy_, sw_, sh_);
+gfx_set(1, 1, 1, 0.2); draw_frame(sx_, sy_, sw_, sh_);
+gfx_setfont(2, "Arial", f_ui_sz, 'b');
+gfx_set(1, 1, 1, 0.9);
+set_pos(sx_ + 10, sy_ + 6);
+slider7 > 0.5 ? gfx_drawstr("START SYNC : ON  (1er REC, hors Auto-Rec)") : gfx_drawstr("START SYNC : OFF  (REC immediat)");
+mouse_click && shov_ ? (
+    slider7 = slider7 > 0.5 ? 0 : 1;
+    sliderchange(64);
+    slider_automate(64);
+    gmem[94] = slider7;
+);
+
+// --- OPTION : RE-PHASAGE DES LOOPERS SYNCHRO HOST SUR L'HORLOGE DE REAPER ---
+rx_ = 10; ry_ = 270; rw_ = 310; rh_ = 22;
+rhov_ = mx >= rx_ && mx <= rx_ + rw_ && my >= ry_ && my <= ry_ + rh_;
+rephase_on > 0.5 ? gfx_set(0.15, 0.50, 0.30, 1) : gfx_set(0.20, 0.25, 0.35, 1);
+rhov_ ? ( rephase_on > 0.5 ? gfx_set(0.20, 0.60, 0.38, 1) : gfx_set(0.28, 0.35, 0.48, 1); );
+draw_rect(rx_, ry_, rw_, rh_);
+gfx_set(1, 1, 1, 0.2); draw_frame(rx_, ry_, rw_, rh_);
+gfx_setfont(2, "Arial", f_ui_sz, 'b');
+gfx_set(1, 1, 1, 0.9);
+set_pos(rx_ + 10, ry_ + 6);
+rephase_on > 0.5 ? gfx_drawstr("RE-PHASE HOST : ON  (loopers de la synchro courante)") : gfx_drawstr("RE-PHASE HOST : OFF");
+mouse_click && rhov_ ? (
+    rephase_on = rephase_on > 0.5 ? 0 : 1;
+    sliderchange(128);
+    slider_automate(128);
+    gmem[93] = rephase_on;
+);
+
 last_mouse_cap = mouse_cap;
+
