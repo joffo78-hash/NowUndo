@@ -7,7 +7,8 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 ## Où est quoi
 
 - Dépôt : `joffo78-hash/NowUndo`, branche de travail **`nowundo-v3.26`** (créée depuis `ccr-12a0f3a9-86p9ey`, qui contient tout le travail jusqu'au 16 nov. 2026).
-- `NowUndo/NowUndo_V3.26.jsfx` : **version courante du JSFX** (3.19 → 3.25 gardées pour l'historique). Faite à partir du
+- `NowUndo/NowUndo_V3.27.jsfx` : **version courante du JSFX** = V3.26 + dub brut A / D (fait par l'utilisateur) + bouton Mute
+  (3.19 → 3.26 gardées pour l'historique). `NowUndo/NowUndo_V3.26.jsfx` : Faite à partir du
   fichier que l'utilisateur avait chargé dans REAPER (une V3.25 sans `slc_move`, remis ensuite : V3.26 = V3.25 + détection).
 - `NowUndo/NU_DropCapture.jsfx` : capture du drop (posée temporairement par le Launchpad en bout de chaîne de la piste du looper cible).
 - `NowUndo/Scripts/V3.21/` : tous les scripts courants (le nom du dossier est historique) :
@@ -34,7 +35,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `+2` état (0 stop, 1 rec, 2 play, 3 dub, 4 replace, 5 auto-rep, 6 multiply, 7 attente, 8 sync) · `+42` part active ·
 `+44/+45/+46` loop start / width / length · `+47` pos % · `+48` **commande** · `+49` argument ·
 `+50..149` forme d'onde · `+155` BPM estimé · `+160..162` édition In/Out/Width · `+172/+173` VU in/out ·
-`+178/+179` zone des grains du Cloud en % (V3.26) · `+180` id de paramètre à écrire, `+181` valeur (V3.25 : 2 boîtes de plus `+195/+196` et `+197/+198`) · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
+`+156/+157/+158` warp (état / grille / force) · `+159` mode d'overdub (V3.27 : 0 = A compensé, 1 = D brut, lecture seule) · `+178/+179` zone des grains du Cloud en % (V3.26) · `+180` id de paramètre à écrire, `+181` valeur (V3.25 : 2 boîtes de plus `+195/+196` et `+197/+198`) · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
 `+182..184` sync point / ref / len du maître. Global : `0..24` Master Sync par part (`[o]==1` maître looper, `==2` Host,
 `[o+2]` longueur, `[o+3]` position), `100+i` vivant, `130+i` heartbeat, `950/951` heure de l'appui + adresse cible (V3.22),
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
@@ -266,6 +267,20 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
 - `clcic_decall__gauche_ref_droite_looper.wav` : clic 117,4 BPM ; le looper joue des coups espacés de 499,3 ms (120 BPM)
   et saute de ~35 ms à chaque mesure de REAPER (2,044 s) = la boucle dure ~2,0 s au lieu de 2,044 → recalage Host à chaque
   mesure (le « saut sur la 1re attaque »). Cause non trouvée : questions posées (tempo REAPER, Master Sync, Speed, Loop Beats).
+
+## V3.27 (21 nov.) : dub brut A / D (écrit par l'utilisateur) + bouton Mute
+
+- Slider 68 `dub_raw` : **A** (0, « bande ») = overdub compensé d'origine (la couche ressort telle que jouée, sans le
+  pitch / speed / reverse en cours) ; **D** (1, « brut ») = l'entrée est écrite à 1 sample par sample vers l'avant
+  (`dub_raw_tick`, `raw_splat`) dans les zones d'accumulation du dub compensé, collée au bouclage de la tête
+  (`dub_commit_begin`, ou à la sortie de l'overdub), puis relue transformée comme le reste. Seulement hors Slicer et
+  seulement quand quelque chose est transformé (pitch / speed, varispeed, reverse) ; sinon chemin normal. Empilement =
+  somme (poids plafonné à 1). Compensation de latence au départ de l'écriture (`wr_off`). Changement de mode = `dub_flush`.
+- Carré **A / D** en bas à droite du panneau OUTPUT (394, 598). État publié en `+159` (pas encore de commande
+  d'écriture ; pour le piloter de l'extérieur : `wr_id == 67` dans le bloc des paramètres, à faire si demandé).
+- Ajouté par Claude : bouton **Mute** du Transport (venu de la V3.26) ; parenthèses autour d'un `? :` à affectations
+  (`rw_pos`, sens inchangé). Test `tools/traw.py . [0|1] [rev|speed]` : A = impulsion revient à sa place, D = relue en
+  reverse / à la vitesse ; pas de NaN. Non testé dans REAPER.
 
 ## 21 nov. : 8Waves VU / Mute / saturation + bouton Mute du JSFX
 
