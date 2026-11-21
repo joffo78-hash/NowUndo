@@ -1,5 +1,6 @@
 -- @description FX Router v2.8 : bibliothèque JSFX scannée, un seul effet chargé par container
--- @version 2.9
+-- @version 2.10
+-- v2.10 : dock dans REAPER (clic droit sur la fenetre : Docker / Detacher), etat docke garde au redemarrage
 -- v2.9 : instance unique (une 2e instance refuse de demarrer : deux FX Router ouverts se battaient)
 -- v2.8 : source suivie par le Launchpad ; changement d'effet sans réactivation du container ; état piloté par la matrice FX
 -- Nécessite l'extension ReaImGui (ReaPack > ReaTeam Extensions > ReaImGui)
@@ -34,6 +35,13 @@ do
 end
 
 local ctx = reaper.ImGui_CreateContext('FX Router')
+-- v2.10 : docking autorise (normalement deja actif dans ReaImGui ; on s'en assure sans casser une version qui n'a pas ces fonctions)
+if reaper.ImGui_GetConfigVar and reaper.ImGui_ConfigVar_Flags and reaper.ImGui_ConfigFlags_DockingEnable then
+  pcall(function()
+    local f = math.floor(reaper.ImGui_GetConfigVar(ctx, reaper.ImGui_ConfigVar_Flags()))
+    reaper.ImGui_SetConfigVar(ctx, reaper.ImGui_ConfigVar_Flags(), f | reaper.ImGui_ConfigFlags_DockingEnable())
+  end)
+end
 
 ------------------------------------------------------------
 -- Sources
@@ -216,6 +224,8 @@ local DARKBLUE = {
 local clipboard_set = nil
 local clear_popup_requested = false
 local first_frame = true
+local dock_req = nil                 -- v2.10 : demande de dock (-1 = docker de REAPER) / 0 = fenetre libre, appliquee avant Begin
+local dock_saved = tonumber(reaper.GetExtState("FXRouter", "dock")) or 0
 local last_saved_geometry = ""
 
 local function get_geometry()
@@ -735,7 +745,9 @@ local function loop()
   sync_launchpad_source()
   if first_frame then
     local x, y, w, h = load_geometry()
-    if x then
+    if dock_saved ~= 0 and reaper.ImGui_SetNextWindowDockID then
+      dock_req = dock_saved                                   -- etait docke : on le remet dans son docker
+    elseif x then
       reaper.ImGui_SetNextWindowPos(ctx, x, y, reaper.ImGui_Cond_Always())
       reaper.ImGui_SetNextWindowSize(ctx, w, h, reaper.ImGui_Cond_Always())
     else
@@ -749,9 +761,29 @@ local function loop()
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(), 6, 4)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 10, 8)
 
+  if dock_req and reaper.ImGui_SetNextWindowDockID then
+    reaper.ImGui_SetNextWindowDockID(ctx, dock_req, reaper.ImGui_Cond_Always())
+    dock_req = nil
+  end
   local visible, open = reaper.ImGui_Begin(ctx, "FX Router", true, reaper.ImGui_WindowFlags_NoCollapse())
+  local docked = reaper.ImGui_IsWindowDocked and reaper.ImGui_IsWindowDocked(ctx)
+  if reaper.ImGui_GetWindowDockID then                         -- memorise le docker (0 = fenetre libre)
+    local did = docked and math.floor(reaper.ImGui_GetWindowDockID(ctx)) or 0
+    if did ~= dock_saved then dock_saved = did; reaper.SetExtState("FXRouter", "dock", tostring(did), true) end
+  end
 
   if visible then
+    -- v2.10 : clic droit sur la fenetre (hors des boutons / listes) = menu Docker / Detacher, comme les autres scripts
+    if reaper.ImGui_BeginPopupContextWindow(ctx, "##dockmenu",
+        reaper.ImGui_PopupFlags_MouseButtonRight() | reaper.ImGui_PopupFlags_NoOpenOverItems()) then
+      if docked then
+        if reaper.ImGui_MenuItem(ctx, "Detacher (fenetre libre)") then dock_req = 0 end
+      else
+        if reaper.ImGui_MenuItem(ctx, "Docker dans REAPER") then dock_req = -1 end
+      end
+      reaper.ImGui_EndPopup(ctx)
+    end
+
     reaper.ImGui_AlignTextToFramePadding(ctx)
     reaper.ImGui_Text(ctx, "Source")
     reaper.ImGui_SameLine(ctx)
@@ -811,15 +843,15 @@ local function loop()
   end
 
   -- Toujours appeler End après Begin, même lorsque visible == false.
-  save_geometry(false)
+  if not docked then save_geometry(false) end                  -- docke : on garde la position de la fenetre libre
   reaper.ImGui_End(ctx)
   reaper.ImGui_PopStyleVar(ctx, 4)
 
   if open then
     reaper.defer(loop)
   else
-    save_geometry(true)
-    reaper.ImGui_DestroyContext(ctx)
+    if dock_saved == 0 then save_geometry(true) end
+    if reaper.ImGui_DestroyContext then reaper.ImGui_DestroyContext(ctx) end
   end
 end
 
