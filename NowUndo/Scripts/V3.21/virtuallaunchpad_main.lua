@@ -643,6 +643,28 @@ function LPF.set_input_silent(tr, silent)
   return false
 end
 
+-- V3.27 : MUTE d'une entree (rush "in1 mute") = mute de la piste IN, pose comme un mute MANUEL (sans marqueur : le
+-- mute automatique des entrees non routees ne le retire jamais). Demute : la regle automatique reprend la main ensuite.
+-- mode = "on" | "off" | "tog" ; etat lu = muet ET pas un mute automatique
+function VL.input_muted(k)
+  if not (reaper and reaper.GetMediaTrackInfo_Value) then return false end
+  local tr = VL.resolve_tracks(false).inputs[k]
+  if not tr then return false end
+  local _, mark = reaper.GetSetMediaTrackInfo_String(tr, AUTOMUTE_KEY, "", false)
+  return reaper.GetMediaTrackInfo_Value(tr, "B_MUTE") == 1 and mark ~= "1"
+end
+function VL.set_input_mute(k, mode)
+  if not (reaper and reaper.SetMediaTrackInfo_Value) then return false end
+  local tr = VL.resolve_tracks(false).inputs[k]
+  if not tr then return false end
+  local on = (mode == "on") or (mode == "tog" and not VL.input_muted(k))
+  reaper.GetSetMediaTrackInfo_String(tr, AUTOMUTE_KEY, "", true)        -- plus un mute automatique : il est a toi
+  reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", on and 1 or 0)
+  if not on and VL.apply_routing then pcall(VL.apply_routing) end        -- entree non routee : la regle automatique la recoupe
+  log("info", "IN%d : mute %s", k, on and "on" or "off")
+  return true
+end
+
 -- Retire le mute automatique pose par le script (pas les mutes manuels)
 function LPF.clear_input_automute(tr)
   if not tr then return end
@@ -2640,6 +2662,9 @@ function VL.ext_cmd_poll()
       if lp and lp >= 1 and lp <= NPAGE and S.page ~= lp then VL.set_page(lp) end
       local pk = tonumber(name:match("^p4page_(%d+)$"))
       if pk and VL.set_layer("rp" .. pk) and S.page ~= 4 then VL.set_page(4) end
+      local mk, mm = name:match("^inmute_(%d+)_(%a+)$")                    -- V3.27 : rush "in1 mute" / "in1 mute off"
+      mk = tonumber(mk)
+      if mk and mk >= 1 and mk <= NIN then VL.set_input_mute(mk, mm) end
       local tw = tonumber(name:match("^twpage_(%d+)$"))
       if tw and tw >= 1 and tw <= 8 then VL.set_fighter_page(tw) end
     end
@@ -4006,7 +4031,7 @@ function VL.dash_publish(force, t)
   for k = 1, NIN do
     local f = 0
     for sl = 1, NSLOT do if S.fx.input[k] and S.fx.input[k][sl] then f = f | (1 << (sl - 1)) end end
-    xm[k] = f
+    xm[k] = f + (VL.input_muted(k) and 1000 or 0)                          -- + 1000 = entree mute (rush "in1 mute")
   end
   local sig = table.concat(gm, ",") .. "|" .. table.concat(im, ",") .. "|" .. table.concat(lm, ",") .. "|" .. table.concat(fm, ",") .. "|" .. table.concat(xm, ",")
   if not force and sig == DASH.last_sig and (t - DASH.last_t) < 1.0 then return end   -- changement, ou rafraichissement 1 Hz
@@ -4018,7 +4043,7 @@ function VL.dash_publish(force, t)
     reaper.gmem_write(DASH.base + 20 + i, lm[i])
     reaper.gmem_write(DASH.base + 30 + i, fm[i])
   end
-  for k = 1, NIN do reaper.gmem_write(DASH.base + 40 + k, xm[k]) end
+  for k = 1, NIN do reaper.gmem_write(DASH.base + 40 + k, xm[k] % 1000); reaper.gmem_write(DASH.base + 50 + k, xm[k] >= 1000 and 1 or 0) end
 end
 
 -- Pedal Board : commandes de selection de looper (ExtState "NowUndo_Pedal/lp_cmd" = ts \t nom \t arg)

@@ -525,7 +525,16 @@ local function compile(text, forced, toggle, gate_off)
             if not ops then errs[#errs + 1] = "[" .. act .. "] " .. k .. " : " .. err; ok = false; break end
             for _, i in ipairs(targets) do
               for _, op in ipairs(ops) do
-                if i > 100 and op.glob ~= "fx" then errs[#errs + 1] = "[" .. act .. "] sur une entree (in" .. (i - 100) .. ") : seulement fx 1..4"; ok = false; break end
+                if i > 100 and k == "mute" then             -- V3.27 : mute d'une ENTREE = mute de sa piste (par le Launchpad)
+                  local w = true
+                  local vv = inline[n] or val
+                  if vv ~= nil then w = onoff(vv) end
+                  if H._omode then w = not w end
+                  local md = tmode and "tog" or (w and "on" or "off")
+                  items[#items + 1] = { i = i, glob = "inmute", qname = string.format("inmute_%d_%s", i - 100, md), key = "mute" }
+                  break
+                end
+                if i > 100 and op.glob ~= "fx" then errs[#errs + 1] = "[" .. act .. "] sur une entree (in" .. (i - 100) .. ") : seulement fx 1..4 et mute"; ok = false; break end
                 if not op.all then items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, glob = op.glob, slot = op.slot, want = op.want, key = k .. (op.slot and ("#" .. op.slot) or "") } end
               end
             end
@@ -914,7 +923,8 @@ local HELP = {
   { ".", "separateur decimal (0.25) : la virgule separe les actions" },
   { "//", "commentaire jusqu'a la fin de la ligne" },
   { "R(n)  G(n)", "rappelle le preset de ROUTING (R) / de GROUPE (G) n°1-8 de la page principale du Launchpad  (r(2), g(3))" },
-  { "in1 fx 2", "effet 2 de l'entree 1 (in1-in8, ou i1) ; l1 fx 2 = l1 e2 = effet 2 du looper 1. Sur une entree : seulement fx" },
+  { "in1 fx 2", "effet 2 de l'entree 1 (in1-in8, ou i1) ; l1 fx 2 = l1 e2 = effet 2 du looper 1. Sur une entree : fx et mute" },
+  { "in1 mute", "coupe la piste de l'entree 1 (plus rien vers les loopers ni la sortie) ; in1 mute off = la remet" },
   { "l3 to g2", "met L3 dans le groupe 2 (il quitte son ancien groupe) ; to g0 = sans groupe. En toggle / gate : OFF = sort du groupe" },
   { "go lp 2  go 4c  go t3", "appelle la page 2 du Launchpad | la page de rushes c (page 4) | la page 3 du Twister" },
   { "double-clic", "sur un pas de la liste : l'editer   (GO / Espace : l'executer)" },
@@ -2311,6 +2321,11 @@ local function mac_active(m, targets)
   end
   local key = split_key(t[1]:match("[^/]+") or "")
   if not key then return false end
+  if key == "mute" and #targets > 0 and targets[1] > 100 then   -- V3.27 : entree mute (gmem 6050+n, publie par le Launchpad)
+    local want = not (t[2] == "off" or (t[1]:match("off$") ~= nil))
+    for _, i in ipairs(targets) do if i <= 100 or ((rd(6050 + i - 100) > 0.5) ~= want) then return false end end
+    return true
+  end
   local fsl = tonumber(key:match("^e([1-4])$"))         -- V3.27 : effet allume = slot actif (gmem 6030+i loopers, 6040+n entrees)
   if fsl then
     if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end
@@ -2366,7 +2381,9 @@ H._mirror = function(m)
   if a:match("%f[%a]to%s+g%s*%(?%s*%d+%s*%)?$") then return true end
   local w = {}
   for x in a:gmatch("%S+") do w[#w + 1] = x end
+  local inp = w[1] and w[1]:match("^in?[%d%(]") ~= nil
   if w[1] and is_tgt(w[1]) then table.remove(w, 1) end
+  if inp and w[1] and w[1]:match("^mute") then return true end        -- mute d'une entree : suit la piste
   return w[1] ~= nil and w[1]:match("^e[1-4]") ~= nil
 end
 local mac_on_t, mac_on_s = 0, nil

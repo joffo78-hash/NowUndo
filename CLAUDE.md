@@ -41,7 +41,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
 (sert aussi d'enregistrement au drop), **drop de groupe (V3.25)** : `300 + k*10` accusé du looper k (+0 jeton, +1 horloge
 du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 abandon), `381` cible, `393` départ capture,
-`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Tableau de bord (Launchpad)** : `6000+i` groupe, `6010+i` / `6020+i` masques des sources, `6030+i` masque des slots FX actifs du looper i (V3.26), `6040+n` masque des slots FX actifs de l'entrée n (V3.27). **Nouveau REC (V3.25)** : `398` heure, `399` id.
+`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Tableau de bord (Launchpad)** : `6000+i` groupe, `6010+i` / `6020+i` masques des sources, `6030+i` masque des slots FX actifs du looper i (V3.26), `6040+n` masque des slots FX actifs de l'entrée n (V3.27). `6050+n` = 1 si l'entrée n est mutée à la main / par rush (V3.27). **Nouveau REC (V3.25)** : `398` heure, `399` id.
 
 **Commandes JSFX (+48)** : 1 rec/dub, 2 clear, 3 stop/play, 4 reverse, 5 ping-pong, 6 slicer, 7 cloud, 8 link,
 9 replace, 10 auto-replace, 11 clear full, 12 part, 13 multiply, 14 undo, 15 redo, 16 restart, 17 re-rec, 18 one-shot,
@@ -302,6 +302,9 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   une fois en dernière page (`H._fxpage`, ExtState persistant `NowUndo_Macros/fx_page` = 1) : rangées 1-4 = FX 1-4 de
   IN1-8, rangées 5-8 = FX 1-4 de L1-8, en toggle. Rushes toggle **miroir** (`H._mirror` : 1re action = effet ou `to g`) :
   pad allumé = état réel (masques 6030 / 6040, groupe 6000), un appui inverse l'état réel (pas la pile).
+- **`in1 mute` / `in1 mute off`** : mute de la piste IN (`VL.set_input_mute`, commande `inmute_<n>_<on|off|tog>`), posé comme
+  un mute manuel (marqueur d'auto-mute effacé) → le mute auto des entrées non routées ne le retire pas ; au démute,
+  `apply_routing` réapplique la règle auto. Un mute auto ne compte pas comme « muté » (LED). Rush toggle = miroir.
 - Limites connues : LED des pads RC-505 = allumé / éteint (plus de rouge / orange / clignotant du REC) ; Restart n'est plus
   en gate ; effets des entrées : revenus en rushes (`in1 fx 2`, page Effets).
 - Tests : mocks lupa (`tools/trush_tgt.lua` + scénario pages / commandes) ; non testé dans REAPER.
