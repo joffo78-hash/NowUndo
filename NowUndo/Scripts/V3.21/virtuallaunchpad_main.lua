@@ -4953,11 +4953,14 @@ local HOLD = {
           local cell
           local moff = VL.p4_moff()
           if S.page == 4 and moff and r and r >= 1 and c <= 8 then cell = moff + (r - 1) * 8 + c
-          else
-            cell = 1
-            while cell <= 128 and VL.macros.layout[cell] do cell = cell + 1 end       -- pas sur une case : a la suite
+          else                                                                      -- pas sur une case : a la suite,
+            local p0 = (S.page == 4 and moff) or 0                                  -- dans la sous-page affichee (sinon a)
+            cell = p0 + 1
+            while cell <= p0 + 64 and VL.macros.layout[cell] do cell = cell + 1 end
+            if cell > p0 + 64 then cell = nil; log("warn", "rush non pose : sous-page pleine (64 pads)") end
           end
-          if cell <= 64 and #ids > 0 then VL.macro_drop(ids, cell) end
+          -- V3.27 : 26 sous-pages de 64 (avant : limite 64 = seule la sous-page a acceptait un depot)
+          if cell and cell <= 26 * 64 and #ids > 0 then VL.macro_drop(ids, cell) end
         end
       end
     end

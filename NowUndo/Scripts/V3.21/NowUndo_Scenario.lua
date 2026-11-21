@@ -2632,7 +2632,8 @@ local function mac_drop_outside(d)
   for _, m in ipairs(ms) do ids[#ids + 1] = tostring(m.id) end
   local x, y = reaper.GetMousePosition()
   reaper.SetExtState(MAC_EXT, "drop", string.format("%s\t%d\t%d\t%.3f", table.concat(ids, ","), x, y, reaper.time_precise()), false)
-  msg = #ms .. " rush(es) depose(s) sur le Launchpad (case sous le curseur)."; msg_err = false
+  msg = #ms .. " rush(es) envoye(s) au Launchpad..."; msg_err = false
+  H._dropchk = { id = ms[1].id, t = reaper.time_precise() }        -- verifie 1,5 s plus tard que le Launchpad l'a bien pose
 end
 
 local function mac_key(c)
@@ -2714,6 +2715,11 @@ end
 local MPC = 32                                         -- macros par colonne : la 33e repart en haut de la 2e colonne
 local mflash = {}
 local function mac_draw(W, Hh, down)
+  if H._dropchk and reaper.time_precise() - H._dropchk.t > 1.5 then
+    local c = lp_cell_of(H._dropchk.id); H._dropchk = nil
+    if c then msg = "Rush pose sur le Launchpad en " .. lp_name(c) .. "."; msg_err = false
+    else msg = "Le Launchpad n'a pas pris le rush : relache-le sur sa fenetre (page 4, sous-page non pleine), ou bouton POSER."; msg_err = true end
+  end
   local list_h = Hh - LIST_Y - 162   -- V3.27 : + la rangee des pages
   local rows = math.max(1, math.min(MPC, math.floor(list_h / RH)))
   local cw = math.floor((W - 24 - 6) / 2)
