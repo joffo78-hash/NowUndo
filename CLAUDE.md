@@ -312,7 +312,10 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 
 - Liste de l'onglet Rushes = **pages de 64** (2 colonnes × 32, `H._lp`, boutons `< LISTE n/N >` en haut à droite) ; un rush
   sélectionné / créé ouvre sa page (`mwant`). Avant : seuls les 64 premiers étaient visibles.
-- « → LAUNCHPAD » renommé **« POSER LA SELECTION SUR 4x »** (1/3 de largeur, couleur neutre) ; rangée des pages = « LAUNCHPAD PAGE 4x ».
+- Bouton « → LAUNCHPAD » **supprimé** (jugé superflu ; CAPTURE pleine largeur) ; rangée des pages = « LAUNCHPAD PAGE 4x ».
+- **Clic droit sur un pad de la page 4 du Launchpad virtuel** : case vide = le Scenario (rouvert s'il était fermé) ouvre
+  l'éditeur de nouveau rush, le rush validé est posé sur cette case (`ED.cell`) ; case occupée = édition du rush.
+  Protocole : `NowUndo_Scn/lp_new` = `case\tid (0 = vide)\ttemps` → `H._lpreq` traité dans `main`.
 - **Glisser un rush vers le Launchpad** : le Launchpad refusait toute case > 64 (reste d'avant les sous-pages) → impossible de
   déposer ailleurs qu'en 4a. Corrigé (limite 26 × 64 ; hors d'un pad = 1re case libre de la sous-page affichée). Le Scenario
   vérifie 1,5 s après (`H._dropchk`) et dit « posé en c1.3 » ou « le Launchpad n'a pas pris le rush ».

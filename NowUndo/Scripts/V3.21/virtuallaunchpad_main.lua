@@ -4935,6 +4935,18 @@ local HOLD = {
     local edge_up   = (not pressed) and was_pressed
     was_pressed = pressed
     lp_poll_input(t)
+    -- V3.27 : clic droit sur un pad de rush (page 4) : case vide = creer un rush ici, case occupee = l'editer (fenetre du Scenario)
+    local rpress = (cap & 2) == 2
+    if rpress and not VL._rwas and S.page == 4 and VL.p4_moff() then
+      local r, c = pad_at(gfx.mouse_x, gfx.mouse_y, CELL, OX, OY)
+      if r and r >= 1 and c <= 8 then
+        local cell = VL.p4_moff() + (r - 1) * 8 + c
+        reaper.SetExtState("NowUndo_Scn", "lp_new", string.format("%d\t%d\t%.3f", cell, VL.macros.layout[cell] or 0, reaper.time_precise()), false)
+        local hb = tonumber(reaper.GetExtState("NowUndo_Scn", "alive")) or 0
+        if reaper.time_precise() - hb > 2 then log("warn", "clic droit : lance le script NowUndo_Scenario pour creer / editer un rush") end
+      end
+    end
+    VL._rwas = rpress
 
     -- Macros deposees depuis NowUndo_Scenario (glisser-deposer) : ExtState NowUndo_Macros/drop = ids <TAB> x ecran <TAB> y ecran <TAB> temps
     local dq = reaper.GetExtState("NowUndo_Macros", "drop")

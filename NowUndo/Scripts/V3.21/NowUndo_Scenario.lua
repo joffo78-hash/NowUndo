@@ -1030,7 +1030,7 @@ local HELP = {
   { "DEL  (Suppr)", "supprime la selection (retire aussi les pads du Launchpad)" },
   { "selection", "clic ; Ctrl/Cmd+clic = ajouter / retirer ; Maj+clic = plage ; Ctrl+A = tout" },
   { "glisser", "hors de la fenetre sur le Launchpad = pose a la suite (cases libres, rien n'est ecrase) ; sur un autre rush = reordonner" },
-  { "POSER ... SUR 4x", "bouton : pose les rushes selectionnes sur la page 4x affichee (= glisser hors de la fenetre vers le Launchpad)" },
+  { "clic droit (Launchpad)", "sur une case vide de la page 4 : cree un rush pose sur cette case ; sur un rush : l'edite" },
   { "LISTE 1/2  < >", "pages de la liste des rushes (64 par page) ; un rush selectionne / cree ouvre sa page" },
   { "RETIRER DU LP / VIDER", "retire la selection / tout du Launchpad (les rushes restent dans le chutier)" },
   { "▶ TESTER  (Espace)", "execute la selection sur le looper / groupe choisi sur le Launchpad" },
@@ -1756,24 +1756,6 @@ local function lp_count() local n = 0; for _ in pairs(layout) do n = n + 1 end; 
 local function lp_cell_of(id) for c, i in pairs(layout) do if i == id then return c end end end
 local function lp_name(c) local k = (c - 1) % 64; return string.format("%s%d.%d", string.char(96 + math.ceil(c / 64)), k // 8 + 1, k % 8 + 1) end
 
--- pose des macros sur le Launchpad : a la suite, dans les premieres cases libres (rien n'est ecrase)
-local function lp_place(ms)
-  local placed, already, full = 0, 0, false
-  for _, m in ipairs(ms) do
-    if lp_cell_of(m.id) then already = already + 1
-    else
-      local c, c1 = (H._pg - 1) * 64 + 1, H._pg * 64         -- V3.27 : dans la sous-page affichee
-      while c <= c1 and layout[c] do c = c + 1 end
-      if c > c1 then full = true; break end
-      layout[c] = m.id; placed = placed + 1
-    end
-  end
-  if placed > 0 then mac_save() end
-  msg = placed .. " rush(es) pose(s) sur la page 4" .. string.char(96 + H._pg) .. " du Launchpad"
-        .. (already > 0 and ("  (" .. already .. " deja presente(s))") or "")
-        .. (full and "  -  page pleine (64 pads) : ajoute une page (+ PAGE)" or "")
-  msg_err = full
-end
 local function lp_remove(ms)
   local n = 0
   for _, m in ipairs(ms) do
@@ -2076,7 +2058,7 @@ end
 local function mac_new()                    -- ADD : ouvre l'editeur (assistant + palette) sur une macro vide
   if #macros >= MAC_MAX then msg = MAC_MAX .. " rushes maximum."; msg_err = true; return end
   ED.on, ED.id, ED.new, ED.text, ED.off, ED.star = true, nil, true, "", false, false
-  ED.cur, ED.sug, ED.si, ED.view = 0, {}, 1, 0
+  ED.cur, ED.sug, ED.si, ED.view, ED.cell = 0, {}, 1, 0, nil
   ED.refocus()
 end
 -- titre propose = le contenu (virgules -> " - ", tronque)
@@ -2092,6 +2074,10 @@ function ED.create(text)
   local ok2, nm = reaper.GetUserInputs("Nom du rush", 1, "Nom (vide = afficher l'action) :,extrawidth=240", ED.title(text))
   reaper.SetExtState("NowUndo_Scn", "typing", "0", false)
   local m = mac_add(text, ok2 and nm or "", nil)
+  if m and ED.cell then                                            -- V3.27 : cree par clic droit sur une case du Launchpad
+    if not layout[ED.cell] then layout[ED.cell] = m.id; mac_save() end
+    ED.cell = nil
+  end
   if m then msg = m.err and ("Rush cree mais invalide : " .. m.err) or ("Rush cree : " .. mac_label(m)); msg_err = m.err ~= nil end
 end
 local function mac_recolor()
@@ -2404,6 +2390,12 @@ local mac_on_t, mac_on_s = 0, nil
 -- declenchements venant du Launchpad (ExtState NowUndo_Scn/mcr : id<TAB>cibles<TAB>temps) + heartbeat "alive"
 local function mac_poll()
   local t = reaper.time_precise()
+  local rq = reaper.GetExtState(CAPEXT, "lp_new")                  -- V3.27 : clic droit sur un pad de la page 4 du Launchpad
+  if rq ~= "" then
+    reaper.SetExtState(CAPEXT, "lp_new", "", false)
+    local c, id, ts = rq:match("^(%d+)\t(%d+)\t([%d%.]+)")
+    if c and t - tonumber(ts) < 3 then H._lpreq = { cell = tonumber(c), id = tonumber(id) }; if H._bg then H._open() end end
+  end
   if t - mac_on_t > 0.12 then                                      -- pads toggle du Launchpad : ON = plein feu, OFF = attenue
     mac_on_t = t
     local tg, ids = sel_targets(), {}
@@ -2725,7 +2717,7 @@ local function mac_draw(W, Hh, down)
   if H._dropchk and reaper.time_precise() - H._dropchk.t > 1.5 then
     local c = lp_cell_of(H._dropchk.id); H._dropchk = nil
     if c then msg = "Rush pose sur le Launchpad en " .. lp_name(c) .. "."; msg_err = false
-    else msg = "Le Launchpad n'a pas pris le rush : relache-le sur sa fenetre (page 4, sous-page non pleine), ou bouton POSER."; msg_err = true end
+    else msg = "Le Launchpad n'a pas pris le rush : relache-le sur sa fenetre (page 4, sous-page non pleine)."; msg_err = true end
   end
   local list_h = Hh - LIST_Y - 162   -- V3.27 : + la rangee des pages
   local rows = math.max(1, math.min(MPC, math.floor(list_h / RH)))
@@ -2990,13 +2982,7 @@ local function mac_draw(W, Hh, down)
     if btn(xx + 74, py, 70, 22, "NOM PAGE", 0.20, 0.25, 0.35) then H._pg_ren() end
     if btn(xx + 148, py, 70, 22, "SUPPR PAGE", 0.45, 0.15, 0.15) then H._pg_del() end
     gfx.setfont(2, "Arial", 14, 'b')
-    local w2 = math.floor((W - 24 - 4) * 2 / 3)
-    if btn(12, Hh - 100, w2, 40, "● CAPTURE / VALIDER", 0.55, 0.15, 0.15) then mac_capture_toggle() end
-    gfx.setfont(2, "Arial", 12, 'b')                                -- pose la selection sur la page 4x affichee (sans glisser, ex. LP web)
-    if btn(12 + w2 + 4, Hh - 100, W - 12 - (12 + w2 + 4), 40, "POSER LA SELECTION SUR 4" .. string.char(96 + H._pg), 0.20, 0.25, 0.35) then
-      local ms = sel_ids()
-      if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_place(ms) end
-    end
+    if btn(12, Hh - 100, W - 24, 40, "● CAPTURE / VALIDER", 0.55, 0.15, 0.15) then mac_capture_toggle() end
     gfx.setfont(2, "Arial", 12, 'b')
     local bw = math.floor((W - 24 - 4 * 6) / 7)
     local labels = { "ADD", "EDIT", "NOM", "COULEUR", H._learn and "MIDI ..." or "MIDI", "▲", "▼" }
@@ -3065,6 +3051,19 @@ local function main()
   mac_poll()
   if capturing then cap_poll() end
   if tl.on and not capturing then tl_poll() end
+  if H._lpreq then                                                 -- V3.27 : clic droit sur un pad du Launchpad
+    local rq = H._lpreq; H._lpreq = nil
+    if capturing then msg = "Termine la capture avant de creer un rush."; msg_err = true
+    else
+      if ED.on then ED.close(false) end
+      show_help = false
+      if tab ~= "mac" then set_tab("mac") end
+      local m = rq.id > 0 and mac_find(rq.id)
+      if m then msel = { [m.id] = true }; mcur = m.id; mwant = true; mac_edit()
+      else mac_new(); if ED.on then ED.cell = rq.cell end
+        msg = "Nouveau rush pour la case " .. lp_name(rq.cell) .. " du Launchpad : ecris-le puis Entree."; msg_err = false end
+    end
+  end
 
   mx, my = gfx.mouse_x, gfx.mouse_y
   local down = (gfx.mouse_cap & 1) == 1
