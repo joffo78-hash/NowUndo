@@ -1,5 +1,6 @@
 -- @description FX Router v2.8 : bibliothèque JSFX scannée, un seul effet chargé par container
--- @version 2.10
+-- @version 2.11
+-- v2.11 : End seulement si la fenetre est visible (erreur "End() too many times" une fois dockee)
 -- v2.10 : dock dans REAPER (clic droit sur la fenetre : Docker / Detacher), etat docke garde au redemarrage
 -- v2.9 : instance unique (une 2e instance refuse de demarrer : deux FX Router ouverts se battaient)
 -- v2.8 : source suivie par le Launchpad ; changement d'effet sans réactivation du container ; état piloté par la matrice FX
@@ -842,15 +843,16 @@ local function loop()
     end
   end
 
-  -- Toujours appeler End après Begin, même lorsque visible == false.
-  if not docked then save_geometry(false) end                  -- docke : on garde la position de la fenetre libre
-  reaper.ImGui_End(ctx)
+  -- ReaImGui : End seulement si Begin a renvoye visible (fenetre dockee cachee = visible false ; End en trop = erreur)
+  if visible then
+    if not docked then save_geometry(false) end                -- docke : on garde la position de la fenetre libre
+    reaper.ImGui_End(ctx)
+  end
   reaper.ImGui_PopStyleVar(ctx, 4)
 
   if open then
     reaper.defer(loop)
   else
-    if dock_saved == 0 then save_geometry(true) end
     if reaper.ImGui_DestroyContext then reaper.ImGui_DestroyContext(ctx) end
   end
 end
