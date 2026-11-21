@@ -2729,7 +2729,7 @@ local function mac_draw(W, Hh, down)
     if c then msg = "Rush pose sur le Launchpad en " .. lp_name(c) .. "."; msg_err = false
     else msg = "Le Launchpad n'a pas pris le rush : relache-le sur sa fenetre (page 4, sous-page non pleine)."; msg_err = true end
   end
-  local list_h = Hh - LIST_Y - 162   -- V3.27 : + la rangee des pages
+  local list_h = Hh - LIST_Y - (capturing and 162 or 118)   -- CAPTURE est un bouton normal (plus de grande rangee)
   local rows = math.max(1, math.min(MPC, math.floor(list_h / RH)))
   local cw = math.floor((W - 24 - 6) / 2)
   local function colx(c) return 12 + c * (cw + 6) end
@@ -2962,7 +2962,7 @@ local function mac_draw(W, Hh, down)
   end
 
   -- message
-  local my0 = Hh - 156
+  local my0 = Hh - (capturing and 156 or 112)
   gfx.setfont(2, "Arial", 12)
   if msg_err then gfx.set(1, 0.4, 0.4, 1) else gfx.set(0.6, 0.9, 0.6, 1) end
   gfx.x, gfx.y = 14, my0
@@ -2981,7 +2981,7 @@ local function mac_draw(W, Hh, down)
   if capturing then cap_panel(W, Hh) else
     -- V3.27 : pages de la page 4 du Launchpad
     gfx.setfont(2, "Arial", 12, 'b')
-    local py, pw = Hh - 128, 26
+    local py, pw = Hh - 84, 26
     local plbl = "4" .. H._pg_label(H._pg) .. "  (" .. H._pg_count(H._pg) .. "/64)  v"
     local bwp = math.min(260, gfx.measurestr(plbl) + 20)         -- sous-page geree par les boutons voisins (petite etiquette)
     if btn(12, py, pw, 22, "<", 0.20, 0.25, 0.35) then H._pg = (H._pg - 2) % #H._pages + 1 end
@@ -2993,14 +2993,14 @@ local function mac_draw(W, Hh, down)
     if btn(xx + 74, py, 70, 22, "NOM PAGE", 0.20, 0.25, 0.35) then H._pg_ren() end
     if btn(xx + 148, py, 70, 22, "SUPPR PAGE", 0.45, 0.15, 0.15) then H._pg_del() end
     gfx.setfont(2, "Arial", 14, 'b')
-    if btn(12, Hh - 100, W - 24, 40, "● CAPTURE / VALIDER", 0.55, 0.15, 0.15) then mac_capture_toggle() end
     gfx.setfont(2, "Arial", 12, 'b')
-    local bw = math.floor((W - 24 - 4 * 6) / 7)
-    local labels = { "ADD", "EDIT", "NOM", "COULEUR", H._learn and "MIDI ..." or "MIDI", "▲", "▼" }
-    local fns = { mac_new, mac_edit, mac_rename, mac_recolor, function() H._learn_start(ctrl) end, function() mac_move(-1) end, function() mac_move(1) end }
-    for k = 1, 7 do
-      local lr = (k == 5 and H._learn) and 0.75 or 0.20
-      if btn(12 + (k - 1) * (bw + 4), Hh - 54, bw, 24, labels[k], lr, 0.25, 0.35) then fns[k]() end
+    local bw = math.floor((W - 24 - 4 * 7) / 8)
+    local labels = { "● CAPTURE", "ADD", "EDIT", "NOM", "COULEUR", H._learn and "MIDI ..." or "MIDI", "▲", "▼" }
+    local fns = { mac_capture_toggle, mac_new, mac_edit, mac_rename, mac_recolor, function() H._learn_start(ctrl) end, function() mac_move(-1) end, function() mac_move(1) end }
+    for k = 1, 8 do
+      local lr, lg, lb = (k == 6 and H._learn) and 0.75 or 0.20, 0.25, 0.35
+      if k == 1 then lr, lg, lb = 0.55, 0.15, 0.15 end
+      if btn(12 + (k - 1) * (bw + 4), Hh - 54, bw, 24, labels[k], lr, lg, lb) then fns[k]() end
     end
     local w4 = math.floor((W - 24 - 4 * 4) / 5)
     local function x4(k) return 12 + (k - 1) * (w4 + 4) end
