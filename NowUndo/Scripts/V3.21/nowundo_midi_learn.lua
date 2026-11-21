@@ -1232,6 +1232,76 @@ local function steal_assignment(new_id, ev, dn)
   return removed
 end
 
+-- V3.27 : MIDI LEARN DES RUSHES. Le learn se fait dans la fenetre Rushes (NowUndo_Scenario) ; le MIDI est range AVEC le
+-- rush (9e champ de la ligne M de NowUndo_Macros/set : "status:ch:d1@appareil"). Ce script ecoute et declenche :
+-- demande  NowUndo_MIDILearn/rush_learn = "id<TAB>temps"  ->  reponse  rush_learned = "id<TAB>cle<TAB>texte<TAB>temps"
+-- declenchement : ligne "id<TAB><TAB>heure de l'appui<TAB>on|off" dans NowUndo_Scn/mcr (cible vide = selection du Launchpad)
+-- gate : appui = on, relachement = off ; autres : un appui = un declenchement (CC : passage au-dessus de 63)
+local RL = { binds = {}, rev = nil, t = -1e9, learn = nil, learn_t = 0, last = {}, n = 0 }
+function RL.poll(now)
+  if now - RL.t < 0.3 then return end
+  RL.t = now
+  local rq = reaper.GetExtState(EXT, "rush_learn")
+  local id, ts = rq:match("^(%d+)\t([%d%.]+)")
+  if id and now - tonumber(ts) < 120 then
+    if RL.learn ~= tonumber(id) then RL.learn = tonumber(id); RL.learn_t = now end
+  else RL.learn = nil end
+  local rev = reaper.GetExtState("NowUndo_Macros", "rev")
+  if rev == RL.rev then return end
+  RL.rev = rev
+  RL.binds, RL.n = {}, 0
+  for line in (reaper.GetExtState("NowUndo_Macros", "set") or ""):gmatch("[^\r\n]+") do
+    local f = {}
+    for w in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = w end
+    if f[1] == "M" and tonumber(f[2]) and (f[9] or "") ~= "" then
+      local st, ch, d1, dv = f[9]:match("^(%d+):(%d+):(%d+)@(.*)$")
+      if st then
+        RL.binds[#RL.binds + 1] = { id = tonumber(f[2]), status = tonumber(st), ch = tonumber(ch), d1 = tonumber(d1), dev = dv,
+                                    gate = (f[8] == "1") }
+        RL.n = RL.n + 1
+      end
+    end
+  end
+end
+-- message pendant un learn de rush : renvoie true s'il a ete consomme
+function RL.try_learn(ev, dn, now)
+  if not RL.learn or ev.status == KB.ST then return false end
+  if now - RL.learn_t < 0.05 then return true end
+  if ev.note_off or ev.d2 == 0 then return true end
+  local key = ev.status .. ":" .. ev.ch .. ":" .. ev.d1 .. "@" .. (dn or "")
+  local shared = {}
+  for mid, m in pairs(maps) do
+    if m.status == ev.status and m.ch == ev.ch and m.d1 == ev.d1 and (m.dev == nil or m.dev == "" or m.dev == dn) then
+      shared[#shared + 1] = BY_ID[mid] and BY_ID[mid].name or mid
+    end
+  end
+  local txt = fmt_midi(ev) .. (dn ~= "" and (" @" .. dn) or "")
+  reaper.SetExtState(EXT, "rush_learned", string.format("%d\t%s\t%s\t%.3f", RL.learn, key,
+    txt .. (#shared > 0 and ("   (pilote aussi dans le MIDI Learn : " .. table.concat(shared, ", ") .. ")") or ""), now), false)
+  reaper.SetExtState(EXT, "rush_learn", "", false)
+  notify("Rush appris ← " .. txt)
+  RL.learn = nil
+  return true
+end
+function RL.fire(ev, dn)
+  if RL.n == 0 or ev.status == KB.ST then return end
+  for _, b in ipairs(RL.binds) do
+    if b.status == ev.status and b.ch == ev.ch and b.d1 == ev.d1 and b.dev == (dn or "") then
+      local k = b.id .. "#" .. ev.status .. ":" .. ev.d1
+      local on = not ev.note_off and ev.d2 > (ev.status == 0xB0 and 63 or 0)
+      local was = RL.last[k]
+      RL.last[k] = on
+      local gst = nil
+      if on and not was then gst = b.gate and "on" or ""
+      elseif not on and was and b.gate then gst = "off" end
+      if gst then
+        local cur = reaper.GetExtState("NowUndo_Scn", "mcr")
+        reaper.SetExtState("NowUndo_Scn", "mcr", cur .. string.format("%d\t\t%.3f\t%s\n", b.id, PRESS.t or reaper.time_precise(), gst), false)
+      end
+    end
+  end
+end
+
 local function handle_event(msg, dev, kev)
   local dn, ev
   if kev then dn, ev = "clavier", kev                -- v2.7 : evenement clavier (voir process_keys)
@@ -1242,6 +1312,7 @@ local function handle_event(msg, dev, kev)
   end
   if not ev then return end
   local now = reaper.time_precise()
+  if RL.try_learn(ev, dn, now) then return end         -- V3.27 : learn d'un rush (fenetre Rushes)
 
   if learn_id then
     -- Pendant un learn : rien n'est execute, le message sert uniquement a apprendre.
@@ -1318,6 +1389,7 @@ local function handle_event(msg, dev, kev)
     end
     return
   end
+  RL.fire(ev, dn)                                       -- V3.27 : rushes appris (independants des maps)
   -- Un message appris en aux (pour CE peripherique) n'est jamais traite par les maps principales.
   if matches_aux(ev, dn) then return end
 
@@ -1582,7 +1654,11 @@ local function draw()
     gfx.drawstr(txt)
   end
 
-  if learn_id then
+  if RL.learn then
+    gfx.set(1, 0.4, 0.2)
+    gfx.x, gfx.y = S(10), S(32)
+    gfx.drawstr("LEARN D'UN RUSH (fenetre Rushes) — note ou CC…")
+  elseif learn_id then
     gfx.set(1, 0.4, 0.2)
     gfx.x, gfx.y = S(10), S(32)
     gfx.drawstr("LEARNING: " .. (BY_ID[learn_id] and BY_ID[learn_id].name or learn_id) .. " — note ou CC…")
@@ -1593,7 +1669,7 @@ local function draw()
   else
     gfx.set(0.55, 0.55, 0.6)
     gfx.x, gfx.y = S(10), S(32)
-    gfx.drawstr("1-6 page aux  0 tout  |  K pickup en bloc  R return en bloc  N auto-suivant  A sortie aux  X exclusif  I bloque touches  |  F filtre  S sauver  O OUT  |  Esc")
+    gfx.drawstr((RL.n > 0 and ("Rushes appris : " .. RL.n .. " (fenetre Rushes)  |  ") or "") .. "1-6 page aux  0 tout  |  K pickup en bloc  R return en bloc  N auto-suivant  A sortie aux  X exclusif  I bloque touches  |  F filtre  S sauver  O OUT  |  Esc")
   end
 
   local y0 = HEADER_H
@@ -2083,6 +2159,7 @@ end
 local function main()
   PQ.flush()
   reaper.SetExtState(EXT, "hb", tostring(reaper.time_precise()), false)
+  RL.poll(reaper.time_precise())
   process_midi()
   process_keys()
   do                                                   -- v2.7 : blocage des touches apprises (si les maps changent)

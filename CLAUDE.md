@@ -282,6 +282,23 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   (`rw_pos`, sens inchangé). Test `tools/traw.py . [0|1] [rev|speed]` : A = impulsion revient à sa place, D = relue en
   reverse / à la vitesse ; pas de NaN. Non testé dans REAPER.
 
+## 21 nov. : MIDI des rushes + modèle de démarrage des rushes
+
+- **MIDI d'un rush** : appris dans la fenêtre Rushes (bouton **MIDI** de la rangée ADD…▼, ou clic droit > « MIDI Learn de
+  ce rush » ; Ctrl + MIDI = cumul ; Échap / re-clic = annuler ; clic droit > « Oublier le MIDI »). Rangé **dans le rush** :
+  9e champ de la ligne `M` = `status:ch:d1@appareil` (`m.midi`, suit export / import / pages). Badge « MIDI » sur la ligne.
+  Un contrôle = un seul rush (sauf cumul). **Écoute et déclenchement = script MIDI Learn** (`RL` : `RL.poll`,
+  `RL.try_learn`, `RL.fire`) : demande `NowUndo_MIDILearn/rush_learn` = `id\ttemps`, réponse `rush_learned` =
+  `id\tclé\ttexte\ttemps` (+ « pilote aussi : … » si une map du MIDI Learn a le même message). Appareil **strict**.
+  Gate : appui = on / relâchement = off ; sinon 1 appui = 1 déclenchement (CC : passage au-dessus de 63). Envoi dans
+  `NowUndo_Scn/mcr` avec **cible vide = sélection** du Launchpad et l'heure de l'appui (REC calé). Page du MIDI Learn :
+  seulement « Rushes appris : N » dans la ligne d'aide. Test `tools/trush_midi.lua`.
+- **Modèle de démarrage des rushes** (bouton **MODELE**, 5e de la rangée du bas) : ExtState persistant
+  `NowUndo_Macros/model` = fichier de `Data/NowUndo_Macros/`. Démarrage : modèle s'il y en a un, sinon `_autosave.txt`,
+  sinon la mémoire de REAPER (le fichier d'abord : un ExtState long peut être relu en partie). **Le modèle n'est jamais
+  réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
+  « Aucun modèle ».
+
 ## 21 nov. : page 4 = pages de rushes, `to g`, `go`
 
 - **Page 4 du Launchpad = sous-pages de rushes a..z** (couches `rp1`..`rp26`, `VL.p4_moff()`, menu = pages existantes

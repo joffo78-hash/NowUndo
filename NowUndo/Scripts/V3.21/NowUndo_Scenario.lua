@@ -1622,7 +1622,7 @@ end
 local function mac_serialize()
   local t = { "NOWUNDO_MACROS 1" }
   for _, m in ipairs(macros) do
-    t[#t + 1] = table.concat({ "M", m.id, m.color, m.name, m.text, m.toggle and 1 or 0, m.all and 1 or 0, m.gate and 1 or 0 }, "\t")
+    t[#t + 1] = table.concat({ "M", m.id, m.color, m.name, m.text, m.toggle and 1 or 0, m.all and 1 or 0, m.gate and 1 or 0, m.midi or "" }, "\t")
   end
   local cells = {}
   for c in pairs(layout) do cells[#cells + 1] = c end
@@ -1640,7 +1640,7 @@ local function mac_deserialize(txt)
       local id = math.floor(tonumber(f[2]))
       if not seen[id] then
         seen[id] = true
-        list[#list + 1] = { id = id, color = math.floor(tonumber(f[3]) or 0xAAAAAA), name = f[4] or "", text = f[5] or "", toggle = (f[6] == "1"), all = (f[7] == "1"), gate = (f[8] == "1") }
+        list[#list + 1] = { id = id, color = math.floor(tonumber(f[3]) or 0xAAAAAA), name = f[4] or "", text = f[5] or "", toggle = (f[6] == "1"), all = (f[7] == "1"), gate = (f[8] == "1"), midi = f[9] or "" }
       end
     elseif f[1] == "L" and tonumber(f[2]) and tonumber(f[3]) then
       lay[math.floor(tonumber(f[2]))] = math.floor(tonumber(f[3]))
@@ -1712,12 +1712,14 @@ local function mac_save()
   local f = io.open(MDIR .. "_autosave.txt", "w")
   if f then f:write(txt); f:close() end
 end
+-- V3.27 : MODELE de demarrage (comme le MIDI Learn) : ExtState persistant NowUndo_Macros/model = nom d'un fichier de
+-- Data/NowUndo_Macros/ (vide = aucun : on reprend la derniere seance, _autosave.txt). Le FICHIER est lu en priorite :
+-- la memoire de REAPER peut ne relire qu'une partie d'un texte long. Le modele n'est jamais reecrit automatiquement.
+H._read = function(fn) local f = io.open(MDIR .. fn, "r"); if not f then return nil end; local t = f:read("*a"); f:close(); return t end
 do                                                  -- chargement au demarrage
-  local txt = reaper.GetExtState(MAC_EXT, "set")
-  if txt == "" then
-    local f = io.open(MDIR .. "_autosave.txt", "r")
-    if f then txt = f:read("*a") or ""; f:close() end
-  end
+  local model = reaper.GetExtState(MAC_EXT, "model")
+  local txt = (model ~= "" and H._read(model)) or H._read("_autosave.txt") or ""
+  if txt == "" then txt = reaper.GetExtState(MAC_EXT, "set") end
   local list, lay, pages, had_p = mac_deserialize(txt)
   if not had_p then
     -- V3.27 : ancienne disposition (Rushes / Rushes 2) -> sous-pages b, c ; la page a = RC-505 en rushes (cree une fois)
@@ -2429,6 +2431,7 @@ local function mac_poll()
     if not mac_find(mcur) then mcur = 0 end
     mac_my_rev = reaper.GetExtState(MAC_EXT, "rev")
   end
+  H._learn_poll()
   local q = reaper.GetExtState(CAPEXT, "mcr")
   if q == "" then return end
   reaper.SetExtState(CAPEXT, "mcr", "", false)
@@ -2442,7 +2445,8 @@ local function mac_poll()
           local k = tonumber(n)
           if k >= 1 and k <= NLOOP then targets[#targets + 1] = k end
         end
-        if #targets > 0 then run_macro(m, targets, gst, tonumber(ts)) end
+        if #targets == 0 then targets = sel_targets() end   -- V3.27 : cible vide (MIDI d'un rush) = selection du Launchpad
+        run_macro(m, targets, gst, tonumber(ts))
       end
     end
   end
@@ -2487,6 +2491,79 @@ local function mac_import()
   mac_apply(list, lay, pages); mac_save()
   last_export = file:match("([^/\\]+)$") or last_export
   msg = "Importe : " .. last_export .. "  (" .. #list .. " rushes)"; msg_err = false
+end
+
+-- V3.27 : MIDI d'un rush. LEARN (bouton MIDI) = demande au script MIDI Learn ; Ctrl + MIDI = cumul (les autres rushes
+-- gardent ce controle) ; sinon un controle = un seul rush. Le MIDI est range dans le rush (m.midi = "status:ch:d1@appareil").
+H._midi_txt = function(k)
+  local st, ch, d1, dv = (k or ""):match("^(%d+):(%d+):(%d+)@(.*)$")
+  if not st then return "" end
+  st = tonumber(st)
+  return string.format("%s %d ch%d", st == 0xB0 and "CC" or "Note", tonumber(d1), tonumber(ch) + 1) .. (dv ~= "" and (" @" .. dv) or "")
+end
+H._learn_start = function(add)
+  local m = mac_find(mcur)
+  if H._learn then
+    reaper.SetExtState("NowUndo_MIDILearn", "rush_learn", "", false); H._learn = nil
+    msg = "Learn annule."; msg_err = false; return
+  end
+  if not m then msg = "Selectionne un rush."; msg_err = true; return end
+  local hb = tonumber(reaper.GetExtState("NowUndo_MIDILearn", "hb")) or 0
+  if reaper.time_precise() - hb > 2 then msg = "Lance le script MIDI Learn : c'est lui qui ecoute le MIDI."; msg_err = true; return end
+  H._learn, H._learn_add = m.id, add
+  reaper.SetExtState("NowUndo_MIDILearn", "rush_learned", "", false)
+  reaper.SetExtState("NowUndo_MIDILearn", "rush_learn", string.format("%d\t%.3f", m.id, reaper.time_precise()), false)
+  msg = "LEARN : bouge le controle pour « " .. mac_label(m) .. " »  (Echap ou MIDI = annuler)"; msg_err = false
+end
+H._learn_poll = function()
+  if not H._learn then return end
+  local r = reaper.GetExtState("NowUndo_MIDILearn", "rush_learned")
+  local id, key, txt = r:match("^(%d+)\t([^\t]*)\t([^\t]*)")
+  if not id then return end
+  reaper.SetExtState("NowUndo_MIDILearn", "rush_learned", "", false)
+  local m = mac_find(tonumber(id))
+  H._learn = nil
+  if not m then return end
+  local stolen = {}
+  if not H._learn_add then
+    for _, o in ipairs(macros) do
+      if o ~= m and o.midi == key then o.midi = ""; stolen[#stolen + 1] = mac_label(o) end
+    end
+  end
+  m.midi = key; mac_save()
+  msg = "MIDI appris : « " .. mac_label(m) .. " » ← " .. txt .. (#stolen > 0 and ("   (retire de : " .. table.concat(stolen, ", ") .. ")") or "")
+  msg_err = false
+end
+-- MODELE : choisir / enregistrer / recharger / aucun
+H._model_menu = function(x, y)
+  local cur = reaper.GetExtState(MAC_EXT, "model")
+  local items = { "Choisir un fichier comme modele de demarrage...",
+                  (cur ~= "" and "" or "#") .. "Enregistrer l'etat actuel dans le modele" .. (cur ~= "" and (" (" .. cur .. ")") or ""),
+                  (cur ~= "" and "" or "#") .. "Recharger le modele maintenant",
+                  (cur ~= "" and "" or "!") .. "Aucun modele (reprendre la derniere seance)" }
+  gfx.x, gfx.y = x, y
+  local k = gfx.showmenu(table.concat(items, "|"))
+  if k == 1 then
+    reaper.RecursiveCreateDirectory(MDIR, 0)
+    local ok, file = reaper.GetUserFileNameForRead(MDIR .. (cur ~= "" and cur or "modele.txt"), "Modele de demarrage des rushes", ".txt")
+    if not ok then return end
+    local fn = file:match("([^/\\]+)$")
+    if not H._read(fn) then msg = "Le modele doit etre dans " .. MDIR; msg_err = true; return end
+    reaper.SetExtState(MAC_EXT, "model", fn, true)
+    msg = "Modele de demarrage : " .. fn .. "  (charge a chaque lancement ; tes changements ne le reecrivent pas)"; msg_err = false
+  elseif k == 2 then
+    local f = io.open(MDIR .. cur, "w")
+    if f then f:write(mac_serialize(), "\n"); f:close(); msg = "Modele enregistre : " .. cur; msg_err = false
+    else msg = "Ecriture impossible : " .. cur; msg_err = true end
+  elseif k == 3 then
+    local txt = H._read(cur)
+    if not txt then msg = "Modele introuvable : " .. cur; msg_err = true; return end
+    if reaper.MB("Remplacer les rushes actuels par le modele " .. cur .. " ?", "NowUndo - rushes", 4) ~= 6 then return end
+    local list, lay, pages = mac_deserialize(txt)
+    mac_apply(list, lay, pages); mac_save(); msg = "Modele recharge : " .. cur; msg_err = false
+  elseif k == 4 then
+    reaper.SetExtState(MAC_EXT, "model", "", true); msg = "Aucun modele : on reprend la derniere seance."; msg_err = false
+  end
 end
 
 -- V3.27 : sous-pages de la page 4 (a..z) : ajouter / renommer / supprimer / choisir
@@ -2657,10 +2734,14 @@ local function mac_draw(W, Hh, down)
                     (H._mclip and #H._mclip > 0) and "Coller  (Ctrl+V)" or "#Coller  (Ctrl+V)",
                     ri and "Dupliquer  (Ctrl+D)" or "#Dupliquer  (Ctrl+D)", "",
                     ri and "Supprimer  (Suppr)" or "#Supprimer  (Suppr)", "",
-                    ri and "Editer  (E)" or "#Editer  (E)", ri and "Renommer  (N)" or "#Renommer  (N)" }
+                    ri and "Editer  (E)" or "#Editer  (E)", ri and "Renommer  (N)" or "#Renommer  (N)", "",
+                    ri and "MIDI Learn de ce rush" or "#MIDI Learn de ce rush",
+                    (ri and (macros[ri].midi or "") ~= "") and ("Oublier le MIDI (" .. H._midi_txt(macros[ri].midi) .. ")") or "#Oublier le MIDI" }
     local k = gfx.showmenu(table.concat(items, "|"))
     if k == 1 then ED.mcopy() elseif k == 2 then ED.mcut() elseif k == 3 then ED.mpaste()
-    elseif k == 4 then ED.mdup() elseif k == 5 then mac_delete() elseif k == 6 then mac_edit() elseif k == 7 then mac_rename() end
+    elseif k == 4 then ED.mdup() elseif k == 5 then mac_delete() elseif k == 6 then mac_edit() elseif k == 7 then mac_rename()
+    elseif k == 8 then H._learn = nil; H._learn_start(false)
+    elseif k == 9 and ri then macros[ri].midi = ""; mac_save(); msg = "MIDI oublie."; msg_err = false end
   end
   ED.mrwas = rdn
   local _, ci = mac_find(mcur)
@@ -2740,7 +2821,13 @@ local function mac_draw(W, Hh, down)
         if m.err then gfx.set(1, 0.35, 0.35, 1)
         elseif (m.name or "") == "" or m.name:match("^Macro %d+$") then gfx.set(1, 1, 1, 0.65) else gfx.set(1, 1, 1, 0.97) end
         gfx.x, gfx.y = x0 + 132, y + 5
-        gfx.drawstr(fit(mac_label(m), cw - 132 - 84))
+        gfx.drawstr(fit(mac_label(m), cw - 132 - 104))
+        if (m.midi or "") ~= "" or H._learn == m.id then                 -- V3.27 : rush appris en MIDI
+          gfx.setfont(2, "Arial", 11, 'b')
+          if H._learn == m.id then gfx.set(1, 0.45, 0.2, (now_t * 3) % 1 < 0.5 and 1 or 0.3) else gfx.set(1, 0.55, 0.95, 1) end
+          gfx.x, gfx.y = x0 + cw - 100, y + 6
+          gfx.drawstr("MIDI")
+        end
         -- case de destination sur le Launchpad (ex. 3.5) a la place de l'ancien label secondaire
         local lc = lp_cell_of(m.id)
         if lc then
@@ -2853,7 +2940,8 @@ local function mac_draw(W, Hh, down)
     gfx.drawstr(fit("Rush '" .. mac_label(cm) .. "' : " .. cm.err, W - 28))
   elseif cm then
     gfx.set(1, 1, 1, 0.55); gfx.x, gfx.y = 14, my0 + 16
-    gfx.drawstr(fit("Action : " .. cm.text .. (cm.toggle and "   [toggle]" or "") .. (cm.gate and "   [gate]" or "") .. (cm.all and "   [all]" or ""), W - 28))
+    gfx.drawstr(fit("Action : " .. cm.text .. (cm.toggle and "   [toggle]" or "") .. (cm.gate and "   [gate]" or "") .. (cm.all and "   [all]" or "")
+      .. ((cm.midi or "") ~= "" and ("   MIDI : " .. H._midi_txt(cm.midi)) or ""), W - 28))
   end
 
   -- boutons
@@ -2878,13 +2966,14 @@ local function mac_draw(W, Hh, down)
       if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_place(ms) end
     end
     gfx.setfont(2, "Arial", 12, 'b')
-    local bw = math.floor((W - 24 - 4 * 5) / 6)
-    local labels = { "ADD", "EDIT", "NOM", "COULEUR", "▲", "▼" }
-    local fns = { mac_new, mac_edit, mac_rename, mac_recolor, function() mac_move(-1) end, function() mac_move(1) end }
-    for k = 1, 6 do
-      if btn(12 + (k - 1) * (bw + 4), Hh - 54, bw, 24, labels[k], 0.20, 0.25, 0.35) then fns[k]() end
+    local bw = math.floor((W - 24 - 4 * 6) / 7)
+    local labels = { "ADD", "EDIT", "NOM", "COULEUR", H._learn and "MIDI ..." or "MIDI", "▲", "▼" }
+    local fns = { mac_new, mac_edit, mac_rename, mac_recolor, function() H._learn_start(ctrl) end, function() mac_move(-1) end, function() mac_move(1) end }
+    for k = 1, 7 do
+      local lr = (k == 5 and H._learn) and 0.75 or 0.20
+      if btn(12 + (k - 1) * (bw + 4), Hh - 54, bw, 24, labels[k], lr, 0.25, 0.35) then fns[k]() end
     end
-    local w4 = math.floor((W - 24 - 3 * 4) / 4)
+    local w4 = math.floor((W - 24 - 4 * 4) / 5)
     local function x4(k) return 12 + (k - 1) * (w4 + 4) end
     if btn(x4(1), Hh - 26, w4, 22, "EXPORT", 0.20, 0.25, 0.35) then mac_export() end
     if btn(x4(2), Hh - 26, w4, 22, "IMPORT", 0.20, 0.25, 0.35) then mac_import() end
@@ -2892,6 +2981,7 @@ local function mac_draw(W, Hh, down)
       local ms = sel_ids()
       if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_remove(ms) end
     end
+    if btn(x4(5), Hh - 26, w4, 22, reaper.GetExtState(MAC_EXT, "model") ~= "" and "MODELE ✓" or "MODELE", 0.20, 0.30, 0.25) then H._model_menu(x4(5), Hh - 4) end
     if btn(x4(4), Hh - 26, w4, 22, "VIDER LA PAGE", 0.45, 0.15, 0.15) then
       local n = H._pg_count(H._pg)
       if n > 0 and reaper.MB("Retirer les " .. n .. " rushes de la page " .. H._pg_label(H._pg) .. " ? (ils restent dans la liste)", "NowUndo - rushes", 4) == 6 then
@@ -2921,6 +3011,7 @@ local function main()
   end
   local c = gfx.getchar()
   local close = c == -1
+  if c == 27 and H._learn then H._learn_start(false); c = 0 end   -- V3.27 : Echap = annule le learn MIDI d'un rush
   if c == 27 then
     if ED.on then ED.close(false); c = 0
     elseif show_help then show_help = false
