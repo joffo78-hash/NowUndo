@@ -102,7 +102,7 @@ Tout est poussé, **rien n'a été testé dans REAPER** (seulement bancs Python 
    rushes (bouton MODELE, jamais réécrit automatiquement).
 À vérifier en priorité avec l'utilisateur : la migration de la page 4 (a RC-505, b, c, d Effets), le menu des pages,
 `l3 to g2`, `in1 mute`, le learn MIDI d'un rush (QuNeo / pédale, gate), le modèle au redémarrage, le carré A / D.
-Les « PROBLÈMES OUVERTS » plus bas (Launchpad muet à l'ouverture du MIDI Learn, QuNeo, Drop, BR) n'ont pas été retouchés.
+Aucun problème ouvert connu : les anciens (Launchpad / MIDI Learn, QuNeo, Drop, BR) sont résolus.
 Suite logique proposée : le grand chantier « tout est rush » (étapes 1-4 plus bas : moteur commun exécuté par le
 Launchpad, rushes d'usine, page 1 en disposition de rushes, LED riches comme l'ancien REC rouge / orange / clignotant).
 
@@ -174,23 +174,10 @@ Launchpad, rushes d'usine, page 1 en disposition de rushes, LED riches comme l'a
 - **Nouveau REC (V3.25)** : un looper qui lance un nouvel enregistrement (REC sur vide, Re-Rec) termine le REC en cours
   d'un autre looper (> 0,3 s), qui attend son point de synchro puis joue (`tools/trec.py`). Un overdub ne le fait pas.
 
-## PROBLÈMES OUVERTS (à traiter en priorité dans la prochaine conversation)
+## Anciens problèmes (RÉSOLUS, confirmé par l'utilisateur le 21 nov.)
 
-L'utilisateur est mécontent (« t'as rien corrigé du tout ») : commencer par **reproduire et corriger** ces points, sans
-nouvelles fonctionnalités, et **demander des captures / messages d'erreur** avant de supposer.
-1. **Le Launchpad ne répond plus quand on ouvre le MIDI Learn** (signalé le 17 nov., non résolu, cause inconnue). Questions
-   posées sans réponse : physique ou fenêtre ? revient-il à la fermeture du MIDI Learn ? erreur ReaScript ? apparu avec les
-   fichiers du 17 nov. ? Pistes : changements récents de `nowundo_midi_learn.lua` (`dev_ok`, `KB.text_focus`, `PQ`,
-   cumul, `par:fx_mix`, mute) ; le MIDI Learn écrit `nowundo_vl/state` + `rev` (`vl_state_edit`) et `midi_ui` que le
-   Launchpad relit ; verrou d'instance du Launchpad (`lp_hb`) ; ports mémorisés (`lp_in_name` / `lp_out_name`).
-   Comparer avec la version de `ccr-12a0f3a9-86p9ey` (`git diff ccr-12a0f3a9-86p9ey -- NowUndo/Scripts/V3.21/nowundo_midi_learn.lua`).
-2. **Le QuNeo déclenche des Clear** alors que tous les MIDI des Clear ont été retirés (MIDI Learn + pédalier). Correctif
-   « appareils stricts » livré, **non confirmé** ; suspect principal : boutons du Twister (`tw:btn`, page 7 Custom = Clear)
-   ou une ancienne copie de script lancée (`Scripts/nowundo_midi_learn.lua`, `VirtualTwister.lua`...), ou un raccourci REAPER.
-3. **Drop** : saut de position / boucle bancale signalé ; capture déplacée sur la piste de la cible, **non confirmé**.
-4. **Beat Repeat** : « 1/16 plus court que 1/32 » signalé ; le moteur mesuré est correct (1/16 = 125 ms, 1/32 = 62,5 ms
-   à 120 BPM) → probablement l'ordre des rushes gate / la pile « dernier actif gagne » ; en attente des textes de rushes.
-5. (Résolu d'après l'utilisateur le 18 nov. : « tout ça est résolu ».)
+Launchpad muet à l'ouverture du MIDI Learn, Clear envoyés par le QuNeo, saut / boucle bancale du Drop, fractions du
+Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau signalement.
 
 ## V3.26 (18 nov.) : détection des slices « à l'oreille »
 
