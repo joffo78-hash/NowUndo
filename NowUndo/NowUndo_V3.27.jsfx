@@ -2389,6 +2389,7 @@ loop(3,
     cmd == 33 ? do_beat_repeat(!br_on) :
     cmd == 37 ? ( lp_mute = cmd_arg == 1 ? 1 : (cmd_arg == 2 ? 0 : !lp_mute); ) :   // V3.25 : mute (0 bascule, 1 on, 2 off)
     cmd == 38 ? ( warp_on = cmd_arg == 1 ? 1 : (cmd_arg == 2 ? 0 : (warp_on >= 0.5 ? 0 : 1)); slider65 = warp_on; ) :   // V3.26 : warp (0 bascule, 1 on, 2 off)
+    cmd == 39 ? ( dub_raw = cmd_arg == 1 ? 1 : (cmd_arg == 2 ? 0 : (dub_raw > 0.5 ? 0 : 1)); slider68 = dub_raw; ) :   // V3.27 : dub A / D (0 bascule, 1 = D brut, 2 = A compense)
     cmd == 34 ? dr_arm_target(cmd_arg) :
     cmd == 35 ? dr_arm_source(cmd_arg) :
     cmd == 36 ? dr_commit_begin(cmd_arg) :
@@ -2524,6 +2525,7 @@ loop(3,
     wr_id == 64 ? ( cloud_diffuse = max(0, min(1, wr_v)); slider64 = cloud_diffuse; ) :
     wr_id == 65 ? ( warp_grid = max(0, min(5, floor(wr_v + 0.5))); slider66 = warp_grid; ) :   // V3.26
     wr_id == 66 ? ( warp_force = max(0, min(100, wr_v)); slider67 = warp_force; ) :
+    wr_id == 67 ? ( dub_raw = wr_v > 0.5 ? 1 : 0; slider68 = dub_raw; ) :   // V3.27 : dub A (0) / D (1)
     0;
     gmem[gmem_base + wr_mo] = 0;
     gmem[gmem_base + wr_mo + 1] = 0;

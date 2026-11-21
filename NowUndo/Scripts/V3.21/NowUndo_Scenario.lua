@@ -6,7 +6,8 @@
   SYNTAXE
     un PAS      = une ou plusieurs ACTIONS separees par des virgules, termine (ou non) par ;
     une ACTION  = CIBLE  MOT [valeur]  [MOT [valeur]] ...
-    CIBLE       = l1  |  l1/3/6  |  l2-4  |  all        (les loopers se separent par /)
+    CIBLE       = l1  |  l1/3/6  |  l2-4  |  l(1/3)  |  g2  |  g1/3  |  g(2)  |  all   (/ separe ; g = groupe du Launchpad)
+                  (g(2) SEUL dans une action = rappel du preset de groupe 2 ; "g(2) rec" = REC sur le groupe 2)
     MOTS        = rec dub(=rec) play stop clear clearfull replace multiply autorep
                   rev pp slicer cloud link auto oneshot br      -> on / off (sans valeur = ON ; rien ne se passe si deja dans cet etat)
                   undo redo restart rerec fullloop quant reset (tous les params)
@@ -34,8 +35,9 @@
     l1 in 0.25 out 0.5, l4 vol -6db;
     l1 in/out reset, l1 slicer/cloud off;
 
-  MACROS (onglet MACROS) : chutier de 64 actions SANS cible (elles s'appliquent au looper / groupe selectionne), partage avec
-  la page 4 du Launchpad (couche "Action macros"). Voir le lexique (?) pour le detail.
+  RUSHES (ex macros, onglet MACROS) : chutier de 128 actions, partage avec la page 4 du Launchpad. V3.27 : meme syntaxe que
+  les pas, la CIBLE est facultative : sans cible = looper / groupe selectionne ("rec"), sinon l1 | l(1/3) | g2 | g(1/3) | all
+  ("g2 rec", "all stop", "rec, l3 play" : l3 seulement pour play). Voir le lexique (?) pour le detail.
 
   COMMANDES CLAVIER : Espace / Entree / Droite = GO | Gauche / Backspace = BACK
                       Haut / Bas = choisir le pas | E = editer le pas | double-clic sur un pas = l'editer
@@ -66,7 +68,7 @@ local function fb(i)
     rev = rd(b + 17) > 0.5, pp = rd(b + 18) > 0.5, cloud = rd(b + 24) > 0.5,
     slicer = (pm > 0.5 and pm < 1.5), oneshot = pm > 1.5,
     link = rd(b + 9) > 0.5, auto = rd(b + 43) > 0.5,
-    br = rd(b + 189) > 0.5, mute = rd(b + 199) > 0.5,
+    br = rd(b + 189) > 0.5, mute = rd(b + 199) > 0.5, raw = rd(b + 159) > 0.5,
     len = rd(b + 46), lstart = rd(b + 44), lwidth = rd(b + 45),
   }
 end
@@ -138,6 +140,25 @@ H.auto     = tog(19, function(F) return F.auto end)
 H.oneshot  = tog(18, function(F) return F.oneshot end)
 H.br       = tog(33, function(F) return F.br end)
 H.mute     = tog(37, function(F) return F.mute end)   -- V3.25 : mute du looper (sans couper la piste)
+do   -- V3.27 : mode d'overdub  a = A (compense, "bande")  |  d = D (brut, transforme comme la boucle) ; "d off" = A
+  local function dubm(raw)
+    return function(v)
+      local want = true
+      if v ~= nil then
+        want = onoff(v)
+        if want == nil then return nil, "on/off attendu" end
+      end
+      if H._omode then want = not want end   -- GATE, relachement : l'autre mode
+      if tmode then return { { ch = "cmd", f = function(i) return fb(i).b, 39 end } } end
+      local val = (want == raw) and 1 or 0
+      return { { ch = "param", f = function(i)
+        local F = fb(i)
+        if (F.raw and 1 or 0) ~= val then return F.b, 67, val end   -- deja dans ce mode : rien
+      end } }
+    end
+  end
+  H.a = dubm(false); H.d = dubm(true)
+end
 
 -- e1..e4 : effets (slots FX 1-4 du looper = page Effects du Launchpad). Comme slicer : "l1 e1" active, "l1 e1 off" desactive.
 -- Execute par le Launchpad (commande ExtState), qui garde son affichage a jour. Macro TOGGLE : on inverse.
@@ -333,23 +354,34 @@ local function split_key(piece)
   end
 end
 
+-- CIBLE : all | l1 | l1/3/6 | l2-4 | l(1/3) | g2 | g1/3 | g(2) | l1/g2 ...  (V3.27 : groupes = gmem 6000+i, lus a l'execution)
+-- is_tgt : le mot est-il une cible ?  ("g(2)" SEUL dans une action reste le rappel du preset de groupe, traite avant)
+local function is_tgt(w)
+  return w == "all" or w == "tous" or w == "*" or w:match("^l?%d") ~= nil or w:match("^[lg]%(") ~= nil or w:match("^g%d") ~= nil
+end
 local function parse_target(s)
   if s == "all" or s == "tous" or s == "*" then
     local t = {}; for i = 1, NLOOP do t[i] = i end; return t
   end
-  s = (s:gsub("^l", ""):gsub("/l", "/"))
-  local t = {}
+  s = s:gsub("[%(%)]", "")
+  local t, pre, grp, seen = {}, "l", false, {}
   for piece in s:gmatch("[^/]+") do
-    local a, b = piece:match("^(%d+)%-(%d+)$")
-    if a then
-      for i = tonumber(a), tonumber(b) do t[#t + 1] = i end
-    elseif piece:match("^%d+$") then
-      t[#t + 1] = tonumber(piece)
-    else
-      return nil, "cible invalide : " .. piece
+    local p, rest = piece:match("^([lg]?)(.*)$")
+    if p ~= "" then pre = p end
+    local a, b = rest:match("^(%d+)%-(%d+)$")
+    if not a and rest:match("^%d+$") then a, b = rest, rest end
+    if not a then return nil, "cible invalide : " .. piece end
+    for n = tonumber(a), tonumber(b) do
+      if pre == "g" then
+        grp = true
+        for i = 1, NLOOP do if rd(6000 + i) == n and not seen[i] then seen[i] = true; t[#t + 1] = i end end
+      elseif not seen[n] then
+        if n < 1 or n > NLOOP then return nil, "looper " .. n .. " inexistant (1-" .. NLOOP .. ")" end
+        seen[n] = true; t[#t + 1] = n
+      end
     end
   end
-  if #t == 0 then return nil, "cible manquante" end
+  if #t == 0 and not grp then return nil, "cible manquante" end
   for _, i in ipairs(t) do
     if i < 1 or i > NLOOP then return nil, "looper " .. i .. " inexistant (1-" .. NLOOP .. ")" end
   end
@@ -388,18 +420,21 @@ local function compile(text, forced, toggle, gate_off)
       end
     elseif act ~= "" then
       local s = act:lower():gsub("à", " "):gsub("[=:]", " ")
+      s = s:gsub("%f[%a]([lg])%s*%(([%d/%-%s]+)%)", function(p, inner) return p .. "(" .. inner:gsub("%s+", "") .. ")" end)
       local t = {}
       for w in s:gmatch("%S+") do
-        if w ~= "a" and w ~= "to" and w ~= "at" and w ~= "->" then t[#t + 1] = w end
+        -- "a" = mot de liaison, sauf en position de mot (V3.27 : a = dub A) : "l1 a", "a" seul dans un rush
+        local word_pos = #t == 0 or (#t == 1 and is_tgt(t[1]))
+        if (w ~= "a" or word_pos) and w ~= "to" and w ~= "at" and w ~= "->" then t[#t + 1] = w end
       end
       local first = t[1] or ""
       local targets, terr
-      local is_target = first == "all" or first == "tous" or first == "*" or first:match("^l?%d") ~= nil
-      if forced then
-        targets = forced                      -- macro : pas de cible dans la syntaxe, elle est imposee a l'execution
-        table.insert(t, 1, "_")
-      elseif not is_target and last_targets and split_key(first:match("[^/]+") or "") then
+      local is_target = is_tgt(first)
+      if not is_target and last_targets and split_key(first:match("[^/]+") or "") then
         targets = last_targets                -- pas de cible : on garde celle de l'action precedente
+        table.insert(t, 1, "_")
+      elseif not is_target and forced then
+        targets = forced                      -- rush sans cible : looper / groupe selectionne (impose a l'execution)
         table.insert(t, 1, "_")
       else
         targets, terr = parse_target(first)
@@ -617,8 +652,8 @@ end
 
 local function go()
   if #steps == 0 then return end
+  reparse(cur)                          -- V3.27 : recompile au GO (cibles de groupe g2 = composition du moment)
   local p = parsed[cur]
-  if not p then reparse(cur); p = parsed[cur] end
   if p.err then msg = "Pas " .. cur .. " invalide : " .. p.err; msg_err = true; return end
   reaper.gmem_attach(GMEM)
   local dead, seen, nsync, nglob = {}, {}, 0, 0
@@ -813,7 +848,7 @@ local HELP = {
   { "-", "plage de loopers (l2-4) ; signe moins d'une valeur (vol -6db, pitch -5)" },
   { "*", "en fin d'action : ARMEE, part au prochain point de synchro  (l1 rev*)" },
   { "off", "precise l'arret (rev off, recoff). Sans precision = ON ; deja dans l'etat = rien" },
-  { "a  à  =  :", "mots de liaison ignores  (l1 in 0.25 out à 0.5)" },
+  { "a  à  =  :", "mots de liaison ignores  (l1 in 0.25 out à 0.5) ; a juste apres la cible (ou seul dans un rush) = dub A" },
   { ".", "separateur decimal (0.25) : la virgule separe les actions" },
   { "//", "commentaire jusqu'a la fin de la ligne" },
   { "R(n)  G(n)", "rappelle le preset de ROUTING (R) / de GROUPE (G) n°1-8 de la page principale du Launchpad  (r(2), g(3))" },
@@ -823,7 +858,10 @@ local HELP = {
   { "l1", "un looper" },
   { "l1/3/6", "plusieurs loopers" },
   { "l2-4", "une plage (2, 3 et 4)" },
-  { "all", "les 8 loopers" },
+  { "all", "les 8 loopers   (all rec, all stop)" },
+  { "l(1/3)", "meme chose avec parentheses" },
+  { "g2  g1/3  g(2)", "les loopers du groupe 2 (des groupes 1 et 3) du Launchpad, au moment de l'action" },
+  { "(rien)", "dans un rush : le looper / groupe selectionne  (rec)  ;  apres une virgule : la cible precedente" },
   { "" },
   { "ON / OFF" },
   { "rec  (dub)", "enregistrement / overdub  (rec on sur boucle existante = dub)" },
@@ -840,6 +878,7 @@ local HELP = {
   { "link", "link pitch/speed" },
   { "auto", "auto-rec" },
   { "oneshot", "mode one-shot" },
+  { "a  d", "mode d'overdub : a = A (compense, la couche reste telle que jouee) | d = D (brut, transformee comme la boucle)" },
   { "" },
   { "COMMANDES" },
   { "clear", "efface la part active" },
@@ -1471,8 +1510,8 @@ local function move_to(from, to)
 end
 
 --------------------------------------------------------------------------
--- MACROS : chutier de 64 actions individuelles. Meme syntaxe que les pas du scenario, mais SANS cible
--- (pas de l1/l2... : l'action s'applique au looper ou au groupe selectionne).
+-- MACROS (rushes) : chutier d'actions. Meme syntaxe que les pas du scenario ; V3.27 : cible facultative
+-- (sans cible = looper / groupe selectionne ; l1, l(1/3), g2, g(1/3), all = cible ecrite).
 -- Partage avec le Launchpad (page 4, couche "Action macros") par l'ExtState "NowUndo_Macros" :
 --   set = macros + disposition sur le Launchpad ; rev = numero de version (le Launchpad recharge quand il change).
 --------------------------------------------------------------------------
@@ -1644,7 +1683,7 @@ ED.CATS = {
   { "Derniere action", { "off", "*" } },          -- off : ajoute / retire "off" ; * : armee au point de synchro
   { "Enregistrement", { "rec", "replace", "autorep", "multiply", "rerec", "auto" } },
   { "Lecture",        { "play", "stop", "restart", "rev", "pp", "oneshot", "fullloop", "part..." } },
-  { "Modes",          { "slicer", "cloud", "br", "brf...", "link", "mute" } },
+  { "Modes",          { "slicer", "cloud", "br", "brf...", "link", "mute", "a", "d" } },
   { "Effets",         { "e1", "e2", "e3", "e4" } },
   { "Niveaux",        { "vol...", "speed...", "pitch...", "fb...", "smix...", "brmix..." } },
   { "Boucle",         { "in...", "out...", "quant", "undo", "redo", "clear", "clearfull", "reset" } },
@@ -1681,7 +1720,7 @@ function ED.words()
   local function add(k) if not seen[k] and not k:match("^_") then seen[k] = true; w[#w + 1] = k end end
   for k, f in pairs(H) do if type(f) == "function" then add(k) end end
   for k in pairs(ALIAS) do add(k) end
-  for _, k in ipairs({ "off", "on", "reset", "sync", "unsync", "syncall", "unsyncall" }) do add(k) end
+  for _, k in ipairs({ "off", "on", "reset", "sync", "unsync", "syncall", "unsyncall", "all" }) do add(k) end
   table.sort(w)
   ED._w = w
   return w
@@ -2059,9 +2098,7 @@ H._rush_live = function(m, targets, on)
       for k = #H._live, 1, -1 do
         local e2 = H._live[k]
         local m2 = mac_find(e2.mid)
-        local hit = false
-        for _, ti in ipairs(e2.targets) do if ti == it.i then hit = true end end
-        if m2 and not m2.err and hit then
+        if m2 and not m2.err then          -- V3.27 : les cibles peuvent etre ecrites dans le rush (l2, g1...) : on compare les items
           for _, it2 in ipairs(compile(m2.text, e2.targets, false, false)) do
             if it2.i == it.i and it2.key == it.key then repl = repl or {}; repl[#repl + 1] = it2 end
           end
@@ -2100,8 +2137,9 @@ local function run_macro(m, targets, gst)   -- gst : "on" / "off" pour une macro
       if it.sync then nsync = nsync + 1 end
     elseif not it.all and not m.all and not seen[it.i] then seen[it.i] = true; dead[#dead + 1] = "L" .. it.i end   -- ALL : les loopers absents sont ignores
   end
-  local tl_ = {}
-  for _, i in ipairs(targets) do tl_[#tl_ + 1] = "L" .. i end
+  local tl_, tseen = {}, {}
+  for _, it in ipairs(items) do if it.i and not tseen[it.i] then tseen[it.i] = true; tl_[#tl_ + 1] = it.i end end   -- V3.27 : cibles reelles
+  table.sort(tl_); for n, i in ipairs(tl_) do tl_[n] = "L" .. i end
   msg = "Rush '" .. mac_label(m) .. "' -> " .. (m.all and "ALL" or table.concat(tl_, ",")) .. (m.toggle and " [toggle]" or "") .. (m.gate and " [gate]" or "")
         .. (#dead > 0 and ("  (looper absent : " .. table.concat(dead, ",") .. ")") or "")
         .. (nsync > 0 and ("  -  " .. nsync .. " action(s) * en attente du point de synchro") or "")
@@ -2122,6 +2160,7 @@ local PROBE = {
   multiply = function(F) return F.st == 6 end, rev = function(F) return F.rev end, pp = function(F) return F.pp end,
   slicer = function(F) return F.slicer end, cloud = function(F) return F.cloud end, link = function(F) return F.link end,
   auto = function(F) return F.auto end, oneshot = function(F) return F.oneshot end, br = function(F) return F.br end, mute = function(F) return F.mute end, play = function(F) return F.playing end,
+  d = function(F) return F.raw end, a = function(F) return not F.raw end,
 }
 local function mac_active(m, targets)
   if not m.toggle or m.err then return false end
@@ -2130,6 +2169,10 @@ local function mac_active(m, targets)
   local t = {}
   for w in act:gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
   if #t == 0 then return false end
+  if is_tgt(t[1]) and #t > 1 then                    -- V3.27 : cible ecrite dans le rush (l2, g1, all...) : c'est elle qu'on verifie
+    local tt = parse_target(t[1]); if not tt then return false end
+    targets = tt; table.remove(t, 1)
+  end
   local key = split_key(t[1]:match("[^/]+") or "")
   if not key then return false end
   local x, kind = nil, nil
@@ -2161,6 +2204,7 @@ H._probe_ok = function(m)
   local s = m.text:lower():gsub("à", " "):gsub("[=:]", " ")
   local t = {}
   for w in (s:match("^[^,]*") or ""):gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
+  if t[1] and is_tgt(t[1]) and #t > 1 then table.remove(t, 1) end   -- V3.27 : cible ecrite dans le rush
   local key = t[1] and split_key(t[1]:match("[^/]+") or "")
   if not key then return false end
   if PROBE[key] then return true end

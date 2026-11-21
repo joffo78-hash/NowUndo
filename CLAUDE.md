@@ -47,9 +47,9 @@ du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 a
 9 replace, 10 auto-replace, 11 clear full, 12 part, 13 multiply, 14 undo, 15 redo, 16 restart, 17 re-rec, 18 one-shot,
 19 auto, 20 speed step, 21 pitch step, 22 full loop, 23 quantise, 24 reset, 30 exclu, 31/32 import (copie / requête longueur), 33 beat repeat,
 34/35/36 drop (horloge du passage sur la cible / source en attente d'effacement / copie de l'enregistrement ; arg = jeton),
-37 mute (arg 0 bascule / 1 on / 2 off ; état publié en `+199`).
+37 mute (arg 0 bascule / 1 on / 2 off ; état publié en `+199`), 38 warp, **39 dub A / D** (V3.27 : arg 0 bascule / 1 = D / 2 = A).
 **Paramètres (+180)** : 3 speed, 4 pitch, 5 mix, 7 fade, 19 fdbk, 20 dégradation, 21 stéréo, 22 out vol, 26-28/35/36/38-41 cloud,
-29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2.
+29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2, 65/66 warp grille / force, **67 dub A (0) / D (1)** (V3.27).
 
 **ExtState** : `nowundo_vl` (état partagé du Launchpad : `state` + `rev`, `web_cmd`/`web_ack`, `web_frame/labels/meta`,
 `fx_source`, `fx_slot`, `sel_looper`, `fighter_page`, `active_page`) · `NowUndo_VLcmd/q` (file de commandes externes vers le
@@ -276,11 +276,22 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   (`dub_commit_begin`, ou à la sortie de l'overdub), puis relue transformée comme le reste. Seulement hors Slicer et
   seulement quand quelque chose est transformé (pitch / speed, varispeed, reverse) ; sinon chemin normal. Empilement =
   somme (poids plafonné à 1). Compensation de latence au départ de l'écriture (`wr_off`). Changement de mode = `dub_flush`.
-- Carré **A / D** en bas à droite du panneau OUTPUT (394, 598). État publié en `+159` (pas encore de commande
-  d'écriture ; pour le piloter de l'extérieur : `wr_id == 67` dans le bloc des paramètres, à faire si demandé).
+- Carré **A / D** en bas à droite du panneau OUTPUT (394, 598). État publié en `+159`. Pilotage : commande **39**
+  (0 bascule / 1 D / 2 A) et paramètre **67** ; MIDI Learn « Dub A / D (bascule) » + paramètre « Dub A / D » ; mots de rush `a` / `d`.
 - Ajouté par Claude : bouton **Mute** du Transport (venu de la V3.26) ; parenthèses autour d'un `? :` à affectations
   (`rw_pos`, sens inchangé). Test `tools/traw.py . [0|1] [rev|speed]` : A = impulsion revient à sa place, D = relue en
   reverse / à la vitesse ; pas de NaN. Non testé dans REAPER.
+
+## 21 nov. : cibles dans les rushes (préparation du chantier « tout est rush »)
+
+- Rush = même syntaxe qu'un pas de scénario, **cible facultative** : rien = looper / groupe sélectionné (`rec`) ; `l1`,
+  `l1/3`, `l2-4`, `l(1/3)`, **`g2`, `g1/3`, `g(2)`** (groupe du Launchpad, gmem `6000+i`, lu à l'exécution), mélange
+  `l2/g1`, `all`. Après une virgule sans cible = cible précédente (`rec, l6 play, stop` : stop sur L6). `g(2)` **seul**
+  dans une action reste le rappel du preset de groupe. Scénarios : mêmes cibles, pas recompilé au GO (groupes à jour).
+- Mots `a` / `d` (dub A / D, param 67) ; `a` reste un mot de liaison ailleurs qu'en position de mot (`l1 in 0.25 out a 0.5`).
+- Pile « dernier actif gagne » : comparaison par items (looper + mot), plus par la sélection. Pad toggle allumé : vérifie le
+  1er mot sur la cible écrite. Message = loopers réellement visés. `parse_target` / `is_tgt` dans le Scenario (193 locales).
+- Test : `tools/trush_tgt.lua` (lupa, faux REAPER, 8 loopers, groupes). Non testé dans REAPER.
 
 ## 21 nov. : 8Waves VU / Mute / saturation + bouton Mute du JSFX
 
