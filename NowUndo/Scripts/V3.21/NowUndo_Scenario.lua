@@ -1617,6 +1617,12 @@ local function mac_label(m)                            -- libelle affiche : le n
 end
 local function mac_check(m)
   if trim(m.text) == "" then m.err = "rush vide"; return end
+  if m.toggle then   -- toggle "a" = interrupteur A / D : ecrit "d" (le pad affiche d et s'allume en D, comme "d")
+    local head, rest = m.text:match("^([^,]*)(.*)$")
+    local h2 = head:gsub("^(%s*)a(%s*%*?%s*)$", "%1d%2")
+    if h2 == head then h2 = head:gsub("^(%s*(%S+)%s+)a(%s*%*?%s*)$", function(p, w, x) if is_tgt(w:lower()) then return p .. "d" .. x end end) end
+    if h2 ~= head then m.text = h2 .. rest end
+  end
   local _, errs = compile(m.text, { 1 }, m.toggle)
   m.err = errs[1]
 end
@@ -2390,6 +2396,7 @@ H._mirror = function(m)
   local inp = w[1] and w[1]:match("^in?[%d%(]") ~= nil
   if w[1] and is_tgt(w[1]) then table.remove(w, 1) end
   if inp and w[1] and w[1]:match("^mute") then return true end        -- mute d'une entree : suit la piste
+  if w[1] == "d" or w[1] == "d*" then return true end  -- interrupteur A / D : suit le mode reel (allume = D)
   return w[1] ~= nil and w[1]:match("^e[1-4]") ~= nil
 end
 local mac_on_t, mac_on_s = 0, nil

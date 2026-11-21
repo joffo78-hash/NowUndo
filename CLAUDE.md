@@ -316,6 +316,8 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 - **Glisser un rush vers le Launchpad** : le Launchpad refusait toute case > 64 (reste d'avant les sous-pages) → impossible de
   déposer ailleurs qu'en 4a. Corrigé (limite 26 × 64 ; hors d'un pad = 1re case libre de la sous-page affichée). Le Scenario
   vérifie 1,5 s après (`H._dropchk`) et dit « posé en c1.3 » ou « le Launchpad n'a pas pris le rush ».
+- **Rush toggle `a` / `d` = interrupteur A / D** : `mac_check` réécrit un toggle `a` (ou `l1 a`, `all a`, 1re action) en `d` ;
+  pad allumé = **D**, miroir de l'état réel (`H._mirror`). Test `tools/trush_ad.lua`.
 - `ED.add` : après une cible seule (`all`, `l3`, `g2`, `in1`) ou `… to`, le mot de la palette est collé par une espace (`all a`), plus par une virgule.
 
 ## 21 nov. : page 4 = pages de rushes, `to g`, `go`
