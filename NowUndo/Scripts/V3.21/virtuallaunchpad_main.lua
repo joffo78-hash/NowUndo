@@ -2653,6 +2653,25 @@ function VL.ext_cmd_poll()
       if mk and mk >= 1 and mk <= NIN then VL.set_input_mute(mk, mm) end
       local tw = tonumber(name:match("^twpage_(%d+)$"))
       if tw and tw >= 1 and tw <= 8 then VL.set_fighter_page(tw) end
+      -- V3.27 (8 Waves interactif) : sel_<i> = selectionne L i ; stap_<i> = tap du pad de la 2e rangee (statut) de L i ;
+      -- ctrlgrp_<i>_1 = 1er Ctrl+clic (L i libre -> nouveau groupe, groupe -> on edite le sien) ; ctrlgrp_<i>_0 = clics
+      -- suivants, Ctrl toujours tenu : L i entre / sort de ce groupe (meme geste que Ctrl + clic sur la rangee du haut)
+      local si = tonumber(name:match("^sel_(%d+)$"))
+      if si and si >= 1 and si <= NLOOP and S.sel_looper ~= si then VL.select_looper(si) end
+      local ti = tonumber(name:match("^stap_(%d+)$"))
+      if ti and ti >= 1 and ti <= NLOOP then VL.status_pad_tap(ti) end
+      local ci, cfirst = name:match("^ctrlgrp_(%d+)_([01])$")
+      ci = tonumber(ci)
+      if ci and ci >= 1 and ci <= NLOOP then
+        if cfirst == "1" or not VL._w8g then
+          local g = S.group_of[ci] or 0
+          if g == 0 then g = VL.first_empty_group() or 0; if g > 0 then VL.assign_group(ci, g) end end
+          VL._w8g = g
+          VL.select_looper(ci)
+        elseif VL._w8g > 0 then
+          VL.assign_group(ci, (S.group_of[ci] == VL._w8g) and 0 or VL._w8g)
+        end
+      end
     end
     -- fxin_<n>_<slot>_<on|off|tog> : effet d'une ENTREE (page web Twister / Effets)
     local ii, is_, ia = (name or ""):match("^fxin_(%d+)_(%d+)_(%a+)$")

@@ -20,7 +20,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
   | `twisterinoutreset.lua` | Midi Fighter Twister v3.5 (8 pages, page 7 Custom, page 8 Display, sélection d'effet FX Router). |
   | `nowundo_midi_learn.lua` | MIDI Learn v2.8 + raccourcis clavier (js_ReaScriptAPI), cumul clavier/MIDI, double appui. Écoute aussi le **MIDI des rushes** (table `RL`, V3.27). |
   | `NowUndo_8Looper_Panel.lua` | Panneau 8 loopers + import de fichiers audio (glisser-déposer, modes Adapter / Indépendant / Étirer). |
-  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, fond de la forme d'onde teinté de la couleur du looper (arrêt, et un peu plus sombre en lecture : plus de noir), cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées ; étiquette : L n (partie seulement si ≠ MAIN) + sources entre parenthèses + état + REVERSE / SLICE / CLOUD + SP (speed ≠ 1) / PS (pitch ≠ 0) + « FX n » en rose ; M / S / F tout à droite ; VU vertical d'entrée à gauche (`+172`) et de sortie à droite (`+173`) ; état MUTE (`+199`) ; saturation de **tout le cadre** = Out Vol (`+22`) : 0 dB couleur pleine → -40 dB noir et blanc, courbe ^1.5, gris un peu assombri, textes / tête gardent une luminosité ≥ 0,8 ; Mute = noir et blanc ; VU d'entrée et cadre de groupe restent en couleur). Pas de paramètres, sources, boutons ni glisser-déposer. Fenêtre `NowUndo_8Waves`. |
+  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, fond de la forme d'onde teinté de la couleur du looper (arrêt, et un peu plus sombre en lecture : plus de noir), cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées ; étiquette : L n (partie seulement si ≠ MAIN) + sources entre parenthèses + état + REVERSE / SLICE / CLOUD + SP (speed ≠ 1) / PS (pitch ≠ 0) + « FX n » en rose ; M / S / F tout à droite ; VU vertical d'entrée à gauche (`+172`) et de sortie à droite (`+173`) ; état MUTE (`+199`) ; saturation de **tout le cadre** = Out Vol (`+22`) : 0 dB couleur pleine → -40 dB noir et blanc, courbe ^1.5, gris un peu assombri, textes / tête gardent une luminosité ≥ 0,8 ; Mute = noir et blanc ; VU d'entrée et cadre de groupe restent en couleur). Pas de paramètres, sources ni boutons ; **interactif depuis le 21 nov.** (voir « 8Waves interactif »). Fenêtre `NowUndo_8Waves`. |
   | `NowUndo_Scenario.lua` | Séquenceur de scénarios + **Rushes** (ex « macros ») : éditeur, assistant, palette ; V3.27 : cibles dans les rushes, sous-pages de la page 4 (+ PAGE / NOM / SUPPR), MIDI par rush, modèle de démarrage. |
   | `NowUndo_Twister_Web.lua` | Pont gmem ↔ ExtState pour l'onglet Twister In/Out et l'onglet **Loopers** du web. |
   | `NowUndo_Latency.lua` | Réglage global de la compensation de latence (V3.23). |
@@ -307,6 +307,18 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   sinon la mémoire de REAPER (le fichier d'abord : un ExtState long peut être relu en partie). **Le modèle n'est jamais
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
+
+## 21 nov. : 8Waves interactif
+
+- `NowUndo_8Waves.lua` (table `UI`, géométrie des lignes dans `VIS.R[i]`) : **clic rapide** (< 0,4 s, sans glisser) sur la
+  forme d'onde = sélection + **tap du pad de statut** (2e rangée du LP : `VL.status_pad_tap`, groupe compris) ; clic sur
+  l'étiquette ou les VU = sélection seule ; **Ctrl + clic** = geste de groupe (1er clic : looper libre → nouveau groupe,
+  groupé → son groupe ; clics suivants Ctrl tenu : entre / sort) ; **flèches haut / bas** = looper actif précédent / suivant ;
+  **glisser** : poignées In (commande d'édition 1) / Out (2), milieu de la fenêtre = déplacer In/Out (5) ; Cloud : milieu de la
+  zone des grains = position (param 38, passe en Free param 37 par la boîte +195), bords = Spread (param 28 = demi-largeur /
+  demi-fenêtre). Curseur souris selon la cible. Écran tactile : REAPER ne donne qu'un seul pointeur (pas de multi-doigts).
+- Launchpad, file `NowUndo_VLcmd/q` : `sel_<i>`, `stap_<i>`, `ctrlgrp_<i>_<1|0>` (`VL._w8g` = groupe du geste en cours).
+- Tests : `tools/t8waves_ui.lua` (gestes → commandes / écritures gmem), `tools/tlp_8waves.lua` (Launchpad en `VL_TEST`).
 
 ## 21 nov. : ping-pong qui restait en reverse (JSFX V3.27, corrigé en place)
 

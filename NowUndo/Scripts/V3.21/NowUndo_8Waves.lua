@@ -24,7 +24,7 @@ local function read(base, off) return reaper.gmem_read(base + off) or 0 end
 -- noir et blanc direct. En gris, le dessin est aussi un peu assombri, mais les textes et la tete de lecture gardent une
 -- luminosite minimale (lisibles). Restent en couleur : VU d'entree (independant du volume de sortie) et cadre de groupe.
 -- VU-metres verticaux : entree (+172) avant la forme d'onde, sortie (+173) apres.
-local VIS = {s = 1}
+local VIS = {s = 1, R = {}}
 function VIS.sat(out_vol, muted)
   if muted then return 0 end
   local db = 20 * math.log(math.max(0.000001, out_vol), 10)
@@ -99,6 +99,7 @@ local function draw_row(i, x, y, w, h, now_t, s)
     rect(x, y, w, h, .06 + hc[1] * .07, .06 + hc[2] * .07, .07 + hc[3] * .07, 1, 1)
     rect(x, y, w, h, hc[1] * .30 + .08, hc[2] * .30 + .08, hc[3] * .30 + .09, 1, 0)
     text(x + 6, y + 4, "LOOPER " .. (i + 1) .. "   INACTIF", fs, hc[1] * .55 + .10, hc[2] * .55 + .10, hc[3] * .55 + .10, true)
+    VIS.R[i] = nil
     return
   end
   local p = ap - 1; local gb = base0 + p * 200
@@ -128,6 +129,9 @@ local function draw_row(i, x, y, w, h, now_t, s)
   -- fond de la forme d'onde teinte de la couleur du looper : a l'arret, et un peu plus sombre en lecture (la forme d'onde ressort)
   local wbg = is_stop and {.05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10} or {.035 + hc[1] * .11, .035 + hc[2] * .11, .042 + hc[3] * .11}
   rect(wx, wy, ww, wh, wbg[1], wbg[2], wbg[3], 1, 1)
+  -- geometrie de la ligne pour la souris (frame suivante) ; zone des grains en echantillons (+178 / +179 = % de la longueur)
+  VIS.R[i] = { ds = ds_i, x = x, y = y, w = w, h = h, wx = wx, wy = wy, ww = ww, wh = wh, gb = gb, len = length, ls = ls, lw = lw,
+               cloud = cloud_on and length > 0 and lw > 0, z0 = read(gb, 178) * .01 * length, z1 = read(gb, 179) * .01 * length }
   if tc then
     rect(x, y, w, h, tc[1], tc[2], tc[3], tk, 1)                    -- voile de la couleur du groupe / de la selection
     if length > 0 and lw > 0 then                                    -- ... sauf hors de In / Out : fond normal (non selectionne)
@@ -220,7 +224,10 @@ local function draw_row(i, x, y, w, h, now_t, s)
     end
     local endpos = math.min(ls + lw, length)
     setc(.32, .88, .52, 1); local ix = wx + (ls / length) * ww; gfx.line(ix, wy, ix, wy + wh)
+    local hw, hh = math.max(5, math.floor(wh * .06)), math.max(8, math.floor(wh * .16))   -- poignees (souris / doigt)
+    gfx.rect(ix, wy, hw, hh, 1); gfx.rect(ix, wy + wh - hh, hw, hh, 1)
     setc(.55, 1, .68, 1); local ox = wx + (endpos / length) * ww; gfx.line(ox, wy, ox, wy + wh)
+    gfx.rect(ox - hw + 1, wy, hw, hh, 1); gfx.rect(ox - hw + 1, wy + wh - hh, hw, hh, 1)
   end
   local px = wx + math.max(0, math.min(100, read(gb, 47))) * .01 * ww
   setc_hi(.95, .55, .82, 1); gfx.line(px, wy, px, wy + wh); gfx.line(px + 1, wy, px + 1, wy + wh)
@@ -255,6 +262,7 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local tw, gapw = 0, fs * .9
   for k, pt in ipairs(parts) do pt.w = gfx.measurestr(pt[1]); tw = tw + pt.w + (k > 1 and gapw or 0) end
   rect(wx + 2, wy + 2, tw + 10, fs + 6, 0, 0, 0, .55, 1)
+  VIS.R[i].tag = tw + 12                                           -- etiquette : un clic dessus = selection seule
   local tx = wx + 6
   for _, pt in ipairs(parts) do text(tx, wy + 4, pt[1], fs, pt[2], pt[3], pt[4], true); tx = tx + pt.w + gapw end
 
@@ -292,12 +300,127 @@ local function draw_row(i, x, y, w, h, now_t, s)
   end
 end
 
+-- ============================================================================================================
+-- INTERACTION (V3.27) : clic = selection + tap de la 2e rangee du Launchpad (statut : lecture/stop, sortie REC / slicer /
+-- reverse / cloud...), clic sur l'etiquette = selection seule, Ctrl + clic = geste de groupe (comme Ctrl + clic sur la
+-- rangee du haut du Launchpad), fleches haut / bas = selection, glisser : bords In / Out, milieu = deplacer la fenetre,
+-- zone des grains du Cloud (milieu = position, bords = largeur). Commandes vers le Launchpad : NowUndo_VLcmd/q.
+-- ============================================================================================================
+local UI = { down = false, drag = nil, ctrl_sess = false }
+function UI.lp(cmd)
+  local q = reaper.GetExtState("NowUndo_VLcmd", "q")
+  reaper.SetExtState("NowUndo_VLcmd", "q", q .. cmd .. "\t" .. string.format("%.3f", reaper.time_precise()) .. "\n", false)
+end
+function UI.row_at(mx, my)
+  for i = 0, MAX_INST - 1 do
+    local R = VIS.R[i]
+    if R and mx >= R.x and mx < R.x + R.w and my >= R.y and my < R.y + R.h then return i, R end
+  end
+end
+local function sx(R, smp) return R.wx + smp / R.len * R.ww end           -- echantillon -> x ecran
+local function smp_at(R, px) return math.max(0, math.min(R.len, (px - R.wx) / R.ww * R.len)) end
+-- zone des grains repliee dans la fenetre In / Out : centre (dans la fenetre) et demi-largeur, en echantillons
+function UI.zone(R)
+  if not R.cloud or R.z1 <= R.z0 then return nil end
+  local wl = math.max(1, R.lw)
+  local half = math.min(wl * .5, (R.z1 - R.z0) * .5)
+  local c = (R.z0 + R.z1) * .5 - R.ls; c = c - math.floor(c / wl) * wl
+  return R.ls + c, half, wl
+end
+-- distance (echantillons) entre x et le centre de la zone, en tenant compte du repli dans la fenetre
+local function zdist(R, smp, c, wl)
+  local d = smp - c; d = d - math.floor(d / wl + .5) * wl; return d
+end
+function UI.hit(R, mx, my)
+  if R.tag and mx >= R.wx and mx < R.wx + R.tag and my >= R.wy and my < R.wy + R.wh * .35 then return "tag" end
+  if mx < R.wx or mx >= R.wx + R.ww then return "tag" end              -- VU / marges : selection seule
+  if R.len <= 0 or R.lw <= 0 then return "row" end
+  local tol = math.max(8, math.min(18, R.ww * .012))
+  local ix, ox = sx(R, R.ls), sx(R, math.min(R.len, R.ls + R.lw))
+  if math.abs(mx - ix) <= tol and math.abs(mx - ix) <= math.abs(mx - ox) then return "in" end
+  if math.abs(mx - ox) <= tol then return "out" end
+  local c, half, wl = UI.zone(R)
+  if c then
+    local d = math.abs(zdist(R, smp_at(R, mx), c, wl)) / R.len * R.ww          -- en pixels
+    local hp = half / R.len * R.ww
+    if math.abs(d - hp) <= tol and hp > tol then return "zedge" end
+    if d < hp then return "zmove" end
+  end
+  if mx > ix and mx < ox then return "win" end
+  return "row"
+end
+local CURSOR = { ["in"] = 32644, out = 32644, zedge = 32644, win = 32646, zmove = 32646 }   -- <-> / deplacement
+function UI.param(gb, box, id, v) reaper.gmem_write(gb + box + 1, v); reaper.gmem_write(gb + box, id) end
+function UI.tick(ch)
+  local mx, my, cap = gfx.mouse_x, gfx.mouse_y, gfx.mouse_cap
+  local down, ctrl = (cap & 1) == 1, (cap & 4) == 4
+  if not ctrl then UI.ctrl_sess = false end                           -- Ctrl relache = fin du geste de groupe
+  -- fleches haut / bas : looper actif suivant / precedent (ordre des lignes)
+  if ch == 30064 or ch == 1685026670 then
+    local list, cur = {}, nil
+    for i = 0, MAX_INST - 1 do if VIS.R[i] then list[#list + 1] = VIS.R[i].ds; if VIS.R[i].ds == SEL_LOOPER then cur = #list end end end
+    if #list > 0 then
+      local k = cur and (cur + (ch == 30064 and -1 or 1)) or 1
+      k = math.max(1, math.min(#list, k))
+      if list[k] ~= SEL_LOOPER then UI.lp("sel_" .. list[k]); SEL_LOOPER = list[k] end
+    end
+  end
+  local D = UI.drag
+  if down and not UI.down then                                        -- appui
+    local i, R = UI.row_at(mx, my)
+    if R then
+      if ctrl then
+        UI.lp("ctrlgrp_" .. R.ds .. "_" .. (UI.ctrl_sess and "0" or "1")); UI.ctrl_sess = true
+      else
+        local kind = UI.hit(R, mx, my)
+        D = { i = i, ds = R.ds, kind = kind, x0 = mx, t0 = reaper.time_precise(), moved = false, gb = R.gb, len = R.len,
+              ls = R.ls, lw = R.lw }
+        if kind == "zmove" or kind == "zedge" then D.zc, D.zh, D.zw = UI.zone(R) end
+        if R.ds ~= SEL_LOOPER then UI.lp("sel_" .. R.ds); SEL_LOOPER = R.ds end
+        UI.drag = D
+      end
+    end
+  elseif down and D then                                              -- glisser
+    local R = VIS.R[D.i]
+    if R and math.abs(mx - D.x0) > 4 then D.moved = true end
+    if R and D.moved and D.len > 0 and (D.lx ~= mx) then
+      D.lx = mx
+      local s = smp_at(R, mx)
+      local ds = (mx - D.x0) / R.ww * D.len
+      if D.kind == "in" then
+        reaper.gmem_write(D.gb + 161, math.min(s, D.ls + D.lw - 1)); reaper.gmem_write(D.gb + 160, 1)
+      elseif D.kind == "out" then
+        reaper.gmem_write(D.gb + 162, math.max(s, D.ls + 1)); reaper.gmem_write(D.gb + 160, 2)
+      elseif D.kind == "win" then
+        reaper.gmem_write(D.gb + 161, math.max(0, math.min(D.len - D.lw, D.ls + ds))); reaper.gmem_write(D.gb + 160, 5)
+      elseif D.kind == "zmove" and D.zc then                          -- position des grains (mode Free) en % de la fenetre
+        if not D.free then UI.param(D.gb, 195, 37, 1); D.free = true end
+        local c = D.zc + ds - D.ls; c = c - math.floor(c / D.zw) * D.zw
+        UI.param(D.gb, 180, 38, math.max(0, math.min(100, c / D.zw * 100)))
+      elseif D.kind == "zedge" and D.zc then                          -- largeur de la zone = Spread
+        local half = math.abs(zdist(R, s, D.zc, D.zw))
+        UI.param(D.gb, 180, 28, math.max(0, math.min(1, half / (D.zw * .5))))
+      end
+    end
+  elseif not down and UI.down and D then                              -- relachement : clic rapide = tap de statut
+    if not D.moved and D.kind ~= "tag" and reaper.time_precise() - D.t0 < .4 then UI.lp("stap_" .. D.ds) end
+    UI.drag = nil
+  end
+  if not down then UI.drag = nil end
+  UI.down = down
+  -- curseur selon ce qui est sous la souris
+  local _, R = UI.row_at(mx, my)
+  local want = (UI.drag and CURSOR[UI.drag.kind]) or (R and not ctrl and CURSOR[UI.hit(R, mx, my)]) or 32512
+  if want ~= UI.cur then UI.cur = want; if gfx.setcursor then gfx.setcursor(want) end end
+end
+
 local function main()
   local ch = gfx.getchar(); if ch < 0 then return end
   win_save()
   local w, h = gfx.w, gfx.h
   local now_t = reaper.time_precise()
   SEL_LOOPER = math.floor(tonumber(reaper.GetExtState("nowundo_vl", "sel_looper")) or 0)
+  UI.tick(ch)
   rect(0, 0, w, h, .055, .06, .075, 1, 1)
   local m, gap = 6, 4
   local rh = (h - 2 * m - gap * (MAX_INST - 1)) / MAX_INST
