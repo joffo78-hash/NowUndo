@@ -4,8 +4,8 @@
 --   Page 1 Vol/Feedback | 2 Pitch/Speed | 3 In/Out | 4 Slicer | 5 Cloud | 6 Effets (FX Router)
 --   (v3.3 : pages 1 et 3 permutees ; chaque page garde sa couleur : Vol/Feedback rouge, In/Out vert.
 --    En interne les numeros logiques restent 1 = In/Out, 3 = Vol/Feedback : seul le bouton qui les appelle change.)
---   Page 5 Cloud v2 (NowUndo V3.21) : Density | Agitation | Spread | PSpread / Pos | Rate | Depth | LFO /
---     Size | Diffuse | Mix | Freeze (push) / Width (= Stereo de la section Output)
+--   Page 5 Cloud (V3.27) : Pos (push Link/Free) | Density | Size | Agitation / Spread | LFO (Sine/Saw/InvSaw/Random) | Rate |
+--     Depth / Width | Diffuse (push = Freeze) | - | Smooth (Random) / - | - | - | Dry/Wet
 --   Page 6 : colonne = slot 1..4 de la source courante du FX Router, ligne = parametre 1..4 ; push = valeur par defaut.
 --   Page 7 Custom (v3.4) : 16 knobs + 16 push assignes dans le MIDI Learn (menus) ; agissent sur le looper selectionne
 --     et les membres de son groupe (knobs : meme delta, chacun garde son ecart ; push : chacun selon son etat) ;
@@ -601,12 +601,12 @@ local function make_slicer_page()
 end
 
 local function make_cloud_page()
-  -- NowUndo V3.21 (Cloud v2). Lignes A(haut) .. D(bas), colonnes 1..4 :
-  --   A : Density | Agitation | Spread | PSpread
-  --   B : Pos (push = Link/Free) | Rate | Depth | LFO
-  --   C : Size (log) | Diffuse | Mix | Freeze (push = On/Off)
-  --   D : Width (= Stereo de la section Output) | - | - | -
-  -- Push : valeur par defaut, sauf Pos et Freeze (bascules).
+  -- NowUndo V3.27 (disposition de l'utilisateur, 21 nov.). Lignes A(haut) .. D(bas), colonnes 1..4 :
+  --   A : Pos (push = Link/Free) | Density | Size (log) | Agitation
+  --   B : Spread | LFO forme (Sine / Saw / InvSaw / Random) | Rate | Depth
+  --   C : Width (= Stereo de la section Output) | Diffuse (push = Freeze on/off) | - | Smooth (lissage du LFO Random)
+  --   D : - | - | - | Dry/Wet
+  -- Push : valeur par defaut, sauf Pos (Link/Free) et Diffuse (Freeze). PSpread (pitch) : page 7 Custom / MIDI Learn.
   local cells = {}
   local function cell(r, c, label, off, id, lo, hi, def, disp)
     cells[r .. "," .. c] = {
@@ -621,29 +621,15 @@ local function make_cloud_page()
     }
   end
   local function pct(v) return string.format("%.0f%%", v * 100) end
-  cell(0, 0, "Density", 26, PID.cloud_density, 0, 1, 0.5, pct)
-  cell(0, 1, "Agitation", 27, PID.cloud_chaos, 0, 1, 0, pct)
-  cell(0, 2, "Spread", 28, PID.cloud_spread, 0, 1, 0.1, pct)
-  cell(0, 3, "PSpread", 35, PID.cloud_pitch, 0, 100, 0, function(v) return string.format("%.0f%%", v) end)
-  cell(1, 0, "Pos", 38, PID.cloud_pos, 0, 100, 50, function(v) return string.format("%.0f%%", v) end)
-  cells["1,0"].push = function()
+  -- A
+  cell(0, 0, "Pos", 38, PID.cloud_pos, 0, 100, 50, function(v) return string.format("%.0f%%", v) .. (tgt_get(37) > 0.5 and "" or " LINK") end)
+  cells["0,0"].push = function()
     local cur = tgt_get(37)
     tgt_set_param(37, cur > 0.5 and 0 or 1)
   end
-  cell(1, 1, "Rate", 40, PID.cloud_lfo_rate, 0.1, 4, 1, function(v) return string.format("%.1fHz", v) end)
-  cell(1, 2, "Depth", 41, PID.cloud_lfo_depth, 0, 100, 0, function(v) return string.format("%.0f%%", v) end)
-  cells["1,3"] = {
-    label = "LFO", pid = 39,
-    get = function() return tgt_get(39) end,
-    set = function(_, v) tgt_set_param(39, clamp(math.floor(v + 0.5), 0, 2)) end,
-    to_n = function(v) return clamp(v / 2, 0, 1) end,
-    from_n = function(n) return n * 2 end,
-    def = 0,
-    push = function() tgt_set_param(39, 0) end,
-    disp = function(v) local k = math.floor(v + 0.5); return k == 0 and "Sine" or (k == 1 and "Saw" or "InvSaw") end,
-  }
+  cell(0, 1, "Density", 26, PID.cloud_density, 0, 1, 0.5, pct)
   -- Size : 1 .. 1000 ms en echelle log (meme course que le bouton du looper)
-  cells["2,0"] = {
+  cells["0,2"] = {
     label = "Size", pid = PID.cloud_size,
     get = function() return tgt_get(190) end,
     set = function(_, v) tgt_set_param(PID.cloud_size, clamp(v, 1, 1000)) end,
@@ -653,19 +639,32 @@ local function make_cloud_page()
     push = function() tgt_set_param(PID.cloud_size, 80) end,
     disp = function(v) if v >= 100 then return string.format("%.0fms", v) end return string.format("%.1fms", v) end,
   }
-  cell(2, 1, "Diffuse", 192, PID.cloud_diffuse, 0, 1, 0, pct)
-  cell(2, 2, "Mix", 36, PID.cloud_mix, 0, 1, 1, pct)
-  cells["2,3"] = {
-    label = "Freeze", pid = PID.cloud_freeze,
-    get = function() return tgt_get(191) end,
-    set = function() end,                                   -- le knob ne fait rien : seul le push bascule
-    to_n = function(v) return v > 0.5 and 1 or 0 end,       -- anneau plein = ON
-    from_n = function(n) return n end,
+  cell(0, 3, "Agitation", 27, PID.cloud_chaos, 0, 1, 0, pct)
+  -- B
+  cell(1, 0, "Spread", 28, PID.cloud_spread, 0, 1, 0.1, pct)
+  cells["1,1"] = {
+    label = "LFO", pid = 39,
+    get = function() return tgt_get(39) end,
+    set = function(_, v) tgt_set_param(39, clamp(math.floor(v + 0.5), 0, 3)) end,
+    to_n = function(v) return clamp(v / 3, 0, 1) end,
+    from_n = function(n) return n * 3 end,
     def = 0,
-    push = function() tgt_set_param(PID.cloud_freeze, tgt_get(191) > 0.5 and 0 or 1) end,
-    disp = function(v) return v > 0.5 and "ON" or "OFF" end,
+    push = function() tgt_set_param(39, 0) end,
+    disp = function(v) local k = math.floor(v + 0.5); return ({ [0] = "Sine", "Saw", "InvSaw", "Random" })[k] or "Sine" end,
   }
-  cell(3, 0, "Width", 21, PID.stereo_width, 0, 1, 0, pct)
+  cell(1, 2, "Rate", 40, PID.cloud_lfo_rate, 0.1, 4, 1, function(v) return string.format("%.1fHz", v) end)
+  cell(1, 3, "Depth", 41, PID.cloud_lfo_depth, 0, 100, 0, function(v) return string.format("%.0f%%", v) end)
+  -- C
+  cell(2, 0, "Width", 21, PID.stereo_width, 0, 1, 0, pct)
+  cell(2, 1, "Diffuse", 192, PID.cloud_diffuse, 0, 1, 0, function(v) return pct(v) .. (tgt_get(191) > 0.5 and " FRZ" or "") end)
+  cells["2,1"].push = function() tgt_set_param(PID.cloud_freeze, tgt_get(191) > 0.5 and 0 or 1) end   -- push = Freeze
+  cell(2, 3, "Smooth", nil, 68, 0, 1, 0, pct)                     -- lissage du LFO Random (param 68)
+  cells["2,3"].get = function()                                    -- relu dans la zone 112000 + (looper*3 + part)*20 (V3.27)
+    local i = page_targets()[1]
+    return reaper.gmem_read(112000 + ((i - 1) * 3 + active_part(i) - 1) * 20) or 0
+  end
+  -- D
+  cell(3, 3, "Dry/Wet", 36, PID.cloud_mix, 0, 1, 1, pct)
   return cells
 end
 
@@ -1717,8 +1716,9 @@ function SCN.emit(line, prefix)
   end
   reaper.SetExtState("NowUndo_Scn", "q", q .. line .. "\n", false)
 end
-SCN.P5 = { [0] = "cdens", [1] = "cchaos", [2] = "cspread", [3] = "cpitch", [4] = "cpos", [5] = "clfo", [6] = "clfodepth", [7] = "clfoshape" }
-SCN.P5R = { [0] = {0,1}, [1] = {0,1}, [2] = {0,1}, [3] = {0,100}, [4] = {0,100}, [5] = {0.1,4}, [6] = {0,100}, [7] = {0,2} }
+-- page 5 Cloud (V3.27) : numero du knob (rangee * 4 + colonne) -> mot du scenario ; Size / Width / Diffuse / Dry-Wet : pas de mot
+SCN.P5 = { [0] = "cpos", [1] = "cdens", [3] = "cchaos", [4] = "cspread", [5] = "clfoshape", [6] = "clfo", [7] = "clfodepth" }
+SCN.P5R = { [0] = {0,100}, [1] = {0,1}, [3] = {0,1}, [4] = {0,1}, [5] = {0,3}, [6] = {0.1,4}, [7] = {0,100} }
 function SCN.knob(idx, norm, page)
   if not SCN.on() then return end
   norm = clamp(norm, 0, 1)

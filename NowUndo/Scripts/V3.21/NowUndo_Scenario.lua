@@ -291,7 +291,7 @@ H.cpitch    = param_h(35, 0,   0,   100, c100, "cpitch")
 H.cpos      = param_h(38, 50,  0,   100, c100, "cpos")
 H.clfo      = param_h(40, 1,   0.1, 4,   idc, "clfo")
 H.clfodepth = param_h(41, 0,   0,   100, c100, "clfodepth")
-H.clfoshape = param_h(39, 0,   0,   2,   idc, "clfoshape")
+H.clfoshape = param_h(39, 0,   0,   3,   idc, "clfoshape")
 H.sattack  = param_h(55, 0,     0,     100,  idc, "sattack")     -- slicer
 H.sdecay   = param_h(16, 150,   4,     2000, idc, "sdecay")
 H.ssteps   = param_h(47, 8,     1,     32,   idc, "ssteps")
@@ -979,7 +979,7 @@ local HELP = {
   { "fb", "feedback 0..2  |  reset (= 1)" },
   { "cdens cchaos cspread", "cloud : densite, chaos, spread (0..1)" },
   { "cpitch cpos", "cloud : pitch spread, position (0..100)" },
-  { "clfo clfodepth clfoshape", "cloud LFO : rate (0.1..4), depth (0..100), shape (0..2)" },
+  { "clfo clfodepth clfoshape", "cloud LFO : rate (0.1..4), depth (0..100), shape (0..3 : sine, saw, inv saw, random)" },
   { "sattack sdecay ssteps", "slicer : attack (0..100), decay (4..2000), steps (1..32)" },
   { "srate smode sgrid spreset", "slicer : rate (0..5), mode (0 1 5), grid (0..9), preset (1..4)" },
   { "smax sdetect sdhold", "slicer : max slices (0..32), detect, detect hold" },
@@ -1076,7 +1076,7 @@ local STEP = {
 }
 local RANGE = { pitch = { -48, 48 }, speed = { 0.01, 100 }, vol = { 0, 2 }, fb = { 0, 2 }, ["in"] = { 0, 1 }, out = { 0, 1 },
   cdens = { 0, 1 }, cchaos = { 0, 1 }, cspread = { 0, 1 }, cpitch = { 0, 100 }, cpos = { 0, 100 },
-  clfo = { 0.1, 4 }, clfodepth = { 0, 100 }, clfoshape = { 0, 2 },
+  clfo = { 0.1, 4 }, clfodepth = { 0, 100 }, clfoshape = { 0, 3 },
   sattack = { 0, 100 }, sdecay = { 4, 2000 }, ssteps = { 1, 32 }, srate = { 0, 5 }, smode = { 0, 5 }, sgrid = { 0, 9 },
   spreset = { 1, 4 }, smax = { 0, 32 }, sdetect = { 0.001, 0.8 }, sdhold = { 30, 1000 }, sroot = { 0, 127 },
   srelease = { 0, 3000 }, spitch = { 0, 100 } }

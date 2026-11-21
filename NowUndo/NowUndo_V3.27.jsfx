@@ -38,7 +38,7 @@ slider34:cloud_pitch_spread=0.0<0,100,0.01>-Cloud Pitch Spread (%)
 slider35:cloud_mix=1.0<0,1,0.01>-Cloud Mix
 slider36:cloud_pos_mode=1<0,1,1{Linked,Free}>-Cloud Pos Mode
 slider37:cloud_pos_pct=50.0<0,100,0.1>-Cloud Pos (%)
-slider38:cloud_lfo_shape=0<0,2,1{Sine,Saw,Inv Saw}>-Cloud LFO Shape
+slider38:cloud_lfo_shape=0<0,3,1{Sine,Saw,Inv Saw,Random}>-Cloud LFO Shape
 slider39:cloud_lfo_rate=1.0<0.1,4.0,0.01>-Cloud LFO Rate (Hz)
 slider40:cloud_lfo_depth=0.0<0,100,0.01>-Cloud LFO Depth (%)
 slider41:looper_hue=0<0,8,1{Auto,Rouge,Orange,Jaune,Vert,Cyan,Bleu,Violet,Rose}>-Panel Color
@@ -68,6 +68,7 @@ slider65:warp_on=0<0,1,1{Off,On}>-Warp (attaques calees sur la grille)
 slider66:warp_grid=3<0,5,1{1/4 (Noire),1/8 (Croche),1/12 (Triolet),1/16 (Double),1/24 (Triolet Double),1/32 (Triple)}>-Warp Grid
 slider67:warp_force=100<0,100,1>-Warp Force (%)
 slider68:dub_raw=0<0,1,1{Compense (bande),Brut (transforme comme la boucle)}>-Dub Mode (pitch/speed/reverse)
+slider69:cloud_lfo_smooth=0<0,1,0.01>-Cloud LFO Smooth (Random)
 
 @init
 // Decay : position 0..100 <-> ms, interpolation exponentielle entre points :
@@ -1355,7 +1356,7 @@ function reset_all_params() (
       slicer_pitch_spread = 0.0; slider33 = slicer_pitch_spread; last_pitch_spread = slicer_pitch_spread; update_slicer_pitches(get_slicer_len());
       cloud_pitch_spread = 0.0; slider34 = cloud_pitch_spread; cloud_mix = 1.0; slider35 = cloud_mix;
       cloud_pos_mode = 1; slider36 = cloud_pos_mode; cloud_pos_pct = 50.0; slider37 = cloud_pos_pct;
-      cloud_lfo_shape = 0; slider38 = cloud_lfo_shape; cloud_lfo_rate = 1.0; slider39 = cloud_lfo_rate; cloud_lfo_depth = 0.0; slider40 = cloud_lfo_depth;
+      cloud_lfo_shape = 0; slider38 = cloud_lfo_shape; cloud_lfo_smooth = 0; slider69 = 0; cloud_lfo_rate = 1.0; slider39 = cloud_lfo_rate; cloud_lfo_depth = 0.0; slider40 = cloud_lfo_depth;
       cloud_size = 80; slider62 = cloud_size; cloud_freeze = 0; slider63 = cloud_freeze; cloud_diffuse = 0; slider64 = cloud_diffuse;
       sampler_root = 48; slider42 = sampler_root; sampler_pitch_mode = 0; slider43 = sampler_pitch_mode; sampler_release = 0; slider44 = sampler_release;
       clk_src = 0; slider46 = clk_src; slicer_steps = 8; slider47 = slicer_steps; max_slices = 16; slider48 = max_slices; slicer_preset = 1; slider49 = slicer_preset;
@@ -1422,7 +1423,7 @@ function do_clear(clear_type) local(ms_off, wipe_n, wipe1, wipe2, wipe3, hi) (
 function slicer_mode_name(m) ( m == 0 ? "Random" : (m == 5 ? "All" : "Steps"); );
 function grid_rate_name(m) ( m == 0 ? "1/4" : (m == 1 ? "1/8" : (m == 2 ? "1/12" : (m == 3 ? "1/16" : (m == 4 ? "1/24" : (m == 5 ? "1/32" : (m == 6 ? "1/48" : (m == 7 ? "1/64" : (m == 8 ? "1/96" : "1/128")))))))); );
 function slicer_rate_name(m) ( m == 0 ? "1/4" : (m == 1 ? "1/8" : (m == 2 ? "1/12" : (m == 3 ? "1/16" : (m == 4 ? "1/24" : "1/32")))); );
-function lfo_shape_name(s) ( s == 0 ? "Sine" : (s == 1 ? "Saw" : "Inv Saw"); );
+function lfo_shape_name(s) ( s == 0 ? "Sine" : (s == 1 ? "Saw" : (s == 2 ? "Inv Saw" : "Random")); );
 function quant_name(q) ( q == 0 ? "Free" : q == 1 ? "1/2" : q == 2 ? "1/3" : q == 3 ? "1/4" : q == 4 ? "1/6" : q == 5 ? "1/8" : q == 6 ? "1/12" : q == 7 ? "1/16" : q == 8 ? "1/32" : "1/64"; );
 function quant_val(q) ( q == 0 ? 0 : q == 1 ? 2 : q == 2 ? 3 : q == 3 ? 4 : q == 4 ? 6 : q == 5 ? 8 : q == 6 ? 12 : q == 7 ? 16 : q == 8 ? 32 : 64; );
 function loop_max_len() ( length > 0 ? length : (state == 1 ? pos : buf_len); );
@@ -2502,7 +2503,7 @@ loop(3,
     wr_id == 57 ? ( src_auto = wr_v >= 0.5 ? 1 : 0; slider56 = src_auto; src_auto ? start_analysis_ex(1); ) :
     wr_id == 33 ? ( grid_sub = max(0, min(9, floor(wr_v + 0.5))); slider32 = grid_sub; ) :
     wr_id == 37 ? ( cloud_pos_mode = wr_v >= 0.5 ? 1 : 0; slider36 = cloud_pos_mode; ) :
-    wr_id == 39 ? ( cloud_lfo_shape = max(0, min(2, floor(wr_v + 0.5))); slider38 = cloud_lfo_shape; ) :
+    wr_id == 39 ? ( cloud_lfo_shape = max(0, min(3, floor(wr_v + 0.5))); slider38 = cloud_lfo_shape; ) :
     wr_id == 42 ? ( sampler_root = max(0, min(127, floor(wr_v + 0.5))); slider42 = sampler_root; ) :
     wr_id == 43 ? ( sampler_pitch_mode = wr_v >= 0.5 ? 1 : 0; slider43 = sampler_pitch_mode; ) :
     wr_id == 44 ? ( sampler_release = max(0, min(3000, wr_v)); slider44 = sampler_release; ) :
@@ -2525,7 +2526,8 @@ loop(3,
     wr_id == 64 ? ( cloud_diffuse = max(0, min(1, wr_v)); slider64 = cloud_diffuse; ) :
     wr_id == 65 ? ( warp_grid = max(0, min(5, floor(wr_v + 0.5))); slider66 = warp_grid; ) :   // V3.26
     wr_id == 66 ? ( warp_force = max(0, min(100, wr_v)); slider67 = warp_force; ) :
-    wr_id == 67 ? ( dub_raw = wr_v > 0.5 ? 1 : 0; slider68 = dub_raw; ) :   // V3.27 : dub A (0) / D (1)
+    wr_id == 67 ? ( dub_raw = wr_v > 0.5 ? 1 : 0; slider68 = dub_raw; ) :
+    wr_id == 68 ? ( cloud_lfo_smooth = max(0, min(1, wr_v)); slider69 = cloud_lfo_smooth; ) :   // V3.27 : lissage du LFO Random   // V3.27 : dub A (0) / D (1)
     0;
     gmem[gmem_base + wr_mo] = 0;
     gmem[gmem_base + wr_mo + 1] = 0;
@@ -2633,6 +2635,9 @@ loop(3,
 
     // Export parameter variables by their declared JSFX names.
     param_gmem_base = 110000 + ((inst_idx * 3) + p) * 60;
+    // V3.27 : zone de publication supplementaire (le bloc de 200 et les 60 parametres sont pleins) : 112000 + (looper*3 + part)*20
+    //   +0 = lissage du LFO Random du Cloud (lu par le Twister)
+    gmem[112000 + ((inst_idx * 3) + p) * 20 + 0] = cloud_lfo_smooth;
     gmem[param_gmem_base + 0] = speed;
     gmem[param_gmem_base + 1] = pitch;
     gmem[param_gmem_base + 2] = mix;
@@ -3197,8 +3202,12 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     (cl_snap && eff_len > 16) ? ( cloud_pos_pct = max(0, min(100, (pos - eff_start) / eff_len * 100)); slider37 = cloud_pos_pct; cl_snap = 0; );
     cl_a = max(0, min(1, cloud_chaos));
     cl_N = 0.5 * (16 ^ max(0, min(1, cloud_density)));                // 0.5 .. 8 grains simultanes
-    cloud_lfo_rate > 0.001 && cloud_lfo_depth > 0.001 ? ( cloud_lfo_phase += cloud_lfo_rate / srate; cloud_lfo_phase >= 1.0 ? cloud_lfo_phase -= 1.0; );
-    lfo_val = cloud_lfo_shape == 0 ? sin(2 * $pi * cloud_lfo_phase) : ( cloud_lfo_shape == 1 ? (cloud_lfo_phase * 2.0 - 1.0) : (1.0 - cloud_lfo_phase * 2.0) );
+    // V3.27 : forme 3 = Random (sample & hold : nouvelle valeur au hasard a chaque periode) ; Smooth 0..1 = glissement vers
+    // la valeur suivante (constante de temps = Smooth x demi-periode : 0 = sauts nets, 1 = derive continue)
+    cloud_lfo_rate > 0.001 && cloud_lfo_depth > 0.001 ? ( cloud_lfo_phase += cloud_lfo_rate / srate; cloud_lfo_phase >= 1.0 ? ( cloud_lfo_phase -= 1.0; cl_lfo_rnd = rand(2.0) - 1.0; ); );
+    cloud_lfo_shape == 3 ? ( cloud_lfo_smooth < 0.001 ? ( cl_lfo_sm = cl_lfo_rnd; )
+      : ( cl_lfo_sm += (cl_lfo_rnd - cl_lfo_sm) * (1 - exp(-max(cloud_lfo_rate, 0.001) / (srate * cloud_lfo_smooth * 0.5))); ); );
+    lfo_val = cloud_lfo_shape == 0 ? sin(2 * $pi * cloud_lfo_phase) : ( cloud_lfo_shape == 1 ? (cloud_lfo_phase * 2.0 - 1.0) : ( cloud_lfo_shape == 2 ? (1.0 - cloud_lfo_phase * 2.0) : cl_lfo_sm ) );
     cl_base = cloud_pos_mode == 0 ? ((cloud_freeze >= 0.5 && frz_prev >= 0.5) ? frz_center : pos) : (eff_start + (cloud_pos_pct * 0.01) * eff_len);
     cl_center = cl_base + lfo_val * (cloud_lfo_depth * 0.01) * eff_len * 0.5; cloud_center_draw = cl_center;
     // ordonnanceur : prochain intervalle tire UNE fois par grain. Agitation 0 = regulier (+-5 %), 1 = Poisson (vrai hasard, avec des trous)
@@ -3811,7 +3820,7 @@ v = ui_knob(40, 700, 482, 16, cloud_lfo_depth, 0, 100, "Depth", "%.0f%%", 0.0); 
 v = ui_log_knob(80, 572, 566, 16, cloud_size, 1, 1000, "Size", "%.0f ms", 80); ui_chg ? ( cloud_size = v; slider62 = cloud_size; );
 v = ui_knob(81, 634, 566, 16, cloud_diffuse * 100, 0, 100, "Diffuse", "%.0f%%", 0); ui_chg ? ( cloud_diffuse = v * 0.01; slider64 = cloud_diffuse; );
 ui_btn(680, 552, 60, 24, "Freeze", cloud_freeze >= 0.5, 0.3, 0.75, 0.95) ? ( cloud_freeze = cloud_freeze >= 0.5 ? 0 : 1; slider63 = cloud_freeze; );
-ui_text(440, 530, "LFO Modulation", 0.75, 0.68, 0.72, 1, 0); ui_btn(445, 552, 64, 22, lfo_shape_name(cloud_lfo_shape), 1, 0.2, 0.6, 0.8) ? ( gfx_x = 445; gfx_y = 576; qsel = gfx_showmenu("Sine|Saw|Inv Saw"); qsel > 0 ? ( cloud_lfo_shape = qsel - 1; slider38 = cloud_lfo_shape; ); );
+ui_text(440, 530, "LFO Modulation", 0.75, 0.68, 0.72, 1, 0); ui_btn(445, 552, 64, 22, lfo_shape_name(cloud_lfo_shape), 1, 0.2, 0.6, 0.8) ? ( gfx_x = 445; gfx_y = 576; qsel = gfx_showmenu("Sine|Saw|Inv Saw|Random"); qsel > 0 ? ( cloud_lfo_shape = qsel - 1; slider38 = cloud_lfo_shape; ); );
 
 ui_ar = 0.92; ui_ag = 0.22; ui_ab = 0.24; ui_panel(10, 486, 405, 138, "OUTPUT / TAPE & VU");
 ky_out = 528;

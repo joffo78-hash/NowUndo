@@ -37,7 +37,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `+44/+45/+46` loop start / width / length · `+47` pos % · `+48` **commande** · `+49` argument ·
 `+50..149` forme d'onde · `+155` BPM estimé · `+160..162` édition In/Out/Width · `+172/+173` VU in/out ·
 `+156/+157/+158` warp (état / grille / force) · `+159` mode d'overdub (V3.27 : 0 = A compensé, 1 = D brut, lecture seule) · `+178/+179` zone des grains du Cloud en % (V3.26) · `+180` id de paramètre à écrire, `+181` valeur (V3.25 : 2 boîtes de plus `+195/+196` et `+197/+198`) · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
-`+182..184` sync point / ref / len du maître. Global : `0..24` Master Sync par part (`[o]==1` maître looper, `==2` Host,
+`+182..184` sync point / ref / len du maître. **Le bloc de 200 et les 60 paramètres (`110000 + (i*3+part)*60`) sont pleins** : publication supplémentaire V3.27 en `112000 + (i*3+part)*20` (+0 = lissage du LFO Random du Cloud). Global : `0..24` Master Sync par part (`[o]==1` maître looper, `==2` Host,
 `[o+2]` longueur, `[o+3]` position), `100+i` vivant, `130+i` heartbeat, `950/951` heure de l'appui + adresse cible (V3.22),
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
 (sert aussi d'enregistrement au drop), **drop de groupe (V3.25)** : `300 + k*10` accusé du looper k (+0 jeton, +1 horloge
@@ -50,7 +50,7 @@ du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 a
 34/35/36 drop (horloge du passage sur la cible / source en attente d'effacement / copie de l'enregistrement ; arg = jeton),
 37 mute (arg 0 bascule / 1 on / 2 off ; état publié en `+199`), 38 warp, **39 dub A / D** (V3.27 : arg 0 bascule / 1 = D / 2 = A).
 **Paramètres (+180)** : 3 speed, 4 pitch, 5 mix, 7 fade, 19 fdbk, 20 dégradation, 21 stéréo, 22 out vol, 26-28/35/36/38-41 cloud,
-29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2, 65/66 warp grille / force, **67 dub A (0) / D (1)** (V3.27).
+29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2, 65/66 warp grille / force, **67 dub A (0) / D (1)** (V3.27), **68 lissage du LFO Random** (V3.27, slider69 ; 39 forme du LFO = 0..3, 3 = Random).
 
 **ExtState** : `nowundo_vl` (état partagé du Launchpad : `state` + `rev`, `web_cmd`/`web_ack`, `web_frame/labels/meta`,
 `fx_source`, `fx_slot`, `sel_looper`, `fighter_page`, `active_page`) · `NowUndo_VLcmd/q` (file de commandes externes vers le
@@ -307,6 +307,15 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   sinon la mémoire de REAPER (le fichier d'abord : un ExtState long peut être relu en partie). **Le modèle n'est jamais
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
+
+## 21 nov. : page Cloud du Twister refaite + LFO Random / Smooth (JSFX V3.27 en place)
+
+- Page 5 (disposition de l'utilisateur), A en haut : **A** Pos (push = Link/Free) | Density | Size | Agitation ;
+  **B** Spread | LFO forme (Sine / Saw / InvSaw / **Random**) | Rate | Depth ; **C** Width | Diffuse (push = **Freeze**) | - |
+  **Smooth** ; **D** - | - | - | Dry/Wet. Push = valeur par défaut ailleurs. PSpread (pitch) retiré de la page (reste en page 7
+  Custom / MIDI Learn). `SCN.P5` (capture du Scenario) suit la nouvelle disposition.
+- JSFX : forme 3 = Random sample & hold (`cl_lfo_rnd` tiré à chaque période) ; Smooth (`cloud_lfo_smooth`, param 68) =
+  glissement à un pôle, constante = Smooth × demi-période (`cl_lfo_sm`). Mot de scénario `clfoshape` 0..3. Test `tools/tlfo.py`.
 
 ## 21 nov. : 8Waves interactif
 
