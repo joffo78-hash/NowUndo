@@ -698,6 +698,12 @@ local last_name = ""
 local DIR = reaper.GetResourcePath() .. "/Data/NowUndo_Scenarios/"
 
 local function reparse(i)
+  local id = tonumber((steps[i] or ""):match("^@(%d+)$"))   -- V3.27 : un pas = un rush (reference "@id")
+  if id then
+    local m = H._mfind and H._mfind(id)
+    parsed[i] = { items = {}, errs = {}, err = (not m) and "rush supprime" or m.err, rush = id }
+    return
+  end
   local items, errs = compile(steps[i])
   parsed[i] = { items = items, errs = errs, err = errs[1] }
 end
@@ -756,6 +762,14 @@ local function go()
   reparse(cur)                          -- V3.27 : recompile au GO (cibles de groupe g2 = composition du moment)
   local p = parsed[cur]
   if p.err then msg = "Pas " .. cur .. " invalide : " .. p.err; msg_err = true; return end
+  if p.rush then                        -- V3.27 : scenario = liste de rushes : GO lance le rush du pas
+    H._run_step(p.rush)
+    last = cur
+    msg = "Pas " .. last .. " : " .. msg
+    if cur < #steps then cur = cur + 1 elseif loop_on then cur = 1 end
+    want_visible = true
+    return
+  end
   reaper.gmem_attach(GMEM)
   local dead, seen, nsync, nglob = {}, {}, 0, 0
   grp_counter = grp_counter + 1
@@ -797,6 +811,7 @@ local function ui_out(s) return (tostring(s or ""):gsub("%s*|%s*", ", ")) end
 
 local function edit_step()
   if not steps[cur] then return end
+  if H._step_edit and steps[cur]:match("^@%d+$") then return H._step_edit() end   -- V3.27 : pas = rush
   local ok, ret = reaper.GetUserInputs("Modifier le pas " .. cur, 1, "Pas :,extrawidth=520", ui_in(steps[cur]))
   if ok then
     local new = split_steps(ui_out(ret))
@@ -849,8 +864,12 @@ local function save_scn()
   reaper.RecursiveCreateDirectory(DIR, 0)
   local f = io.open(DIR .. name, "w")
   if not f then msg = "Ecriture impossible : " .. DIR .. name; msg_err = true; return end
-  f:write("# NowUndo scenario\n")
-  for _, s in ipairs(steps) do f:write(s, ";\n") end
+  f:write("# NowUndo scenario (V3.27 : un pas = un rush ; # = nom du rush)\n")
+  for _, s in ipairs(steps) do                          -- le fichier garde le TEXTE des rushes : il se relit partout
+    local m = H._mfind(tonumber(s:match("^@(%d+)$") or "") or -1)
+    if m then f:write("# ", (m.name ~= "" and m.name or m.text), "\n", m.text, ";\n")
+    elseif not s:match("^@") then f:write(s, ";\n") end
+  end
   f:close()
   last_name = name; persist()
   msg = "Sauve : " .. name; msg_err = false
@@ -865,7 +884,7 @@ local function load_scn()
   local text = f:read("*a"); f:close()
   steps = split_steps(text); cur = 1; last = 0
   last_name = file:match("([^/\\]+)$") or ""
-  reparse_all()
+  if H._scn_conv then H._scn_conv() else reparse_all() end   -- V3.27 : chaque pas devient (ou retrouve) un rush
   msg = "Charge : " .. last_name .. "  (" .. #steps .. " pas)"; msg_err = false
 end
 
@@ -879,13 +898,9 @@ do
   end
   last_name = reaper.GetExtState(EXT, "name")
   loop_on = reaper.GetExtState(EXT, "loop") == "1"
-  if #steps == 0 then
-    steps = {
-      "l1/3/6 rev, l2 recoff",
-      "l1/3/6 revoff, l2 rec",
-      "l1 in 0.25 out 0.5",
-      "l1 in/out reset, l1 slicer/cloud off",
-    }
+  -- V3.27 : plus de scenario d'exemple (un scenario = des rushes) ; l'ancien exemple encore enregistre est vide
+  if table.concat(steps, "|") == "l1/3/6 rev, l2 recoff|l1/3/6 revoff, l2 rec|l1 in 0.25 out 0.5|l1 in/out reset, l1 slicer/cloud off" then
+    steps = {}
   end
   reparse_all()
 end
@@ -902,7 +917,8 @@ do
     return
   end
 end
-H._open = function() gfx.init("NowUndo Scenario", ld("w", 620), ld("h", 560), ld("dock", 0), ld("x", 120), ld("y", 120)); H._bg = false end
+-- V3.27 : scenario + rushes cote a cote : 1000 px de large au minimum a l'ouverture (la fenetre reste redimensionnable)
+H._open = function() gfx.init("NowUndo Scenario", math.max(1000, ld("w", 1100)), math.max(560, ld("h", 640)), ld("dock", 0), ld("x", 120), ld("y", 120)); H._bg = false end
 H._open()
 
 local was_down, last_click_t, last_click_row = false, 0, 0
@@ -1326,7 +1342,10 @@ local function cap_finalize()
   if n == 0 then msg = "Rien a enregistrer : aucun changement depuis la ligne precedente."; msg_err = true; return end
   if cap.macro then mac_from_capture(text); return end
   local at = (#steps == 0) and 0 or cur
-  table.insert(steps, at + 1, text); cur = at + 1
+  local m = H._mk(text, "S" .. (at + 1) .. " " .. text)            -- V3.27 : le pas capture devient un rush perso
+  if not m then msg = "Trop de rushes : impossible d'ajouter le pas."; msg_err = true; return end
+  H._msave()
+  table.insert(steps, at + 1, "@" .. m.id); cur = at + 1
   reparse_all(); want_visible = true
   local un = next(unknown) and ("   (ignore : " .. table.concat(sorted(unknown), ",") .. ")") or ""
   msg = "Ligne " .. cur .. " enregistree : " .. text .. un; msg_err = false
@@ -1514,10 +1533,18 @@ local function toggle_tl()
   msg = tl.on and ("Timeline ON : " .. #tl.items .. " item(s) S<n> sur " .. (tl.track == 0 and "toutes les pistes" or ("la piste " .. tl.track)) .. ".") or "Timeline OFF (inhibee)."
   msg_err = false
 end
-local function cycle_tl_track()
-  local nt = math.max(1, reaper.CountTracks(0))
-  tl.track = tl.track + 1
-  if tl.track > nt then tl.track = 0 end          -- 0 = toutes les pistes
+local function cycle_tl_track(x, y)                  -- V3.27 : menu des pistes (nom), plus de +1 par clic
+  local nt = reaper.CountTracks(0)
+  local items = { (tl.track == 0 and "!" or "") .. "Toutes les pistes" }
+  for t = 1, nt do
+    local tr = reaper.GetTrack(0, t - 1)
+    local _, nm = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+    items[#items + 1] = (tl.track == t and "!" or "") .. t .. " : " .. ((nm or "") ~= "" and nm:gsub("|", "/") or "(sans nom)")
+  end
+  gfx.x, gfx.y = x or mx, y or my
+  local k = gfx.showmenu(table.concat(items, "|"))
+  if not k or k < 1 then return end
+  tl.track = k - 1                                  -- 0 = toutes les pistes
   tl.prev = nil; tl_save(); tl_scan()
   msg = "Timeline : " .. (tl.track == 0 and "toutes les pistes" or ("piste " .. tl.track)) .. "  (" .. #tl.items .. " item(s))"; msg_err = false
 end
@@ -1635,6 +1662,7 @@ local OSX = ((reaper.GetOS and reaper.GetOS()) or ""):find("OSX") ~= nil
 local function mac_find(id)
   for i, m in ipairs(macros) do if m.id == id then return m, i end end
 end
+H._mfind = mac_find
 local function mac_clean(s)
   s = (s or ""):gsub("[\t\r\n]+", " ")
   return trim(s)
@@ -1739,6 +1767,17 @@ H._fnew = function(x)
   macros[#macros + 1] = m
   return m
 end
+-- V3.27 : rush perso cree sans toucher a la selection (pas de scenario captures / convertis) ; pas d'enregistrement ici
+H._mk = function(text, name)
+  if #macros >= MAC_MAX then return nil end
+  local id = mac_next_id; mac_next_id = id + 1
+  local nm = trim((name or ""):gsub("[\t\r\n]+", " "):gsub("%s*,%s*", " - "))
+  if #nm > 40 then nm = nm:sub(1, 40) end
+  local m = { id = id, name = nm, color = PALETTE[(id - 1) % #PALETTE + 1], text = trim((text or ""):gsub("[\t\r\n]+", " ")) }
+  mac_check(m)
+  macros[#macros + 1] = m
+  return m
+end
 H._rc505 = function()
   for _, x in ipairs(H._fdefs()) do if x.pg == "rc" then layout[x.cell] = H._fnew(x).id end end
 end
@@ -1817,6 +1856,24 @@ do                                                  -- chargement au demarrage
   if reaper.GetExtState(MAC_EXT, "fx_page") ~= "1" then H._fxpage(); reaper.SetExtState(MAC_EXT, "fx_page", "1", true) end
   mac_save()                                        -- publie tout de suite pour le Launchpad
 end
+H._msave = mac_save
+-- V3.27 : SCENARIO = liste de rushes. Les pas ecrits en texte (anciens scenarios, fichiers importes) deviennent des rushes
+-- perso ; un rush perso de meme texte deja present est reutilise (pas de doublons a chaque import).
+H._scn_conv = function()
+  local by_text, n = {}, 0
+  for _, m in ipairs(macros) do if not m.rom and not by_text[m.text] then by_text[m.text] = m end end
+  for i, st in ipairs(steps) do
+    if not st:match("^@%d+$") then
+      local m = by_text[trim(st)]
+      if not m then m = H._mk(st, "S" .. i .. " " .. st); if m then by_text[m.text] = m; n = n + 1 end end
+      if m then steps[i] = "@" .. m.id end
+    end
+  end
+  if n > 0 then mac_save() end
+  reparse_all()
+  return n
+end
+H._scn_conv()
 mac_count = function() return #macros end
 
 local function sel_ids()
@@ -2373,6 +2430,12 @@ local function run_macro(m, targets, gst, press_t)   -- gst : "on" / "off" pour 
         .. (nglob > 0 and ("  -  " .. nglob .. " commande(s) envoyee(s) au Launchpad") or "")
   msg_err = #dead > 0
 end
+H._run_step = function(id)                           -- V3.27 : GO du scenario = le rush du pas, comme son bouton lecture
+  local m = mac_find(id)
+  if not m then msg = "rush supprime"; msg_err = true; return end
+  H._sflash = { id = id, t = reaper.time_precise() }
+  run_macro(m, sel_targets(), nil, reaper.time_precise())
+end
 local function mac_test()
   local ms = sel_ids()
   if #ms == 0 then msg = "Selectionne un rush a tester."; msg_err = true; return end
@@ -2634,7 +2697,7 @@ H._model_menu = function(x, y)
                   (cur ~= "" and "" or "#") .. "Enregistrer l'etat actuel dans le modele" .. (cur ~= "" and (" (" .. cur .. ")") or ""),
                   (cur ~= "" and "" or "#") .. "Recharger le modele maintenant",
                   (cur ~= "" and "" or "!") .. "Aucun modele (reprendre la derniere seance)" }
-  gfx.x, gfx.y = x, y
+  gfx.x, gfx.y = x + (H._ox or 0), y
   local k = gfx.showmenu(table.concat(items, "|"))
   if k == 1 then
     reaper.RecursiveCreateDirectory(MDIR, 0)
@@ -2691,7 +2754,7 @@ end
 H._pg_menu = function(x, y)
   local items = {}
   for k = 1, #H._pages do items[k] = (k == H._pg and "!" or "") .. H._pg_label(k) end
-  gfx.x, gfx.y = x, y
+  gfx.x, gfx.y = x + (H._ox or 0), y
   local pick = gfx.showmenu(table.concat(items, "|"))
   if pick and pick > 0 then H._pg = pick end
 end
@@ -2818,16 +2881,18 @@ local function mac_draw(W, Hh, down)
   end
   local list_h = Hh - LY - (capturing and 162 or 140)
   local rows = math.max(1, math.min(MPC, math.floor(list_h / RH)))
-  local cw = math.floor((W - 24 - 6) / 2)
+  local NC = (W >= 760) and 2 or 1                     -- V3.27 : une seule colonne si le panneau est etroit
+  local PG = NC * MPC
+  local cw = math.floor((W - 24 - 6 * (NC - 1)) / NC)
   local function colx(c) return 12 + c * (cw + 6) end
-  -- pages de la LISTE : 64 rushes par page (2 colonnes de 32) ; H._lp = page affichee
-  local npg = math.max(1, math.ceil(#macros / (2 * MPC)))
+  -- pages de la LISTE : NC colonnes de 32 rushes ; H._lp = page affichee
+  local npg = math.max(1, math.ceil(#macros / PG))
   H._lp = math.max(1, math.min(npg, H._lp or 1))
-  local base = (H._lp - 1) * 2 * MPC
+  local base = (H._lp - 1) * PG
   local function idx_at(px, py)                        -- macro sous la souris (liste a 2 colonnes)
     if py < LY or py >= LY + rows * RH then return nil end
     local c
-    if px >= colx(0) and px < colx(0) + cw then c = 0 elseif px >= colx(1) and px < colx(1) + cw then c = 1 else return nil end
+    if px >= colx(0) and px < colx(0) + cw then c = 0 elseif NC > 1 and px >= colx(1) and px < colx(1) + cw then c = 1 else return nil end
     local i = base + c * MPC + mscroll + math.floor((py - LY) / RH) + 1
     return macros[i] and i or nil
   end
@@ -2839,7 +2904,7 @@ local function mac_draw(W, Hh, down)
       local rm = macros[ri]
       if not msel[rm.id] then msel = { [rm.id] = true }; mcur = rm.id; manchor = rm.id end
     end
-    gfx.x, gfx.y = mx, my
+    gfx.x, gfx.y = mx + (H._ox or 0), my
     local items = { ri and "Copier  (Ctrl+C)" or "#Copier  (Ctrl+C)", ri and "Couper  (Ctrl+X)" or "#Couper  (Ctrl+X)",
                     (H._mclip and #H._mclip > 0) and "Coller  (Ctrl+V)" or "#Coller  (Ctrl+V)",
                     ri and "Dupliquer  (Ctrl+D)" or "#Dupliquer  (Ctrl+D)", "",
@@ -2857,8 +2922,8 @@ local function mac_draw(W, Hh, down)
   local _, ci = mac_find(mcur)
   if mwant then
     if ci then
-      local lp = math.ceil(ci / (2 * MPC))                           -- rush sur une autre page de la liste : on y va
-      if lp ~= H._lp then H._lp = lp; base = (lp - 1) * 2 * MPC; mscroll = 0 end
+      local lp = math.ceil(ci / PG)                                  -- rush sur une autre page de la liste : on y va
+      if lp ~= H._lp then H._lp = lp; base = (lp - 1) * PG; mscroll = 0 end
       local r = (ci - 1 - base) % MPC + 1
       if r - 1 < mscroll then mscroll = r - 1 end
       if r > mscroll + rows then mscroll = r - rows end
@@ -2875,7 +2940,7 @@ local function mac_draw(W, Hh, down)
     local hy = LIST_Y + 2
     gfx.setfont(2, "Arial", 12, 'b')
     local function go_lp(k) H._lp = (H._lp - 1 + k) % npg + 1; mscroll = 0 end
-    local a1, a2 = base + 1, math.min(#macros, base + 2 * MPC)
+    local a1, a2 = base + 1, math.min(#macros, base + PG)
     if btn(12, hy, 26, 22, "<", 0.20, 0.25, 0.35) and npg > 1 then go_lp(-1) end
     gfx.set(1, 1, 1, 0.85); gfx.x, gfx.y = 46, hy + 5
     gfx.drawstr(#macros == 0 and "RUSHES : aucun" or string.format("RUSHES %d-%d sur %d", a1, a2, #macros))
@@ -2883,7 +2948,7 @@ local function mac_draw(W, Hh, down)
     if btn(tx, hy, 26, 22, ">", 0.20, 0.25, 0.35) and npg > 1 then go_lp(1) end
     local bw3 = math.min(120, math.floor((W - 24 - (tx + 34 - 12) - 8) / 3))
     local x3 = W - 12 - 3 * bw3 - 8
-    if btn(x3, hy, bw3, 22, capturing and "■ VALIDER" or "● CAPTURE", 0.55, 0.15, 0.15) then mac_capture_toggle() end
+    if btn(x3, hy, bw3, 22, capturing and "■ VALIDER" or "● CAPTURE RUSH", 0.55, 0.15, 0.15) then mac_capture_toggle() end
     if not capturing then
       if btn(x3 + bw3 + 4, hy, bw3, 22, "+ NOUVEAU", 0.15, 0.40, 0.25) then mac_new() end
       if btn(x3 + 2 * (bw3 + 4), hy, bw3, 22, "EDIT", 0.20, 0.25, 0.35) then mac_edit() end
@@ -2894,14 +2959,14 @@ local function mac_draw(W, Hh, down)
   local shift = (cap_mod & 8) ~= 0
 
   gfx.set(0.10, 0.03, 0.04, 1)
-  gfx.rect(colx(0), LY, cw, rows * RH); gfx.rect(colx(1), LY, cw, rows * RH)
+  for c = 0, NC - 1 do gfx.rect(colx(c), LY, cw, rows * RH) end
   if #macros == 0 then
     gfx.setfont(2, "Arial", 13); gfx.set(1, 1, 1, 0.45)
     gfx.x, gfx.y = 24, LY + 10
     gfx.drawstr("Aucun rush : ● CAPTURE (fais l'action puis VALIDER) ou ADD (ecris la syntaxe, sans looper).")
   end
   local now_t = reaper.time_precise()
-  for c = 0, 1 do
+  for c = 0, NC - 1 do
     local x0 = colx(c)
     for r = 1, rows do
       local i = base + c * MPC + mscroll + r
@@ -3047,7 +3112,8 @@ local function mac_draw(W, Hh, down)
       if drag.active then over = idx_at(mx, my) end
     else
       if drag.active then
-        if mx < 0 or my < 0 or mx > W or my > Hh then mac_drop_outside(drag)
+        if mx < 0 and mx + (H._ox or 0) >= 0 and my >= LY and my <= Hh then H._to_scn(drag_macros(drag), my)   -- sur le scenario
+        elseif mx < 0 or my < 0 or mx > W or my > Hh then mac_drop_outside(drag)
         else
           local to = idx_at(mx, my)
           if to then
@@ -3082,7 +3148,8 @@ local function mac_draw(W, Hh, down)
   end
 
   -- boutons
-  if capturing then cap_panel(W, Hh) else
+  if capturing then -- panneau de capture : dessine par main, sur toute la largeur
+  else
     local function title(x, y, t) gfx.setfont(2, "Arial", 10, 'b'); gfx.set(1, 1, 1, 0.45); gfx.x, gfx.y = x, y; gfx.drawstr(t) end
     -- rangee 1 : RUSH SELECTIONNE (5 boutons) | FICHIER (3 boutons)
     local y1 = Hh - 76
@@ -3130,6 +3197,155 @@ end
 
 local STC = { [0] = { .25, .25, .28 }, [1] = { .9, .15, .15 }, [2] = { .2, .7, .3 }, [3] = { .95, .55, .1 },
   [4] = { .3, .6, .9 }, [5] = { .6, .4, .9 }, [6] = { .3, .8, .8 }, [7] = { .95, .85, .2 }, [8] = { .95, .85, .2 } }
+
+-- V3.27 : PANNEAU SCENARIO (a gauche) : la liste des pas (un pas = un rush), GO / BACK / BOUCLE, le pas selectionne,
+-- capture / timeline, fichier. On y ajoute des rushes en les glissant depuis la liste de droite (ou + SELECTION).
+H._to_scn = function(ms, wy)
+  if #ms == 0 then return end
+  local g = H._sgeo
+  local at = (#steps == 0) and 0 or cur
+  if g and wy >= g.ly and wy < g.ly + g.rows * RH then
+    at = math.min(#steps, g.scroll + math.floor((wy - g.ly) / RH))      -- depose AVANT la ligne visee
+  end
+  for k, m in ipairs(ms) do table.insert(steps, at + k, "@" .. m.id) end
+  cur = at + 1; reparse_all(); want_visible = true
+  msg = #ms .. " rush(es) ajoute(s) au scenario (pas " .. (at + 1) .. ")."; msg_err = false
+end
+H._step_edit = function()
+  local id = tonumber((steps[cur] or ""):match("^@(%d+)$") or "")
+  local m = id and mac_find(id)
+  if not m then msg = "Ce pas pointe vers un rush supprime : retire-le (RETIRER)."; msg_err = true; return end
+  msel = { [m.id] = true }; mcur = m.id; manchor = m.id; mwant = true
+  mac_edit()
+end
+H._scn_draw = function(SW, Hh, down)
+  local function title(x, y, t) gfx.setfont(2, "Arial", 10, 'b'); gfx.set(1, 1, 1, 0.45); gfx.x, gfx.y = x, y; gfx.drawstr(t) end
+  local LY = LIST_Y + 30
+  local hy = LIST_Y + 2
+  gfx.setfont(2, "Arial", 13, 'b'); gfx.set(1, 1, 1, 0.9); gfx.x, gfx.y = 12, hy + 4
+  gfx.drawstr("SCENARIO")
+  gfx.setfont(2, "Arial", 11); gfx.set(1, 1, 1, 0.5); gfx.x = gfx.x + 8
+  gfx.drawstr(fit(#steps .. " pas" .. (last_name ~= "" and ("  " .. last_name) or ""), SW - 200))
+  gfx.setfont(2, "Arial", 12, 'b')
+  if btn(SW - 12 - 110, hy, 110, 22, "+ SELECTION", 0.15, 0.40, 0.25) then
+    local ms = sel_ids()
+    if #ms == 0 then msg = "Selectionne des rushes a droite (ou glisse-les ici)."; msg_err = true else H._to_scn(ms, -1) end
+  end
+  local bottom = capturing and 162 or 182
+  local rows = math.max(1, math.floor((Hh - LY - bottom) / RH))
+  if want_visible then
+    if cur - 1 < scroll then scroll = cur - 1 end
+    if cur > scroll + rows then scroll = cur - rows end
+    want_visible = false
+  end
+  if mx < SW and my >= LY and gfx.mouse_wheel ~= 0 and not show_help then
+    scroll = scroll - (gfx.mouse_wheel > 0 and 1 or -1) * 2; gfx.mouse_wheel = 0
+  end
+  scroll = math.max(0, math.min(math.max(0, #steps - rows), scroll))
+  H._sgeo = { ly = LY, rows = rows, scroll = scroll }
+  local lw = SW - 24
+  gfx.set(0.10, 0.03, 0.04, 1); gfx.rect(12, LY, lw, rows * RH)
+  if #steps == 0 then
+    gfx.setfont(2, "Arial", 12); gfx.set(1, 1, 1, 0.45); gfx.x, gfx.y = 20, LY + 8
+    gfx.drawstr(fit("Glisse des rushes ici depuis la liste de droite.", lw - 16))
+  end
+  local now_t = reaper.time_precise()
+  for r = 1, rows do
+    local i = scroll + r
+    if i > #steps then break end
+    local y = LY + (r - 1) * RH
+    local p = parsed[i] or {}
+    local m = p.rush and mac_find(p.rush)
+    if i == cur then gfx.set(0.55, 0.40, 0.08, 1); gfx.rect(12, y, lw, RH)
+    elseif i == last then gfx.set(0.12, 0.30, 0.18, 1); gfx.rect(12, y, lw, RH)
+    elseif r % 2 == 0 then gfx.set(0.13, 0.05, 0.06, 1); gfx.rect(12, y, lw, RH) end
+    if H._sflash and m and H._sflash.id == m.id and now_t - H._sflash.t < 0.25 then gfx.set(0.35, 0.85, 0.45, 0.5); gfx.rect(12, y, lw, RH) end
+    gfx.setfont(2, "Arial", 12)
+    gfx.set(1, 1, 1, 0.55); gfx.x, gfx.y = 16, y + 5
+    gfx.drawstr((i == last and "✓" or "") .. string.format("%02d", i))
+    if m then
+      gfx.set(((m.color >> 16) & 255) / 255, ((m.color >> 8) & 255) / 255, (m.color & 255) / 255, 1); gfx.rect(46, y + 4, 10, RH - 8)
+    end
+    gfx.setfont(2, "Arial", 13, 'b')
+    if p.err then gfx.set(1, 0.35, 0.35, 1) else gfx.set(1, 1, 1, 0.95) end
+    gfx.x, gfx.y = 62, y + 5
+    gfx.drawstr(fit(m and mac_label(m) or (p.rush and "(rush supprime)" or steps[i]), lw - 60))
+    if click and mx >= 12 and mx <= 12 + lw and my >= y and my < y + RH then
+      local t = reaper.time_precise()
+      if last_click_row == i and t - last_click_t < 0.35 then cur = i; drag = nil; edit_step()
+      else
+        cur = i
+        if not capturing then drag = { kind = "step", row = i, x = mx, y = my, active = false, label = "S" .. i } end
+      end
+      last_click_row, last_click_t = i, t
+    end
+  end
+  -- glisser un pas : sur un autre pas = reordonner ; hors de la fenetre = item S<n> dans REAPER (timeline)
+  if drag and drag.kind == "step" then
+    if down then
+      if not drag.active and (math.abs(mx - drag.x) + math.abs(my - drag.y)) > 10 then
+        drag.active = true
+        msg = "Glisse le pas S" .. drag.row .. " : sur la piste dans REAPER (timeline) ou sur un autre pas (reordonner)."; msg_err = false
+      end
+      if drag.active and mx >= 12 and mx <= 12 + lw and my >= LY and my < LY + rows * RH then
+        local to = math.max(1, math.min(#steps, scroll + math.floor((my - LY) / RH) + 1))
+        gfx.set(1, 1, 1, 0.9); gfx.rect(12, LY + (to - scroll - 1) * RH, lw, RH, 0)
+      end
+    else
+      if drag.active then
+        if mx < 0 or my < 0 or mx > gfx.w or my > Hh then drop_step(drag.row)
+        elseif mx >= 12 and mx <= 12 + lw and my >= LY and my < LY + rows * RH then
+          move_to(drag.row, math.max(1, math.min(#steps, scroll + math.floor((my - LY) / RH) + 1)))
+        end
+      end
+      drag = nil
+    end
+  end
+  -- erreur du pas selectionne
+  local p = parsed[cur]
+  if p and p.err then
+    gfx.setfont(2, "Arial", 12); gfx.set(1, 0.4, 0.4, 1); gfx.x, gfx.y = 14, LY + rows * RH + 4
+    gfx.drawstr(fit("Pas " .. cur .. " : " .. p.err, lw))
+  end
+  if capturing then return end
+  -- GO / BACK / BOUCLE
+  local yg = Hh - 166
+  gfx.setfont(2, "Arial", 13, 'b')
+  local wg = math.floor((lw - 8) / 3)
+  if btn(12, yg, wg, 26, "◀ BACK", 0.30, 0.22, 0.12) then back() end
+  if btn(12 + wg + 4, yg, wg, 26, "GO ▶", 0.15, 0.50, 0.25) then go() end
+  if btn(12 + 2 * (wg + 4), yg, lw - 2 * (wg + 4), 26, loop_on and "↻ BOUCLE ON" or "↻ BOUCLE", loop_on and 0.15 or 0.20, loop_on and 0.45 or 0.25, loop_on and 0.60 or 0.35) then toggle_loop() end
+  -- pas selectionne
+  local y1 = Hh - 116
+  title(12, y1 - 14, "PAS SELECTIONNE")
+  gfx.setfont(2, "Arial", 12, 'b')
+  local w6 = math.floor((lw - 5 * 4) / 6)
+  local function x6(k) return 12 + (k - 1) * (w6 + 4) end
+  if btn(x6(1), y1, w6, 22, "EDIT", 0.20, 0.25, 0.35) then edit_step() end
+  if btn(x6(2), y1, w6, 22, "RETIRER", 0.45, 0.15, 0.15) then del_step() end
+  if btn(x6(3), y1, w6, 22, "▲", 0.20, 0.25, 0.35) then move_step(-1) end
+  if btn(x6(4), y1, w6, 22, "▼", 0.20, 0.25, 0.35) then move_step(1) end
+  if btn(x6(5), y1, w6, 22, "→ ITEM", 0.20, 0.25, 0.35) then stamp_step() end
+  if btn(x6(6), y1, w6, 22, "VIDER", 0.45, 0.15, 0.15) then
+    if #steps == 0 or reaper.MB("Vider le scenario (" .. #steps .. " pas) ? Les rushes restent.", "NowUndo - scenario", 4) == 6 then new_scn() end
+  end
+  -- capture / timeline
+  local y2 = Hh - 72
+  title(12, y2 - 14, "CAPTURE (un pas par VALIDER) / TIMELINE")
+  gfx.setfont(2, "Arial", 12, 'b')
+  local w3 = math.floor((lw - 8) / 3)
+  if btn(12, y2, w3, 22, "● CAPTURE PAS", 0.55, 0.15, 0.15) then tab = "scn"; cap_start() end
+  if btn(12 + w3 + 4, y2, w3, 22, tl.on and "⏱ TIMELINE ON" or "⏱ TIMELINE OFF", tl.on and 0.15 or 0.20, tl.on and 0.50 or 0.25, tl.on and 0.30 or 0.35) then toggle_tl() end
+  local tlab = "PISTE : " .. (tl.track == 0 and "TOUTES" or tl.track) .. "  v"
+  if btn(12 + 2 * (w3 + 4), y2, lw - 2 * (w3 + 4), 22, tlab, 0.20, 0.25, 0.35) then cycle_tl_track(12 + 2 * (w3 + 4), y2 + 22) end
+  -- fichier
+  local y3 = Hh - 28
+  title(12, y3 - 14, "FICHIER SCENARIO")
+  gfx.setfont(2, "Arial", 12, 'b')
+  local w2 = math.floor((lw - 4) / 2)
+  if btn(12, y3, w2, 22, "IMPORT", 0.20, 0.25, 0.35) then load_scn() end
+  if btn(12 + w2 + 4, y3, lw - w2 - 4, 22, "EXPORT", 0.20, 0.25, 0.35) then save_scn() end
+end
 
 local function main()
   if H._bg then                                                    -- fenetre fermee : rushes et scenarios continuent
@@ -3216,14 +3432,12 @@ local function main()
 
   gfx.set(0.14, 0.05, 0.06, 1); gfx.rect(0, 0, W, Hh)
   gfx.setfont(2, "Arial", 12, 'b')
-  local on_scn = (tab == "scn")
-  if btn(12, 6, 92, 22, "SCENARIO", on_scn and 0.55 or 0.20, on_scn and 0.40 or 0.25, on_scn and 0.08 or 0.35) then set_tab("scn") end
-  if btn(108, 6, 84, 22, "RUSHES", (not on_scn) and 0.55 or 0.20, (not on_scn) and 0.40 or 0.25, (not on_scn) and 0.08 or 0.35) then set_tab("mac") end
+  gfx.setfont(2, "Arial", 14, 'b'); gfx.set(1, 1, 1, 0.9); gfx.x, gfx.y = 14, 9; gfx.drawstr("NowUndo  SCENARIO + RUSHES")
   gfx.setfont(2, "Arial", 12)
   if capturing then gfx.set(1, 0.35, 0.35, 1) else gfx.set(1, 1, 1, 0.5) end
-  gfx.x, gfx.y = 202, 11
+  gfx.x = gfx.x + 18; gfx.y = 11
   local pn = pending()
-  gfx.drawstr(capturing and "● CAPTURE ACTIVE" or (tab == "mac" and mac_status() or string.format("%d pas | file %d%s%s", #steps, pn, loop_on and " | ↻" or "", tl.on and (" | ⏱ " .. #tl.items) or "")))
+  gfx.drawstr(capturing and "● CAPTURE ACTIVE" or (mac_status() .. string.format(" | file %d", pn)))
   gfx.setfont(2, "Arial", 12, 'b')
   if btn(W - 104, 6, 92, 22, "ANNULER *", 0.45, 0.15, 0.15) then cancel_all() end
   if btn(W - 204, 6, 92, 22, "? LEXIQUE", 0.20, 0.25, 0.35) then show_help = true; help_scroll = 0 end
@@ -3232,7 +3446,7 @@ local function main()
   -- bandeau d'etat des 8 loopers
   local cw = math.floor((W - 24 - 7 * 4) / 8)
   local selset = {}
-  if tab == "mac" then for _, k in ipairs(sel_targets()) do selset[k] = true end end   -- looper / groupe vise par les macros
+  for _, k in ipairs(sel_targets()) do selset[k] = true end      -- looper / groupe vise par les rushes (et les pas)
   for i = 1, NLOOP do
     local F = fb(i)
     local x = 12 + (i - 1) * (cw + 4)
@@ -3245,7 +3459,7 @@ local function main()
     gfx.x, gfx.y = x + 6, 51
     gfx.drawstr((F.rev and "R " or "") .. (F.slicer and "S " or "") .. (F.cloud and "C " or ""))
     if Q[i][1] and Q[i][1].sync then gfx.set(1, 0.9, 0.2, 1); gfx.x = x + cw - 12; gfx.y = 36; gfx.drawstr("*") end
-    if tab == "mac" then
+    if true then
       if selset[i] then
         gfx.set(1, 0.85, 0.2, 1); gfx.rect(x, 34, cw, 30, 0); gfx.rect(x + 1, 35, cw - 2, 28, 0); gfx.rect(x + 2, 36, cw - 4, 26, 0)
         gfx.set(1, 0.85, 0.2, 1); gfx.triangle(x + cw / 2 - 5, 66, x + cw / 2 + 5, 66, x + cw / 2, 72)
@@ -3257,107 +3471,22 @@ local function main()
   end
 
   if tab == "mac" and not ED.on and not show_help then ED.vk_poll() else ED.vkprev = nil end
-  if tab == "mac" then mac_draw(W, Hh, down) else
-  -- liste des pas
-  local list_h = Hh - LIST_Y - 134
-  local rows = math.max(1, math.floor(list_h / RH))
-  if want_visible then
-    if cur - 1 < scroll then scroll = cur - 1 end
-    if cur > scroll + rows then scroll = cur - rows end
-    want_visible = false
-  end
-  local wheel = gfx.mouse_wheel
-  if wheel ~= 0 and not show_help then
-    scroll = scroll - (wheel > 0 and 1 or -1) * 2
-    gfx.mouse_wheel = 0
-  end
-  scroll = math.max(0, math.min(math.max(0, #steps - rows), scroll))
-
-  gfx.set(0.10, 0.03, 0.04, 1); gfx.rect(12, LIST_Y, W - 24, rows * RH)
-  for r = 1, rows do
-    local i = scroll + r
-    if i > #steps then break end
-    local y = LIST_Y + (r - 1) * RH
-    local p = parsed[i]
-    if i == cur then gfx.set(0.55, 0.40, 0.08, 1); gfx.rect(12, y, W - 24, RH)
-    elseif i == last then gfx.set(0.12, 0.30, 0.18, 1); gfx.rect(12, y, W - 24, RH)
-    elseif r % 2 == 0 then gfx.set(0.13, 0.05, 0.06, 1); gfx.rect(12, y, W - 24, RH) end
-    gfx.setfont(2, "Arial", 13)
-    gfx.set(1, 1, 1, 0.55); gfx.x, gfx.y = 18, y + 5
-    gfx.drawstr((i == last and "✓" or "") .. string.format("%02d", i))
-    if p and p.err then gfx.set(1, 0.35, 0.35, 1) else gfx.set(1, 1, 1, 0.95) end
-    gfx.x, gfx.y = 58, y + 5
-    gfx.drawstr(fit(steps[i], W - 90))
-    if click and mx >= 12 and mx <= W - 12 and my >= y and my < y + RH then
-      local t = reaper.time_precise()
-      if last_click_row == i and t - last_click_t < 0.35 then cur = i; drag = nil; edit_step()
-      else
-        cur = i
-        if not capturing then drag = { kind = "step", row = i, x = mx, y = my, active = false } end
-      end
-      last_click_row, last_click_t = i, t
-    end
-  end
-
-  -- glisser un pas hors de la fenetre : cree un item S<n> dans REAPER
-  if drag then
-    if down then
-      if not drag.active and (math.abs(mx - drag.x) + math.abs(my - drag.y)) > 10 then
-        drag.active = true
-        msg = "Glisse le pas S" .. drag.row .. " : sur la piste dans REAPER (timeline) ou sur un autre pas (reordonner)."; msg_err = false
-      end
-      if drag.active and mx >= 12 and mx <= W - 12 and my >= LIST_Y and my < LIST_Y + rows * RH then
-        local to = math.max(1, math.min(#steps, scroll + math.floor((my - LIST_Y) / RH) + 1))
-        gfx.set(1, 1, 1, 0.9); gfx.rect(12, LIST_Y + (to - scroll - 1) * RH, W - 24, RH, 0)
-      end
-    else
-      if drag.active then
-        if mx < 0 or my < 0 or mx > W or my > Hh then drop_step(drag.row)
-        elseif mx >= 12 and mx <= W - 12 and my >= LIST_Y and my < LIST_Y + rows * RH then
-          move_to(drag.row, math.max(1, math.min(#steps, scroll + math.floor((my - LIST_Y) / RH) + 1)))
-        end
-      end
-      drag = nil
-    end
-  end
-
-  -- message
-  local my0 = Hh - 128
-  gfx.setfont(2, "Arial", 12)
-  if msg_err then gfx.set(1, 0.4, 0.4, 1) else gfx.set(0.6, 0.9, 0.6, 1) end
-  gfx.x, gfx.y = 14, my0
-  gfx.drawstr(fit(msg, W - 28))
-  local p = parsed[cur]
-  if p and p.err then
-    gfx.set(1, 0.4, 0.4, 1); gfx.x, gfx.y = 14, my0 + 16
-    gfx.drawstr(fit("Pas " .. cur .. " : " .. p.err, W - 28))
-  end
-
-  -- boutons
-  if capturing then cap_panel(W, Hh) else
-  gfx.setfont(2, "Arial", 14, 'b')
-  local lw = 100
-  local half = math.floor((W - 24 - 8 - lw) / 2)
-  if btn(12, Hh - 100, half, 40, "◀  BACK", 0.30, 0.22, 0.12) then back() end
-  if btn(12 + half + 4, Hh - 100, half, 40, "GO  ▶", 0.15, 0.50, 0.25) then go() end
-  local lx = 12 + 2 * half + 8
-  if btn(lx, Hh - 100, W - 12 - lx, 40, loop_on and "↻ BOUCLE ON" or "↻ BOUCLE", loop_on and 0.15 or 0.20, loop_on and 0.45 or 0.25, loop_on and 0.60 or 0.35) then toggle_loop() end
-  gfx.setfont(2, "Arial", 12, 'b')
-  local bw = math.floor((W - 24 - 4 * 6) / 7)
-  local labels = { "EDIT", "ADD", "DEL", "▲", "▼", "NEW", "→ ITEM" }
-  local fns = { edit_step, add_step, del_step, function() move_step(-1) end, function() move_step(1) end, new_scn, stamp_step }
-  for k = 1, 7 do
-    if btn(12 + (k - 1) * (bw + 4), Hh - 54, bw, 24, labels[k], 0.20, 0.25, 0.35) then fns[k]() end
-  end
-  local w5 = math.floor((W - 24 - 4 * 4) / 5)
-  local function x5(k) return 12 + (k - 1) * (w5 + 4) end
-  if btn(x5(1), Hh - 26, w5, 22, "LOAD", 0.20, 0.25, 0.35) then load_scn() end
-  if btn(x5(2), Hh - 26, w5, 22, "SAVE", 0.20, 0.25, 0.35) then save_scn() end
-  if btn(x5(3), Hh - 26, w5, 22, "● CAPTURE", 0.55, 0.15, 0.15) then cap_start() end
-  if btn(x5(4), Hh - 26, w5, 22, tl.on and "⏱ TIMELINE ON" or "⏱ TIMELINE OFF", tl.on and 0.15 or 0.20, tl.on and 0.50 or 0.25, tl.on and 0.30 or 0.35) then toggle_tl() end
-  if btn(x5(5), Hh - 26, w5, 22, tl.track == 0 and "PISTE : TOUTES" or ("PISTE : " .. tl.track), 0.20, 0.25, 0.35) then cycle_tl_track() end
-  end
-  end
+  -- V3.27 : SCENARIO (gauche) + RUSHES (droite) dans la meme fenetre ; un clic dans un panneau lui donne le clavier
+  local SW = math.max(250, math.min(math.floor(W * 0.38), 440))
+  if click and my >= LIST_Y and not capturing then tab = (mx < SW) and "scn" or "mac" end
+  H._scn_draw(SW, Hh, down)
+  local RW = W - SW
+  gfx.setimgdim(7, RW, Hh); gfx.dest = 7
+  gfx.set(0.14, 0.05, 0.06, 1); gfx.rect(0, 0, RW, Hh)
+  local smx = mx; mx = mx - SW; H._ox = SW
+  mac_draw(RW, Hh, down)
+  mx = smx; H._ox = 0
+  gfx.dest = -1
+  gfx.blit(7, 1, 0, 0, LIST_Y, RW, Hh - LIST_Y, SW, LIST_Y, RW, Hh - LIST_Y)
+  gfx.set(1, 1, 1, 0.18); gfx.rect(SW - 2, LIST_Y, 2, Hh - LIST_Y)                -- separation des deux panneaux
+  local fw = tab == "scn" and { 0, SW - 2 } or { SW, RW }                         -- panneau qui a le clavier : liseré
+  gfx.set(0.9, 0.75, 0.15, 0.8); gfx.rect(fw[1], LIST_Y - 2, fw[2], 2)
+  if capturing then cap_panel(W, Hh) end
 
   if drag and drag.active and mx >= 0 and my >= 0 and mx <= W and my <= Hh then   -- etiquette qui suit la souris
     gfx.setfont(2, "Arial", 13, 'b')

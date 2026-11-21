@@ -80,6 +80,10 @@ propre page Launchpad** (`VL.web_with_page`).
 
 ## Préférences de l'utilisateur
 
+- **Jamais de réglage « +1 par clic »** quand il y a beaucoup de valeurs (ex. piste 1 → 30) : un **menu** (gfx.showmenu)
+  ou un champ. Pas de boutons géants : hiérarchie claire (actions principales près de ce qu'elles touchent, le reste en
+  groupes titrés, tous les boutons de taille normale).
+
 - Répondre en français, simplement, sans jargon inutile ; il teste et revient avec des captures.
 - **Proposer des alternatives quand son idée n'est pas optimale** (demandé explicitement), avec une recommandation.
 - Il veut garder la cohérence entre Launchpad, web, MIDI Learn, Twister (même logique partout : groupes, double appui…).
@@ -307,6 +311,19 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   sinon la mémoire de REAPER (le fichier d'abord : un ExtState long peut être relu en partie). **Le modèle n'est jamais
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
+
+## 21 nov. : SCENARIO + RUSHES fusionnés (une seule fenêtre)
+
+- Plus d'onglets : **scénario à gauche** (`H._scn_draw`, largeur 38 %, 250..440 px), **rushes à droite** (`mac_draw`
+  dessiné hors écran image 7 puis `gfx.blit`, souris décalée de `H._ox`) ; un clic dans un panneau lui donne le clavier
+  (variable `tab` = panneau actif, liseré jaune). Fenêtre ≥ 1000 px à l'ouverture. Liste des rushes : 1 colonne si < 760 px.
+- **Un pas = un rush** (`steps[i] = "@id"`) : GO / BACK lancent le rush (`H._run_step` → `run_macro`, cible vide =
+  sélection du LP). Pas texte (anciens, fichiers importés) convertis en rushes perso « S<n> … » par `H._scn_conv`
+  (réutilise un rush perso de même texte). Ajout : glisser un rush de droite sur la liste du scénario (`H._to_scn`) ou
+  `+ SELECTION`. EDIT d'un pas = éditeur du rush. RETIRER / ▲▼ / → ITEM / VIDER. Capture du scénario (incrémentale) :
+  chaque VALIDER crée un rush (`H._mk`) et l'ajoute comme pas. Timeline ON/OFF ; **piste = menu des pistes** (nom).
+  Export : le fichier garde le texte des rushes (`# nom` au-dessus) ; Import : reconvertit. Exemple de scénario supprimé
+  (l'ancien exemple enregistré est vidé). Test `tools/tscn.lua`.
 
 ## 21 nov. : `*` quantise sur le cycle du looper (demande de l'utilisateur)
 
