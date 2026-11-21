@@ -525,7 +525,7 @@ local function compile(text, forced, toggle, gate_off)
             if not ops then errs[#errs + 1] = "[" .. act .. "] " .. k .. " : " .. err; ok = false; break end
             for _, i in ipairs(targets) do
               for _, op in ipairs(ops) do
-                if i > 100 and k == "mute" then             -- V3.27 : mute d'une ENTREE = mute de sa piste (par le Launchpad)
+                if i > 100 and k == "mute" then             -- V3.27 : mute d'une ENTREE = sortie du parent (page 2, par le Launchpad)
                   local w = true
                   local vv = inline[n] or val
                   if vv ~= nil then w = onoff(vv) end
@@ -924,7 +924,7 @@ local HELP = {
   { "//", "commentaire jusqu'a la fin de la ligne" },
   { "R(n)  G(n)", "rappelle le preset de ROUTING (R) / de GROUPE (G) n°1-8 de la page principale du Launchpad  (r(2), g(3))" },
   { "in1 fx 2", "effet 2 de l'entree 1 (in1-in8, ou i1) ; l1 fx 2 = l1 e2 = effet 2 du looper 1. Sur une entree : fx et mute" },
-  { "in1 mute", "coupe la piste de l'entree 1 (plus rien vers les loopers ni la sortie) ; in1 mute off = la remet" },
+  { "in1 mute", "sort l'entree 1 du parent (comme l'appui long en page 2 : plus d'ecoute directe, les loopers la recoivent toujours) ; in1 mute off = la remet" },
   { "l3 to g2", "met L3 dans le groupe 2 (il quitte son ancien groupe) ; to g0 = sans groupe. En toggle / gate : OFF = sort du groupe" },
   { "go lp 2  go 4c  go t3", "appelle la page 2 du Launchpad | la page de rushes c (page 4) | la page 3 du Twister" },
   { "double-clic", "sur un pas de la liste : l'editer   (GO / Espace : l'executer)" },

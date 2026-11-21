@@ -643,26 +643,12 @@ function LPF.set_input_silent(tr, silent)
   return false
 end
 
--- V3.27 : MUTE d'une entree (rush "in1 mute") = mute de la piste IN, pose comme un mute MANUEL (sans marqueur : le
--- mute automatique des entrees non routees ne le retire jamais). Demute : la regle automatique reprend la main ensuite.
--- mode = "on" | "off" | "tog" ; etat lu = muet ET pas un mute automatique
-function VL.input_muted(k)
-  if not (reaper and reaper.GetMediaTrackInfo_Value) then return false end
-  local tr = VL.resolve_tracks(false).inputs[k]
-  if not tr then return false end
-  local _, mark = reaper.GetSetMediaTrackInfo_String(tr, AUTOMUTE_KEY, "", false)
-  return reaper.GetMediaTrackInfo_Value(tr, "B_MUTE") == 1 and mark ~= "1"
-end
+-- V3.27 : MUTE d'une entree (rush "in1 mute") = SORTIE DU PARENT (B_MAINSEND), comme l'appui long de la page 2 :
+-- on n'entend plus l'entree en direct, elle continue d'alimenter les loopers. mode = "on" | "off" | "tog"
+function VL.input_muted(k) return VL.input_parent_cut(k) end
 function VL.set_input_mute(k, mode)
-  if not (reaper and reaper.SetMediaTrackInfo_Value) then return false end
-  local tr = VL.resolve_tracks(false).inputs[k]
-  if not tr then return false end
-  local on = (mode == "on") or (mode == "tog" and not VL.input_muted(k))
-  reaper.GetSetMediaTrackInfo_String(tr, AUTOMUTE_KEY, "", true)        -- plus un mute automatique : il est a toi
-  reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", on and 1 or 0)
-  if not on and VL.apply_routing then pcall(VL.apply_routing) end        -- entree non routee : la regle automatique la recoupe
-  log("info", "IN%d : mute %s", k, on and "on" or "off")
-  return true
+  local on = (mode == "on") or (mode == "tog" and not VL.input_parent_cut(k))
+  return VL.set_input_parent(k, not on)
 end
 
 -- Retire le mute automatique pose par le script (pas les mutes manuels)
