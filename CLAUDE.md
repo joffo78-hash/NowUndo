@@ -308,6 +308,13 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
 
+## 21 nov. : onglet Rushes réorganisé (l'utilisateur : « aucune hiérarchie »)
+
+- Haut, au-dessus de la liste (`LY = LIST_Y + 30`) : `< RUSHES 1-64 sur 134 >` à gauche, `● CAPTURE` (`■ VALIDER` en
+  capture), `+ NOUVEAU`, `EDIT` à droite. Bas, sous petits titres : **RUSH SELECTIONNE** (NOM, COULEUR, MIDI, ▲, ▼) |
+  **FICHIER** (EXPORT, IMPORT, MODELE) ; **LAUNCHPAD PAGE 4** (`<` sous-page `>`, + PAGE, RENOMMER, SUPPRIMER, VIDER,
+  RETIRER SEL.). Plus de gros boutons. Tient en 620 px. Reverse du Drop : `dr_tau` −1 en reverse (calé sur `sync_expected`).
+
 ## 21 nov. (corrigé) : DROP garde TOUT depuis DROP ON
 
 - Première version ON / OFF = seulement le dernier cycle : **faux** (l'utilisateur veut tout ce qui a été joué). Maintenant :

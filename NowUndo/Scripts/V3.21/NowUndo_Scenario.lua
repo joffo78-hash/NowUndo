@@ -2724,12 +2724,15 @@ end
 local MPC = 32                                         -- macros par colonne : la 33e repart en haut de la 2e colonne
 local mflash = {}
 local function mac_draw(W, Hh, down)
+  -- V3.27 : mise en page par groupes. En haut : la liste (pages de la liste) et les actions principales (CAPTURE, NOUVEAU,
+  -- EDIT) ; au milieu : la liste ; en bas, sous titres : rush selectionne | fichier, puis la page 4 du Launchpad.
+  local LY = LIST_Y + 30
   if H._dropchk and reaper.time_precise() - H._dropchk.t > 1.5 then
     local c = lp_cell_of(H._dropchk.id); H._dropchk = nil
     if c then msg = "Rush pose sur le Launchpad en " .. lp_name(c) .. "."; msg_err = false
     else msg = "Le Launchpad n'a pas pris le rush : relache-le sur sa fenetre (page 4, sous-page non pleine)."; msg_err = true end
   end
-  local list_h = Hh - LIST_Y - (capturing and 162 or 118)   -- CAPTURE est un bouton normal (plus de grande rangee)
+  local list_h = Hh - LY - (capturing and 162 or 140)
   local rows = math.max(1, math.min(MPC, math.floor(list_h / RH)))
   local cw = math.floor((W - 24 - 6) / 2)
   local function colx(c) return 12 + c * (cw + 6) end
@@ -2738,10 +2741,10 @@ local function mac_draw(W, Hh, down)
   H._lp = math.max(1, math.min(npg, H._lp or 1))
   local base = (H._lp - 1) * 2 * MPC
   local function idx_at(px, py)                        -- macro sous la souris (liste a 2 colonnes)
-    if py < LIST_Y or py >= LIST_Y + rows * RH then return nil end
+    if py < LY or py >= LY + rows * RH then return nil end
     local c
     if px >= colx(0) and px < colx(0) + cw then c = 0 elseif px >= colx(1) and px < colx(1) + cw then c = 1 else return nil end
-    local i = base + c * MPC + mscroll + math.floor((py - LIST_Y) / RH) + 1
+    local i = base + c * MPC + mscroll + math.floor((py - LY) / RH) + 1
     return macros[i] and i or nil
   end
   -- clic droit sur une ligne : menu Copier / Couper / Coller / Dupliquer / Supprimer / Editer / Renommer
@@ -2784,23 +2787,33 @@ local function mac_draw(W, Hh, down)
     gfx.mouse_wheel = 0
   end
   mscroll = math.max(0, math.min(math.max(0, math.min(MPC, #macros - base) - rows), mscroll))
-  if npg > 1 or #macros > 0 then                                   -- pages de la liste (en haut a droite)
+  do                                                               -- en-tete de la liste
+    local hy = LIST_Y + 2
     gfx.setfont(2, "Arial", 12, 'b')
-    local x1 = W - 204 - 8 - 26
     local function go_lp(k) H._lp = (H._lp - 1 + k) % npg + 1; mscroll = 0 end
-    if btn(x1, 6, 26, 22, ">", 0.20, 0.25, 0.35) and npg > 1 then go_lp(1) end
-    if btn(x1 - 4 - 104, 6, 104, 22, "LISTE " .. H._lp .. "/" .. npg, 0.15, 0.30, 0.45) and npg > 1 then go_lp(1) end
-    if btn(x1 - 8 - 104 - 26, 6, 26, 22, "<", 0.20, 0.25, 0.35) and npg > 1 then go_lp(-1) end
+    local a1, a2 = base + 1, math.min(#macros, base + 2 * MPC)
+    if btn(12, hy, 26, 22, "<", 0.20, 0.25, 0.35) and npg > 1 then go_lp(-1) end
+    gfx.set(1, 1, 1, 0.85); gfx.x, gfx.y = 46, hy + 5
+    gfx.drawstr(#macros == 0 and "RUSHES : aucun" or string.format("RUSHES %d-%d sur %d", a1, a2, #macros))
+    local tx = gfx.x + 8
+    if btn(tx, hy, 26, 22, ">", 0.20, 0.25, 0.35) and npg > 1 then go_lp(1) end
+    local bw3 = math.min(120, math.floor((W - 24 - (tx + 34 - 12) - 8) / 3))
+    local x3 = W - 12 - 3 * bw3 - 8
+    if btn(x3, hy, bw3, 22, capturing and "■ VALIDER" or "● CAPTURE", 0.55, 0.15, 0.15) then mac_capture_toggle() end
+    if not capturing then
+      if btn(x3 + bw3 + 4, hy, bw3, 22, "+ NOUVEAU", 0.15, 0.40, 0.25) then mac_new() end
+      if btn(x3 + 2 * (bw3 + 4), hy, bw3, 22, "EDIT", 0.20, 0.25, 0.35) then mac_edit() end
+    end
   end
   local cap_mod = gfx.mouse_cap
   local ctrl = (cap_mod & 4) ~= 0 or (OSX and (cap_mod & 32) ~= 0)
   local shift = (cap_mod & 8) ~= 0
 
   gfx.set(0.10, 0.03, 0.04, 1)
-  gfx.rect(colx(0), LIST_Y, cw, rows * RH); gfx.rect(colx(1), LIST_Y, cw, rows * RH)
+  gfx.rect(colx(0), LY, cw, rows * RH); gfx.rect(colx(1), LY, cw, rows * RH)
   if #macros == 0 then
     gfx.setfont(2, "Arial", 13); gfx.set(1, 1, 1, 0.45)
-    gfx.x, gfx.y = 24, LIST_Y + 10
+    gfx.x, gfx.y = 24, LY + 10
     gfx.drawstr("Aucun rush : ● CAPTURE (fais l'action puis VALIDER) ou ADD (ecris la syntaxe, sans looper).")
   end
   local now_t = reaper.time_precise()
@@ -2810,7 +2823,7 @@ local function mac_draw(W, Hh, down)
       local i = base + c * MPC + mscroll + r
       local m = macros[i]
       if m then
-        local y = LIST_Y + (r - 1) * RH
+        local y = LY + (r - 1) * RH
         if msel[m.id] then gfx.set(0.40, 0.28, 0.08, 1); gfx.rect(x0, y, cw, RH)
         elseif r % 2 == 0 then gfx.set(0.13, 0.05, 0.06, 1); gfx.rect(x0, y, cw, RH) end
         if m.id == mcur then gfx.set(0.9, 0.8, 0.2, 0.9); gfx.rect(x0, y, cw, RH, 0) end
@@ -2958,11 +2971,11 @@ local function mac_draw(W, Hh, down)
   end
   if over then
     local oc, orow = math.floor((over - 1 - base) / MPC), (over - 1 - base) % MPC - mscroll
-    gfx.set(1, 1, 1, 0.9); gfx.rect(colx(oc), LIST_Y + orow * RH, cw, RH, 0)
+    gfx.set(1, 1, 1, 0.9); gfx.rect(colx(oc), LY + orow * RH, cw, RH, 0)
   end
 
   -- message
-  local my0 = Hh - (capturing and 156 or 112)
+  local my0 = Hh - (capturing and 156 or 134)
   gfx.setfont(2, "Arial", 12)
   if msg_err then gfx.set(1, 0.4, 0.4, 1) else gfx.set(0.6, 0.9, 0.6, 1) end
   gfx.x, gfx.y = 14, my0
@@ -2979,44 +2992,47 @@ local function mac_draw(W, Hh, down)
 
   -- boutons
   if capturing then cap_panel(W, Hh) else
-    -- V3.27 : pages de la page 4 du Launchpad
+    local function title(x, y, t) gfx.setfont(2, "Arial", 10, 'b'); gfx.set(1, 1, 1, 0.45); gfx.x, gfx.y = x, y; gfx.drawstr(t) end
+    -- rangee 1 : RUSH SELECTIONNE (5 boutons) | FICHIER (3 boutons)
+    local y1 = Hh - 76
+    local bw = math.floor((W - 24 - 7 * 4 - 12) / 8)
+    local function bx(k) return 12 + (k - 1) * (bw + 4) + (k > 5 and 12 or 0) end
+    title(bx(1), y1 - 14, "RUSH SELECTIONNE"); title(bx(6), y1 - 14, "FICHIER")
     gfx.setfont(2, "Arial", 12, 'b')
-    local py, pw = Hh - 84, 26
-    local plbl = "4" .. H._pg_label(H._pg) .. "  (" .. H._pg_count(H._pg) .. "/64)  v"
-    local bwp = math.min(260, gfx.measurestr(plbl) + 20)         -- sous-page geree par les boutons voisins (petite etiquette)
-    if btn(12, py, pw, 22, "<", 0.20, 0.25, 0.35) then H._pg = (H._pg - 2) % #H._pages + 1 end
-    if btn(12 + pw + 4, py, bwp, 22, plbl, 0.20, 0.25, 0.35) then H._pg_menu(12 + pw + 4, py + 22) end
-    local xx = 12 + pw + 4 + bwp + 4
-    if btn(xx, py, pw, 22, ">", 0.20, 0.25, 0.35) then H._pg = H._pg % #H._pages + 1 end
-    xx = xx + pw + 4
-    if btn(xx, py, 70, 22, "+ PAGE", 0.15, 0.40, 0.25) then H._pg_add() end
-    if btn(xx + 74, py, 70, 22, "NOM PAGE", 0.20, 0.25, 0.35) then H._pg_ren() end
-    if btn(xx + 148, py, 70, 22, "SUPPR PAGE", 0.45, 0.15, 0.15) then H._pg_del() end
-    gfx.setfont(2, "Arial", 14, 'b')
-    gfx.setfont(2, "Arial", 12, 'b')
-    local bw = math.floor((W - 24 - 4 * 7) / 8)
-    local labels = { "● CAPTURE", "ADD", "EDIT", "NOM", "COULEUR", H._learn and "MIDI ..." or "MIDI", "▲", "▼" }
-    local fns = { mac_capture_toggle, mac_new, mac_edit, mac_rename, mac_recolor, function() H._learn_start(ctrl) end, function() mac_move(-1) end, function() mac_move(1) end }
+    local labels = { "NOM", "COULEUR", H._learn and "MIDI ..." or "MIDI", "▲", "▼", "EXPORT", "IMPORT",
+                     reaper.GetExtState(MAC_EXT, "model") ~= "" and "MODELE ✓" or "MODELE" }
+    local fns = { mac_rename, mac_recolor, function() H._learn_start(ctrl) end, function() mac_move(-1) end, function() mac_move(1) end,
+                  mac_export, mac_import, function() H._model_menu(bx(8), y1 + 22) end }
     for k = 1, 8 do
-      local lr, lg, lb = (k == 6 and H._learn) and 0.75 or 0.20, 0.25, 0.35
-      if k == 1 then lr, lg, lb = 0.55, 0.15, 0.15 end
-      if btn(12 + (k - 1) * (bw + 4), Hh - 54, bw, 24, labels[k], lr, lg, lb) then fns[k]() end
+      if btn(bx(k), y1, bw, 22, labels[k], (k == 3 and H._learn) and 0.75 or 0.20, 0.25, 0.35) then fns[k]() end
     end
-    local w4 = math.floor((W - 24 - 4 * 4) / 5)
-    local function x4(k) return 12 + (k - 1) * (w4 + 4) end
-    if btn(x4(1), Hh - 26, w4, 22, "EXPORT", 0.20, 0.25, 0.35) then mac_export() end
-    if btn(x4(2), Hh - 26, w4, 22, "IMPORT", 0.20, 0.25, 0.35) then mac_import() end
-    if btn(x4(3), Hh - 26, w4, 22, "RETIRER DU LP", 0.35, 0.22, 0.15) then
-      local ms = sel_ids()
-      if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_remove(ms) end
-    end
-    if btn(x4(5), Hh - 26, w4, 22, reaper.GetExtState(MAC_EXT, "model") ~= "" and "MODELE ✓" or "MODELE", 0.20, 0.30, 0.25) then H._model_menu(x4(5), Hh - 4) end
-    if btn(x4(4), Hh - 26, w4, 22, "VIDER LA PAGE", 0.45, 0.15, 0.15) then
+    -- rangee 2 : LAUNCHPAD PAGE 4 (la sous-page geree + ses boutons)
+    local y2 = Hh - 30
+    title(12, y2 - 14, "LAUNCHPAD PAGE 4 : sous-page geree par ces boutons")
+    gfx.setfont(2, "Arial", 12, 'b')
+    local pw = 22
+    local plbl = "4" .. H._pg_label(H._pg) .. "  (" .. H._pg_count(H._pg) .. "/64)  v"
+    local bwp = math.min(220, gfx.measurestr(plbl) + 20)
+    if btn(12, y2, pw, 22, "<", 0.20, 0.25, 0.35) then H._pg = (H._pg - 2) % #H._pages + 1 end
+    if btn(12 + pw + 4, y2, bwp, 22, plbl, 0.20, 0.25, 0.35) then H._pg_menu(12 + pw + 4, y2 + 22) end
+    local xx = 12 + pw + 4 + bwp + 4
+    if btn(xx, y2, pw, 22, ">", 0.20, 0.25, 0.35) then H._pg = H._pg % #H._pages + 1 end
+    xx = xx + pw + 10
+    local wb = math.floor((W - 12 - xx - 4 * 4) / 5)
+    local function px(k) return xx + (k - 1) * (wb + 4) end
+    if btn(px(1), y2, wb, 22, "+ PAGE", 0.15, 0.40, 0.25) then H._pg_add() end
+    if btn(px(2), y2, wb, 22, "RENOMMER", 0.20, 0.25, 0.35) then H._pg_ren() end
+    if btn(px(3), y2, wb, 22, "SUPPRIMER", 0.45, 0.15, 0.15) then H._pg_del() end
+    if btn(px(4), y2, wb, 22, "VIDER", 0.45, 0.15, 0.15) then
       local n = H._pg_count(H._pg)
       if n > 0 and reaper.MB("Retirer les " .. n .. " rushes de la page " .. H._pg_label(H._pg) .. " ? (ils restent dans la liste)", "NowUndo - rushes", 4) == 6 then
         for c in pairs(layout) do if math.ceil(c / 64) == H._pg then layout[c] = nil end end
         mac_save(); msg = "Page videe."; msg_err = false
       end
+    end
+    if btn(px(5), y2, wb, 22, "RETIRER SEL.", 0.35, 0.22, 0.15) then
+      local ms = sel_ids()
+      if #ms == 0 then msg = "Selectionne un ou plusieurs rushes."; msg_err = true else lp_remove(ms) end
     end
   end
 end
