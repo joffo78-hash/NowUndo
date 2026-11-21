@@ -2982,9 +2982,10 @@ local function mac_draw(W, Hh, down)
     -- V3.27 : pages de la page 4 du Launchpad
     gfx.setfont(2, "Arial", 12, 'b')
     local py, pw = Hh - 128, 26
-    local bwp = math.max(60, W - 24 - 2 * pw - 3 * 70 - 5 * 4)
+    local plbl = "4" .. H._pg_label(H._pg) .. "  (" .. H._pg_count(H._pg) .. "/64)  v"
+    local bwp = math.min(260, gfx.measurestr(plbl) + 20)         -- sous-page geree par les boutons voisins (petite etiquette)
     if btn(12, py, pw, 22, "<", 0.20, 0.25, 0.35) then H._pg = (H._pg - 2) % #H._pages + 1 end
-    if btn(12 + pw + 4, py, bwp, 22, "LAUNCHPAD PAGE 4" .. H._pg_label(H._pg) .. "   (" .. H._pg_count(H._pg) .. "/64)   v", 0.15, 0.30, 0.45) then H._pg_menu(12 + pw + 4, py + 22) end
+    if btn(12 + pw + 4, py, bwp, 22, plbl, 0.20, 0.25, 0.35) then H._pg_menu(12 + pw + 4, py + 22) end
     local xx = 12 + pw + 4 + bwp + 4
     if btn(xx, py, pw, 22, ">", 0.20, 0.25, 0.35) then H._pg = H._pg % #H._pages + 1 end
     xx = xx + pw + 4
