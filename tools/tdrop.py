@@ -119,9 +119,9 @@ def scenario(which):
     GM[393] = tok; ncap = ra.n
     print('debut de capture : instant', GM[301], '| duree demandee L', GM[305])
     # V3.27 : DROP ON -> la capture tourne ; DROP OFF un peu plus d'un cycle plus tard, a un instant quelconque
-    L0 = int(GM[305]); step(int(math.ceil(L0 / BLK)) + 37)
+    L0 = int(GM[305]); step(int(math.ceil(2.5 * L0 / BLK)))   # ~2,5 tours captures avant DROP OFF
     GM[380] = tok + 0.25
-    k = wait(lambda: GM[300] == tok + 0.5); print('DROP OFF -> bascule %d blocs plus tard, au debut du cycle (phase %d / %d) | B state %d' % (k, int(A.v_pos), L0, B.v_state))
+    k = wait(lambda: GM[300] == tok + 0.5); print('DROP OFF -> bascule %d blocs plus tard | nouvelle longueur %d = %.2f tours | B state %d' % (k, int(A.v_length), A.v_length / L0, B.v_state))
     fx['on'] = False                      # le script coupe les effets de la piste cible apres l'accuse
     GM[380] = tok + 0.5
     nsw = ra.n - BLK                      # la cible a bascule au debut du dernier bloc
@@ -131,7 +131,7 @@ def scenario(which):
             print('   pos %.1f master_pos %.1f len %d base %d sm_speed %.3f gmem2 %.0f gmem3 %.0f' % (A.v_pos, A.v_master_pos, A.v_length, A.v_base_loop_length, A.v_sm_speed, GM[2], GM[3]))
             step(40)
     if which in ('slc', 'slcp'):
-        L = int(GM[305]); step(int(math.ceil(L / BLK)) + 4)
+        L = int(A.v_length); step(int(math.ceil(L / BLK)) + 4)
         e = 0.0; ref = 0.0; s1 = nsw
         for n in range(s1, s1 + L - 8 * BLK):
             nb = n - ((n - nsw) // L + 1) * L          # meme instant du dernier cycle capture (avant la bascule)

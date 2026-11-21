@@ -1747,8 +1747,8 @@ function dr_arm_target(tok) local(b, s, w, r, sp, slc) (
   slc = play_mode == 1 ? ((mclk_on && mclk_valid && mclk_len > 256) ? 2 : 1) : 0;
   slc == 2 ? dr_L = floor(mclk_len + 0.5);
   slc == 1 ? dr_L = floor(length + 0.5);
-  (length > 0 && w > 16 && state >= 2 && state <= 6 && !ld_active && dr_L > 256 && dr_L + floor(srate * 0.01) <= LD_MAXN
-   && (dr_L <= single_buf_len) && (dr_mode == 0 || dr_mode == 3)) ? (
+  (length > 0 && w > 16 && state >= 2 && state <= 6 && !ld_active && dr_L > 256
+   && (2 * dr_L + floor(srate * 0.05) <= single_buf_len) && (dr_mode == 0 || dr_mode == 3)) ? (
     dr_tok = tok; dr_b = b;
     slc ? (
       dr_t0 = (slc == 2 ? floor(mclk_pos) : floor(master_pos)) + 2;   // +2 : mesure (tools/tdrop.py slc) = l'instant entendu
@@ -1764,6 +1764,7 @@ function dr_arm_target(tok) local(b, s, w, r, sp, slc) (
     // l'eau ; un nouvel etat d'historique entre-temps (overdub...) annule le drop.
     dr_hidx = active_history_idx; dr_ni = (active_history_idx + 1) % max_history;
     dr_nl = dr_slot_l(dr_ni); dr_nr = dr_nl + single_buf_len; dr_cp = 0; dr_tp = dr_t0;
+    dr_K = 0; dr_js = -1; dr_X = max(1, min(floor(srate * 0.01), floor(dr_L / 4)));
     gmem[b + 5] = dr_L; gmem[b + 1] = dr_t0; gmem[b] = tok;
   ) : ( gmem[b] = tok + 0.75; );
 );
@@ -1776,15 +1777,16 @@ function dr_commit_begin(tok) (
   // un ancien script Launchpad : on ne fait rien.
   0;
 );
-function dr_install() local(t, idx, x, k, i, f) (
+function dr_install() local(t, idx, k, i, f) (
   idx = active_part - 1;
-  t = dr_t0 + dr_cnt - 1; t -= dr_L * floor(t / dr_L);   // lecture a plat : on entend pos + 1
-  // V3.27 : raccord de boucle fondu : la fin du cycle glisse vers ce qui precedait son debut (garde par NU_DropCapture)
-  x = floor(gmem[DR_BASE + 91]);
-  (gmem[DR_BASE + 90] == dr_tok && x >= 1 && x < dr_L) ? (
-    k = 0; loop(x, i = dr_L - x + k; f = (k + 1) / (x + 1);
-      dr_nl[i] = dr_nl[i] * (1 - f) + gmem[113000 + k] * f; dr_nr[i] = dr_nr[i] * (1 - f) + gmem[114000 + k] * f; k += 1; );
-  );
+  // V3.27 : tout ce qui a ete capture depuis DROP ON est garde : n = 0 .. X-1 = amorce, n = X .. K+X-1 = la boucle (K = tours
+  // entiers), rangee a l'index (debut + n) mod K -> chaque index = son instant du cycle (calage sur l'horloge conserve).
+  // Repliage : les index >= K reviennent au debut ; la fin (n = K .. K+X-1) glisse vers l'amorce (raccord fondu).
+  dr_L = dr_K;
+  i = 0; loop(dr_js, dr_nl[i] = dr_nl[dr_L + i]; dr_nr[i] = dr_nr[dr_L + i]; i += 1; );
+  k = 0; loop(dr_X, i = dr_js + k; f = (k + 1) / (dr_X + 1);
+    dr_nl[i] = dr_nl[dr_L + i] * (1 - f) + dr_nl[i] * f; dr_nr[i] = dr_nr[dr_L + i] * (1 - f) + dr_nr[i] * f; k += 1; );
+  t = dr_js + dr_cp - 1; t -= dr_L * floor(t / dr_L);   // lecture a plat : on entend pos + 1
   dub_flush();
   br_on ? do_beat_repeat(0);
   switch_history_slot(dr_ni); history_head = dr_ni; hist_len[dr_ni] = dr_L;
@@ -1817,20 +1819,32 @@ function dr_step() local(n, k, a, t, sg, j0, tg) (
     // horloge du cycle (cible) : publiee au debut de chaque bloc (NU_DropCapture demarre a cet index)
     dr_cnt += dr_blk; dr_blk = samplesblock;
     t = dr_t0 + dr_cnt; t -= dr_L * floor(t / dr_L);
-    // V3.27 : recopie au fil de l'eau de ce que la capture a ecrit au bloc precedent (index = instant du cycle)
+    // V3.27 : recopie au fil de l'eau de TOUT ce que la capture a ecrit (rien n'est ecrase) : echantillon n -> index debut + n
     n = gmem[DR_BASE + 97];
-    n > dr_cp ? (
-      k = min(n - dr_cp, dr_L); j0 = gmem[DR_BASE + 92] - k; j0 -= dr_L * floor(j0 / dr_L);
-      loop(k, a = LD_BASE + 16 + j0; dr_nl[j0] = gmem[a]; dr_nr[j0] = gmem[a + LD_MAXN]; j0 += 1; j0 >= dr_L ? j0 = 0; );
+    (dr_js < 0 && n > 0) ? dr_js = floor(gmem[DR_BASE + 92]);
+    (n > dr_cp && dr_js >= 0) ? (
+      k = dr_cp; a = dr_js + k;
+      loop(min(n - dr_cp, single_buf_len - a), j0 = LD_BASE + 16 + (k % LD_MAXN); dr_nl[a] = gmem[j0]; dr_nr[a] = gmem[j0 + LD_MAXN]; k += 1; a += 1; );
       dr_cp = n;
     );
-    (active_part != dr_part || length != dr_slen || sg == dr_tok + 0.75 || active_history_idx != dr_hidx) ? (
+    // DROP OFF (gmem[380] = jeton + 0.25) : la boucle s'arrete a la fin du tour en cours (K = tours entiers depuis DROP ON) ;
+    // place presque pleine sans DROP OFF : bascule sur les tours complets deja captures
+    (dr_K == 0 && dr_js >= 0) ? (
+      sg == dr_tok + 0.25 ? (
+        dr_K = max(dr_L, (floor(max(0, dr_cp - dr_X) / dr_L) + 1) * dr_L);
+      ) : (
+        (dr_js + dr_cp + dr_X + 4 * samplesblock >= single_buf_len) ? (
+          dr_K = floor(max(0, dr_cp - dr_X) / dr_L) * dr_L;
+          dr_K < dr_L ? ( gmem[dr_b] = dr_tok + 0.75; dr_mode = 0; );
+        );
+      );
+    );
+    (dr_mode == 1 && (active_part != dr_part || length != dr_slen || sg == dr_tok + 0.75 || active_history_idx != dr_hidx)) ? (
       sg != dr_tok + 0.75 ? gmem[dr_b] = dr_tok + 0.75;
       dr_mode = 0;
-    ) : (
-      // DROP OFF (gmem[380] = jeton + 0.25) : bascule au debut du cycle suivant, des qu'un cycle complet est recopie
-      (sg == dr_tok + 0.25 && dr_cp >= dr_L && t < dr_tp) ? dr_install() : ( gmem[dr_b + 1] = t; );
-    );
+    ) : (dr_mode == 1 ? (
+      (dr_K > 0 && dr_cp >= dr_K + dr_X) ? dr_install() : ( gmem[dr_b + 1] = t; );
+    ));
     dr_tp = t;
   ) : (dr_mode == 3 ? (
     // source : s'efface quand la cible a bascule (son accuse, ou l'ancien signal du script)

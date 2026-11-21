@@ -308,6 +308,16 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
 
+## 21 nov. (corrigé) : DROP garde TOUT depuis DROP ON
+
+- Première version ON / OFF = seulement le dernier cycle : **faux** (l'utilisateur veut tout ce qui a été joué). Maintenant :
+  `NU_DropCapture` écrit tout linéairement (échantillon n en `LD_BASE+16 + n mod LD_MAXN`, publie `392` = instant du cycle
+  au départ, `397` = n) ; la cible recopie au fil de l'eau à l'index `début + n` de la couche suivante ; DROP OFF fixe
+  K = tours entiers jusqu'à la fin du tour en cours ; bascule quand n ≥ K + X ; repliage (index ≥ K → début) et raccord
+  fondu de la fin (n = K..K+X-1) vers l'amorce (n = 0..X-1). Nouvelle longueur = K (multiple du cycle → synchro gardée).
+  Place max = couche d'historique (~83 s à 48 kHz) : presque pleine sans DROP OFF → bascule sur les tours complets.
+  L'ancien raccord par gmem 390/391/113000 n'existe plus.
+
 ## 21 nov. : DROP ON / OFF + drop fidèle en Slicer (JSFX V3.27 + NU_DropCapture refait)
 
 - **Demande de l'utilisateur** : 1er appui DROP = la capture démarre ; 2e appui = bascule au **prochain début de cycle**

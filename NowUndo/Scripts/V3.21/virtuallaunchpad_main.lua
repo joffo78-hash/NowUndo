@@ -2267,7 +2267,7 @@ PAD_LABEL[1]["5,2"] = "SYNC/UNSYNC"; PAD_RGB[1]["5,2"] = 0x40C0FF   -- court = p
 bind(1, 5, 7, fn(function() if pedal_capture_action("drop_group") then return end VL.drop_group() end,
                  function() local R = VL.DROP.run; return R and ((R.phase == "cap" and not R.exit) and "armed" or "on") or "idle" end),
                fn(function() VL.drop_cancel() end))   -- V3.27 : appui long = annuler le drop en cours
-PAD_LABEL[1]["5,7"] = "DROP : 1er appui = capture, 2e = bascule au prochain cycle, long = annuler (groupe ou looper seul)"; PAD_RGB[1]["5,7"] = 0xFF66CC
+PAD_LABEL[1]["5,7"] = "DROP : 1er appui = capture, 2e = fin au tour en cours (tout est garde), long = annuler"; PAD_RGB[1]["5,7"] = 0xFF66CC
 bind(1, 5, 8, act("full_loop"))
 -- Miroirs FX : helpers (les binds sont UNIQUEMENT sur D5-D8 = 5,5..5,8 plus bas).
 -- Maintenir PAGE 1 (5,9) puis appuyer sur D5-D8 pour changer le mode Toggle/Gate du slot.
@@ -2481,7 +2481,7 @@ function VL.drop_group()
       reaper.gmem_attach(GMEM_NAME)
       reaper.gmem_write(D.BASE + 80, D.tok + 0.25)
       R.exit = true
-      VL.drop_note("DROP OFF : bascule au prochain debut de cycle du looper %d", R.tgt)
+      VL.drop_note("DROP OFF : la boucle se ferme a la fin du tour en cours (tout depuis DROP ON est garde), looper %d", R.tgt)
     else VL.drop_note(R.exit and "bascule en attente du debut de cycle" or "capture en preparation") end
     return
   end
