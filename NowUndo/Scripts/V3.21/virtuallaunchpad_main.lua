@@ -4417,6 +4417,46 @@ function VL.align_reaper()
   log("info", "Play REAPER cale sur l'horloge des loopers (%.3f s -> %.3f s)", X, P)
 end
 
+-- AUTO-TEMPO (21 nov. 2026, remplace le script "NowUndo Auto-Tempo Sync") : le MSV3 (Master Sync) devine les temps de la
+-- boucle maitre et publie le tempo voulu (gmem 917, temps 918, compteur des temps forces 919) ; ici on l'applique, car un
+-- JSFX ne peut pas changer le tempo ni lancer Play / Stop. Seulement si AUTO-SYNC est ON (gmem 95, bouton du MSV3).
+-- Un looper devient maitre de MAIN (ou change de boucle / de temps forces) -> tempo de REAPER, curseur cale sur la boucle,
+-- PLAY si REAPER etait arrete ; Unlock -> STOP. La synchro Host reste au MSV3 (rien n'est ecrit ici).
+function VL.autotempo_tick(t)
+  if VL.mirror_mode or not (reaper and reaper.gmem_read and reaper.SetCurrentBPM and reaper.GetPlayState) then return end
+  local A = VL._at
+  if not A then A = { t = 0 }; VL._at = A end
+  if t - A.t < 0.05 then return end
+  A.t = t
+  reaper.gmem_attach(GMEM_NAME)
+  local rd = reaper.gmem_read
+  local armed = (rd(95) or 0) == 1
+  local id, len = rd(1) or 0, rd(2) or 0
+  local locked = (rd(0) or 0) == 1 and id > 0
+  if armed and locked then
+    local bpm, rev = rd(917) or 0, rd(919) or 0
+    local need = (not A.locked) or id ~= A.id or len ~= A.len or rev ~= A.rev or not A.done
+    if need and len > 0 and bpm >= 20 and bpm <= 960 then
+      local cur = reaper.Master_GetTempo and reaper.Master_GetTempo() or 0
+      if math.abs(bpm - cur) > 0.01 then reaper.SetCurrentBPM(0, bpm, true) end
+      local played = false
+      if (reaper.GetPlayState() or 0) == 0 then
+        pcall(VL.align_reaper)                                  -- curseur : debut de mesure = debut de boucle
+        if reaper.CSurf_OnPlay then reaper.CSurf_OnPlay(); played = true end
+        VL._ps_play = true                                      -- pas de 2e calage au passage en lecture
+      end
+      log("info", "Auto-Tempo : %.2f BPM (%d temps)%s", bpm, math.floor((rd(918) or 0) + 0.5), played and " + PLAY" or "")
+      A.id, A.len, A.rev, A.done = id, len, rev, true
+    end
+  end
+  if armed and A.locked and not locked and (reaper.GetPlayState() or 0) ~= 0 and reaper.CSurf_OnStop then
+    reaper.CSurf_OnStop()
+    log("info", "Auto-Tempo : Unlock -> STOP")
+  end
+  if not locked then A.done = false; A.id = nil end
+  A.locked = locked
+end
+
 function VL.render(t)
   t = t or now()
   if not VL.mirror_mode and reaper and reaper.GetPlayState then
@@ -4424,6 +4464,7 @@ function VL.render(t)
     local playing = (ps & 1) == 1 and (ps & 4) == 0
     if playing and VL._ps_play == false and reaper.GetExtState("NowUndo_Clock", "align") ~= "0" then pcall(VL.align_reaper) end
     VL._ps_play = playing
+    pcall(VL.autotempo_tick, t)
   end
   -- NowUndo V3.23 : latence aller-retour pour les loopers (gmem 955 auto en samples, 956 decalage ms, 957 2 = coupee)
   -- Reglage : script NowUndo_Latency.lua (ExtState NowUndo_Latency : on, offset_ms)
