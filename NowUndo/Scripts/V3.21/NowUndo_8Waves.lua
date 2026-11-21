@@ -125,14 +125,15 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local VW = math.max(4, math.min(8, math.floor(h * .07)))       -- VU d'entree (avant) / de sortie (apres)
   local wx, wy, ww, wh = x + 6 + VW, y + 3, w - 12 - 2 * VW, h - 6
   local vs = VIS.s; VIS.s = 1; VIS.vmeter(x + 5, wy, VW, wh, read(gb, 172)); VIS.s = vs; VIS.vmeter(x + w - 2 - VW, wy, VW, wh, read(gb, 173))
-  if is_stop then rect(wx, wy, ww, wh, .05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10, 1, 1) else rect(wx, wy, ww, wh, .025, .027, .035, 1, 1) end
+  -- fond de la forme d'onde teinte de la couleur du looper : a l'arret, et un peu plus sombre en lecture (la forme d'onde ressort)
+  local wbg = is_stop and {.05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10} or {.035 + hc[1] * .11, .035 + hc[2] * .11, .042 + hc[3] * .11}
+  rect(wx, wy, ww, wh, wbg[1], wbg[2], wbg[3], 1, 1)
   if tc then
     rect(x, y, w, h, tc[1], tc[2], tc[3], tk, 1)                    -- voile de la couleur du groupe / de la selection
     if length > 0 and lw > 0 then                                    -- ... sauf hors de In / Out : fond normal (non selectionne)
       local ix = wx + math.max(0, math.min(1, ls / length)) * ww
       local ox = wx + math.max(0, math.min(1, math.min(ls + lw, length) / length)) * ww
-      local br, bg, bb = .025, .027, .035
-      if is_stop then br, bg, bb = .05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10 end
+      local br, bg, bb = wbg[1], wbg[2], wbg[3]
       if ix - wx >= 1 then rect(wx, wy, ix - wx, wh, br, bg, bb, 1, 1) end
       if wx + ww - ox >= 1 then rect(ox, wy, wx + ww - ox, wh, br, bg, bb, 1, 1) end
     end
