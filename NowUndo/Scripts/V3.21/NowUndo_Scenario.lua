@@ -498,7 +498,7 @@ local function compile(text, forced, toggle, gate_off)
         if targets then last_targets = targets end
       end
       if not targets then errs[#errs + 1] = "[" .. act .. "] " .. terr
-      elseif #t < 2 then errs[#errs + 1] = "[" .. act .. "] action manquante"
+      elseif #t < 2 then errs[#errs + 1] = "[" .. act .. "] action manquante" .. (is_target and (" (cible seule : ecris \"" .. first .. " rec\" sans virgule)") or "")
       else
         local idx, ok = 2, true
         while idx <= #t and ok do
@@ -1848,7 +1848,10 @@ ED.VALS = {
 function ED.add(tok)                       -- ajoute une action (apres une virgule) a l'emplacement du curseur
   local a, b = ED.text:sub(1, ED.cur), ED.text:sub(ED.cur + 1)
   a = a:gsub("[%s,]+$", "")
-  local ins = (a == "") and tok or (a .. ", " .. tok)
+  -- derniere action = une cible seule ("all", "l3", "g2", "in1") ou "l3 to" : le mot la complete (espace, pas de virgule)
+  local seg = trim(a:match("([^,]*)$") or "")
+  local glue = (seg ~= "" and ((not seg:find("%s") and is_tgt(seg:lower())) or seg:lower():match("%sto$"))) and " " or ", "
+  local ins = (a == "") and tok or (a .. glue .. tok)
   b = b:gsub("^[%s,]+", "")
   ED.text = ins .. ((b ~= "") and (", " .. b) or "")
   ED.cur = #ins
