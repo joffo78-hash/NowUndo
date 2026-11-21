@@ -6,7 +6,8 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 
 ## Où est quoi
 
-- Dépôt : `joffo78-hash/NowUndo`, branche de travail **`nowundo-v3.26`** (créée depuis `ccr-12a0f3a9-86p9ey`, qui contient tout le travail jusqu'au 16 nov. 2026).
+- Dépôt : `joffo78-hash/NowUndo`, branche de travail **`nowundo-v3.27`** (créée le 21 nov. 2026 depuis `nowundo-v3.26`, qui contient
+  tout le travail jusqu'au 21 nov. ; `nowundo-v3.26` venait de `ccr-12a0f3a9-86p9ey`, travail jusqu'au 16 nov.).
 - `NowUndo/NowUndo_V3.27.jsfx` : **version courante du JSFX** = V3.26 + dub brut A / D (fait par l'utilisateur) + bouton Mute
   (3.19 → 3.26 gardées pour l'historique). `NowUndo/NowUndo_V3.26.jsfx` : Faite à partir du
   fichier que l'utilisateur avait chargé dans REAPER (une V3.25 sans `slc_move`, remis ensuite : V3.26 = V3.25 + détection).
@@ -14,13 +15,13 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 - `NowUndo/Scripts/V3.21/` : tous les scripts courants (le nom du dossier est historique) :
   | Fichier | Rôle |
   |---|---|
-  | `virtuallaunchpad_main.lua` | Launchpad (Mini MK3 + fenêtre virtuelle + serveur de la page web). Cœur de la logique : pages, groupes, routing, FX, macros/rushes, Ctrl/HOLD. |
+  | `virtuallaunchpad_main.lua` | Launchpad (Mini MK3 + fenêtre virtuelle + serveur de la page web). Cœur de la logique : pages, groupes, routing, FX, macros/rushes, Ctrl/HOLD. **Page 4 = sous-pages de rushes a..z seulement** (V3.27, couches `rp1`..`rp26`). |
   | `Virtual_Launchpad_secondary.lua` | Miroir (3 pages non affichées), charge `virtuallaunchpad_main.lua` en `mirror_mode`. |
   | `twisterinoutreset.lua` | Midi Fighter Twister v3.5 (8 pages, page 7 Custom, page 8 Display, sélection d'effet FX Router). |
-  | `nowundo_midi_learn.lua` | MIDI Learn v2.8 + raccourcis clavier (js_ReaScriptAPI), cumul clavier/MIDI, double appui. |
+  | `nowundo_midi_learn.lua` | MIDI Learn v2.8 + raccourcis clavier (js_ReaScriptAPI), cumul clavier/MIDI, double appui. Écoute aussi le **MIDI des rushes** (table `RL`, V3.27). |
   | `NowUndo_8Looper_Panel.lua` | Panneau 8 loopers + import de fichiers audio (glisser-déposer, modes Adapter / Indépendant / Étirer). |
   | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées ; étiquette : L n (partie seulement si ≠ MAIN) + sources entre parenthèses + état + REVERSE / SLICE / CLOUD + SP (speed ≠ 1) / PS (pitch ≠ 0) + « FX n » en rose ; M / S / F tout à droite ; VU vertical d'entrée à gauche (`+172`) et de sortie à droite (`+173`) ; état MUTE (`+199`) ; saturation des couleurs = Out Vol (`+22`) : 0 dB couleur pleine → -80 dB noir et blanc, Mute = noir et blanc). Pas de paramètres, sources, boutons ni glisser-déposer. Fenêtre `NowUndo_8Waves`. |
-  | `NowUndo_Scenario.lua` | Séquenceur de scénarios + **Rushes** (ex « macros ») : éditeur, assistant, palette. |
+  | `NowUndo_Scenario.lua` | Séquenceur de scénarios + **Rushes** (ex « macros ») : éditeur, assistant, palette ; V3.27 : cibles dans les rushes, sous-pages de la page 4 (+ PAGE / NOM / SUPPR), MIDI par rush, modèle de démarrage. |
   | `NowUndo_Twister_Web.lua` | Pont gmem ↔ ExtState pour l'onglet Twister In/Out et l'onglet **Loopers** du web. |
   | `NowUndo_Latency.lua` | Réglage global de la compensation de latence (V3.23). |
   | `NowUndo_VirtualPedalBoard.lua` | Pédalier virtuel (G-Board / FCB1010 / M-Vave). Deux réglages **séparés** : **LEARN PÉDALE** (clic sur un switch → appui sur la vraie pédale = son MIDI) et **ACTION** (clic sur un switch ou appui sur sa pédale → clic sur un pad du Launchpad / knob du Twister via `NowUndo_Pedal/capture`, ou clic droit > liste) ; Échap = annuler. Témoin MIDI en bas (dernier message reçu + ce qu'il déclenche), le switch s'allume à chaque appui. Modes Gate / Toggle / Absolu, cible = sélection ou looper n. Actions Launchpad (Exclu, Sync, Drop, sélection) via `NowUndo_Pedal/lp_cmd`. V3.25 : + Mute, + Drop. |
@@ -65,7 +66,7 @@ propre page Launchpad** (`VL.web_with_page`).
 ## Règles de code (pièges déjà rencontrés)
 
 - **Lua : 200 variables locales max au niveau principal.** `virtuallaunchpad_main.lua` ≈ 143 (fonctions rangées dans
-  `VL.*`, `LPF.*`), `NowUndo_Scenario.lua` ≈ 192 (**presque plein** : ranger le neuf dans la table `ED` ou `H._xxx`),
+  `VL.*`, `LPF.*`), `NowUndo_Scenario.lua` ≈ 193 (**presque plein** : ranger le neuf dans la table `ED` ou `H._xxx`),
   `twisterinoutreset.lua` ≈ 172. Vérifier avec `python3 tools/lualoc.py <fichier>` après chaque modif.
 - Lua : une `local function` n'est visible qu'après sa déclaration ; pour un appel « en avant », passer par un champ de table.
 - **EEL2 (JSFX) : `min()` / `max()` prennent exactement 2 arguments** (erreur de compilation sinon ; le traducteur Python
@@ -83,6 +84,27 @@ propre page Launchpad** (`VL.web_with_page`).
 - **Proposer des alternatives quand son idée n'est pas optimale** (demandé explicitement), avec une recommandation.
 - Il veut garder la cohérence entre Launchpad, web, MIDI Learn, Twister (même logique partout : groupes, double appui…).
 - Il n'aime pas les ergonomies « à l'envers » (ex. choisir OFF avant l'action) ni l'absence de Retour arrière.
+
+## RÉSUMÉ DE LA SESSION DU 21 NOV. (point de départ de la prochaine discussion)
+
+Tout est poussé, **rien n'a été testé dans REAPER** (seulement bancs Python / mocks Lua) : demander à l'utilisateur ses retours.
+1. **8Waves** : VU d'entrée / sortie verticaux, état MUTE, saturation des couleurs selon Out Vol (Mute = noir et blanc).
+2. **JSFX V3.27** = version de référence : dub brut **A / D** écrit par l'utilisateur (relu, test `tools/traw.py`) + bouton
+   **Mute** (Transport) + pilotage A / D (commande 39, paramètre 67, MIDI Learn, mots `a` / `d`).
+3. **Rushes = langage des scénarios** : cible facultative (`rec` = sélection ; `l1`, `l(1/3)`, `g2`, `g(1/3)`, `all`,
+   entrées `in1`…), `l3 to g2` (groupes), `go lp 2` / `go 4c` / `go t3` (pages), `l1 fx 2` / `in1 fx 2` (effets),
+   `in1 mute` (= **sortie du parent**, comme la page 2 — PAS un mute de piste), REC des rushes calé sur l'appui.
+4. **Page 4 du Launchpad = uniquement des pages de rushes a..z** (les couches Effects / Groups / RC-505 / Rushes 2 sont
+   retirées). Migration au 1er lancement : a = RC-505 en rushes, b / c = anciens Rushes / Rushes 2, puis une page
+   « Effets » ajoutée une fois (rangées 1-4 entrées, 5-8 loopers). Pads d'effets / de groupe / de mute d'entrée = miroir
+   de l'état réel.
+5. **MIDI Learn par rush** (appris dans la fenêtre Rushes, exécuté par le script MIDI Learn) + **modèle de démarrage** des
+   rushes (bouton MODELE, jamais réécrit automatiquement).
+À vérifier en priorité avec l'utilisateur : la migration de la page 4 (a RC-505, b, c, d Effets), le menu des pages,
+`l3 to g2`, `in1 mute`, le learn MIDI d'un rush (QuNeo / pédale, gate), le modèle au redémarrage, le carré A / D.
+Les « PROBLÈMES OUVERTS » plus bas (Launchpad muet à l'ouverture du MIDI Learn, QuNeo, Drop, BR) n'ont pas été retouchés.
+Suite logique proposée : le grand chantier « tout est rush » (étapes 1-4 plus bas : moteur commun exécuté par le
+Launchpad, rushes d'usine, page 1 en disposition de rushes, LED riches comme l'ancien REC rouge / orange / clignotant).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
