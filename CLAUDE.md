@@ -92,24 +92,32 @@ propre page Launchpad** (`VL.web_with_page`).
 
 ## RÉSUMÉ DE LA SESSION DU 21 NOV. (point de départ de la prochaine discussion)
 
-Tout est poussé, **rien n'a été testé dans REAPER** (seulement bancs Python / mocks Lua) : demander à l'utilisateur ses retours.
-1. **8Waves** : VU d'entrée / sortie verticaux, état MUTE, saturation des couleurs selon Out Vol (Mute = noir et blanc).
-2. **JSFX V3.27** = version de référence : dub brut **A / D** écrit par l'utilisateur (relu, test `tools/traw.py`) + bouton
-   **Mute** (Transport) + pilotage A / D (commande 39, paramètre 67, MIDI Learn, mots `a` / `d`).
-3. **Rushes = langage des scénarios** : cible facultative (`rec` = sélection ; `l1`, `l(1/3)`, `g2`, `g(1/3)`, `all`,
-   entrées `in1`…), `l3 to g2` (groupes), `go lp 2` / `go 4c` / `go t3` (pages), `l1 fx 2` / `in1 fx 2` (effets),
-   `in1 mute` (= **sortie du parent**, comme la page 2 — PAS un mute de piste), REC des rushes calé sur l'appui.
-4. **Page 4 du Launchpad = uniquement des pages de rushes a..z** (les couches Effects / Groups / RC-505 / Rushes 2 sont
-   retirées). Migration au 1er lancement : a = RC-505 en rushes, b / c = anciens Rushes / Rushes 2, puis une page
-   « Effets » ajoutée une fois (rangées 1-4 entrées, 5-8 loopers). Pads d'effets / de groupe / de mute d'entrée = miroir
-   de l'état réel.
-5. **MIDI Learn par rush** (appris dans la fenêtre Rushes, exécuté par le script MIDI Learn) + **modèle de démarrage** des
-   rushes (bouton MODELE, jamais réécrit automatiquement).
-À vérifier en priorité avec l'utilisateur : la migration de la page 4 (a RC-505, b, c, d Effets), le menu des pages,
-`l3 to g2`, `in1 mute`, le learn MIDI d'un rush (QuNeo / pédale, gate), le modèle au redémarrage, le carré A / D.
-Aucun problème ouvert connu : les anciens (Launchpad / MIDI Learn, QuNeo, Drop, BR) sont résolus.
-Suite logique proposée : le grand chantier « tout est rush » (étapes 1-4 plus bas : moteur commun exécuté par le
-Launchpad, rushes d'usine, page 1 en disposition de rushes, LED riches comme l'ancien REC rouge / orange / clignotant).
+Tout est poussé sur `nowundo-v3.27`, **rien n'a été testé dans REAPER** (bancs Python / mocks Lua seulement) : demander
+d'abord ses retours à l'utilisateur. Détails dans les sections datées du 21 nov. plus bas.
+1. **Synchro / tempo** : le **MSV3** (`NowUndo/master_synchro`) est le **seul** maître de la synchro (Host, grille de
+   sortie, Start Sync, Re-phase). **Auto-Tempo fusionné** : le MSV3 choisit les temps (AUTO / 4 / 8 / 16 / menu) et publie
+   le tempo (gmem 917-919), le **Launchpad** l'applique (`VL.autotempo_tick` : tempo, curseur calé, PLAY ; Unlock → STOP).
+   Script `nowundoautotempoembeded.lua` **supprimé** et retiré de `__startup.lua` (il réécrivait aussi la synchro Host en
+   concurrence avec le MSV3 : piste possible du « saut à chaque mesure » du 20 nov., à confirmer). Sliders natifs du MSV3
+   **cachés** ; mesures Host et tolérance Re-phase en **menus** dans son interface (fenêtre 330 × 390). `opensync.lua` =
+   simple raccourci qui ouvre la fenêtre du MSV3 (1er effet piste 10), facultatif.
+   **En attente de réponse** : MSV3 dockable → (1) docker la chaîne d'effets de la piste 10 (natif, recommandé d'abord) ou
+   (2) script « NowUndo Sync » dockable qui reprend son interface (remplacerait `opensync.lua`).
+2. **FX Router v2.11** : clic droit = Docker / Détacher, docker retenu ; `ImGui_End` seulement si visible (corrige
+   « End() too many times »).
+3. **Rushes** : liste en pages, rushes d'usine en ROM et ordonnés, **FILTRE** par page du Launchpad / par cible (ciblés,
+   all, non ciblés), clic sur « LP c1.3 » = affiche la sous-page sur le Launchpad, `*` / `*1/4` / `*2` quantisés sur le
+   cycle du looper, palette « Cible », toggle `a` = interrupteur A / D, clic droit sur un pad vide de la page 4 = nouveau
+   rush. **Scenario + Rushes fusionnés** (scénario à gauche = liste de rushes avec GO / BACK, rushes à droite).
+4. **Drop** : DROP ON / OFF qui garde **tout** depuis ON, drop **solo**, drop fidèle en Slicer.
+5. **8Waves** : gris sur tout le cadre selon Out Vol, fond teinté, **interactif** (sélection, tap de statut, Ctrl + clic
+   groupe, flèches, In / Out et grains à la souris).
+6. **JSFX V3.27** : ping-pong qui restait en reverse corrigé ; LFO **Random** + **Smooth** du Cloud ; page Cloud du Twister
+   refaite (disposition de l'utilisateur).
+7. Encore à vérifier depuis avant : migration de la page 4 (a RC-505, b, c, d Effets), `l3 to g2`, `in1 mute`, learn MIDI
+   d'un rush, modèle de démarrage des rushes, carré A / D.
+Idées proposées pas faites : recherche texte + tags perso dans les rushes ; retirer aussi `virtual_launchpad_web.lua` de
+`__startup.lua` (obsolète) ; chantiers « tout est rush » et « Quantize global » (plus bas).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
