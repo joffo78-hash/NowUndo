@@ -439,7 +439,13 @@ local function compile(text, forced, toggle, gate_off)
   for act in (text .. ","):gmatch("([^,]*),") do
     act = trim(act)
     local sync = false
-    if act:sub(-1) == "*" and #act > 1 then sync = true; act = trim(act:sub(1, -2)) end
+    -- V3.27 : * = au prochain debut de cycle du looper ; *1/4, *1/8 = prochain 1/4, 1/8 de cycle ; *2 = au 2e debut de cycle
+    local sb, sq = act:match("^(.-)%s*%*%s*([%d%./]*)$")
+    if sb and trim(sb) ~= "" then
+      sync = H._qparse(sq)
+      if not sync then errs[#errs + 1] = "[" .. act .. "] * : *, *1/4, *1/8, *2 ... attendu"; sync = 1 end
+      act = trim(sb)
+    end
     local pk, pn = act:lower():match("^([rg])%s*%(%s*(%d+)%s*%)$")
     local sc = SYNC_WORDS[(act:lower():gsub("%s+", ""))]
     local gq, gerr = H._go(act:lower())                 -- V3.27 : go lp 2 | go 4c | go t3
@@ -598,18 +604,42 @@ local function sync_info(i)
   return ph - math.floor(ph), unit, sr, locked
 end
 
--- true quand l'action armee (*) peut partir. On part juste AVANT le point (latence bloc + gmem).
+-- V3.27 : valeur du suffixe de * : "" = 1 cycle, "1/4" = 0.25, "2" = 2 cycles, "0.5" ; nil si illisible
+H._qparse = function(q)
+  if q == nil or q == "" then return 1 end
+  local a, b = q:match("^(%d+)/(%d+)$")
+  local v = a and (tonumber(a) / math.max(1, tonumber(b))) or tonumber(q)
+  if not v or v <= 0 or v > 64 then return nil end
+  return v
+end
+-- true quand l'action armee (*) peut partir : au prochain point de la grille (fraction ou nombre de cycles) du CYCLE DU
+-- LOOPER VISE (sa position dans In / Out, dans le sens ou il joue). Boucle en cours de creation (1er REC) : tout de suite.
+-- On part juste AVANT le point (latence du script + bloc audio), comme avant.
 local function sync_ready(i, op, q, t, dt)
-  if q.released == op.grp then return true end       -- meme pas, meme looper : part avec la 1re
-  local ph, unit, sr, locked = sync_info(i)
-  if not ph then return true end                       -- aucune reference : immediat (comme le REC du looper)
-  if locked == 2 and (reaper.GetPlayState() & 1) == 0 then return true end   -- Host a l'arret
-  if op.prev == nil then op.prev = ph; op.chg = t; return false end
-  if ph ~= op.prev then op.chg = t end
-  local hit = ph < op.prev - 1e-6                      -- l'horloge a boucle
-  if (1 - ph) * unit / sr <= math.max(0.012, dt * 0.75) then hit = true end
-  if t - op.chg > 0.6 then hit = true end              -- horloge figee : pas de synchro possible
-  op.prev = ph
+  if q.released == op.grp then return true end       -- meme appui, meme looper : part avec la 1re
+  local F = fb(i)
+  if not F.alive or F.len <= 0 or F.st == 1 then return true end   -- pas encore de boucle (ou 1er REC) : immediat
+  local lw = (F.lwidth > 0) and F.lwidth or F.len
+  local pos = rd(F.b + 47) * 0.01 * F.len
+  local ph = (pos - F.lstart) / lw; ph = ph - math.floor(ph)
+  if F.rev then ph = 1 - ph end                        -- en reverse le cycle entendu repart de Out
+  local qv = (type(op.sync) == "number") and op.sync or 1
+  if op.prog == nil then                               -- armement : prochain point de la grille
+    op.prog, op.prev, op.chg, op.rate = ph, ph, t, nil
+    op.goal = (math.floor(ph / qv + 1e-9) + 1) * qv
+    return false
+  end
+  local d = ph - op.prev; d = d - math.floor(d + 0.5)  -- avance depuis la derniere lecture (bouclage compris)
+  if d < 0 then d = 0 end
+  if d > 0 then
+    op.chg = t
+    local r = d / math.max(1e-3, t - (op.tl or t - 0.03))
+    op.rate = op.rate and (op.rate * 0.7 + r * 0.3) or r
+  end
+  op.prog = op.prog + d; op.prev = ph; op.tl = t
+  local lead = math.max(0.012, dt * 0.75) * (op.rate or 0)
+  local hit = op.prog >= op.goal - lead
+  if t - op.chg > 0.6 then hit = true end              -- looper arrete (horloge figee) : pas d'attente
   if hit then q.released = op.grp end
   return hit
 end
@@ -917,7 +947,7 @@ local HELP = {
   { ", mot", "cible omise = celle de l'action precedente :  l1 rec off, rev   (= l1 recoff, l1 rev)" },
   { "/", "plusieurs loopers (l1/3/6) ou plusieurs mots (l1 slicer/cloud off, l1 in/out reset)" },
   { "-", "plage de loopers (l2-4) ; signe moins d'une valeur (vol -6db, pitch -5)" },
-  { "*", "en fin d'action : ARMEE, part au prochain point de synchro  (l1 rev*)" },
+  { "*", "en fin d'action : part au prochain debut de cycle du looper  (l1 rev*) ; *1/4, *1/8 = prochain 1/4, 1/8 de cycle ; *2 = au 2e debut de cycle ; 1er REC : immediat" },
   { "off", "precise l'arret (rev off, recoff). Sans precision = ON ; deja dans l'etat = rien" },
   { "a  à  =  :", "mots de liaison ignores  (l1 in 0.25 out à 0.5) ; a juste apres la cible (ou seul dans un rush) = dub A" },
   { ".", "separateur decimal (0.25) : la virgule separe les actions" },
@@ -1619,8 +1649,8 @@ local function mac_check(m)
   if trim(m.text) == "" then m.err = "rush vide"; return end
   if m.toggle then   -- toggle "a" = interrupteur A / D : ecrit "d" (le pad affiche d et s'allume en D, comme "d")
     local head, rest = m.text:match("^([^,]*)(.*)$")
-    local h2 = head:gsub("^(%s*)a(%s*%*?%s*)$", "%1d%2")
-    if h2 == head then h2 = head:gsub("^(%s*(%S+)%s+)a(%s*%*?%s*)$", function(p, w, x) if is_tgt(w:lower()) then return p .. "d" .. x end end) end
+    local h2 = head:gsub("^(%s*)a(%s*%*?[%d%./]*%s*)$", "%1d%2")
+    if h2 == head then h2 = head:gsub("^(%s*(%S+)%s+)a(%s*%*?[%d%./]*%s*)$", function(p, w, x) if is_tgt(w:lower()) then return p .. "d" .. x end end) end
     if h2 ~= head then m.text = h2 .. rest end
   end
   local _, errs = compile(m.text, { 1 }, m.toggle)
@@ -1934,13 +1964,13 @@ function ED.mod_last(kind)
   local head, seg = ED.text:match("^(.*,)%s*(.-)%s*$")
   if not seg then head, seg = "", trim(ED.text) end
   if seg == "" then msg = "Ajoute d'abord une action."; msg_err = true; return end
-  local star = seg:sub(-1) == "*"
-  if star then seg = trim(seg:sub(1, -2)) end
-  if kind == "*" then star = not star
+  local suf = seg:match("(%*[%d%./]*)$")                     -- *, *1/4, *2 ... garde tel quel par OFF
+  if suf then seg = trim(seg:sub(1, -#suf - 1)) end
+  if kind == "*" then suf = (not suf) and "*" or nil
   elseif seg:match("%soff$") then seg = trim(seg:sub(1, -5))
   elseif seg:match("^%a+off$") and split_key(seg) then seg = seg:sub(1, -4)
   else seg = seg .. " off" end
-  ED.text = head .. ((head ~= "") and " " or "") .. seg .. (star and "*" or "")
+  ED.text = head .. ((head ~= "") and " " or "") .. seg .. (suf or "")
   ED.cur = #ED.text
 end
 function ED.pick(word, as_off)
@@ -2371,7 +2401,7 @@ local function mac_active(m, targets)
     return true
   end
   local t = {}
-  for w in act:gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
+  for w in act:gmatch("%S+") do t[#t + 1] = (w:gsub("%*[%d%./]*$", "")) end
   if #t == 0 then return false end
   if is_tgt(t[1]) and #t > 1 then                    -- V3.27 : cible ecrite dans le rush (l2, g1, all...) : c'est elle qu'on verifie
     local tt = parse_target(t[1]); if not tt then return false end
@@ -2423,7 +2453,7 @@ H._probe_ok = function(m)
   local s = H._norm(m.text):lower():gsub("à", " "):gsub("[=:]", " ")
   if trim(s:match("^[^,]*") or ""):match("%f[%a]to%s+g%s*%(?%s*%d+%s*%)?$") then return true end   -- V3.27 : l3 to g2
   local t = {}
-  for w in (s:match("^[^,]*") or ""):gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
+  for w in (s:match("^[^,]*") or ""):gmatch("%S+") do t[#t + 1] = (w:gsub("%*[%d%./]*$", "")) end
   if t[1] and is_tgt(t[1]) and #t > 1 then table.remove(t, 1) end   -- V3.27 : cible ecrite dans le rush
   local key = t[1] and split_key(t[1]:match("[^/]+") or "")
   if not key then return false end

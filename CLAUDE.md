@@ -308,6 +308,15 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
 
+## 21 nov. : `*` quantise sur le cycle du looper (demande de l'utilisateur)
+
+- `*` = prochain début de cycle **du looper visé** (sa position +47 dans In/Out, sens de lecture compris : en reverse le
+  cycle entendu repart de Out) ; `*1/4`, `*1/8` = prochain 1/4, 1/8 de cycle ; `*2` = 2e début de cycle (`*0.5` permis,
+  `H._qparse`) ; boucle en cours de création (longueur 0 ou état 1 = 1er REC) : **immédiat** (sortie de REC comprise).
+  Avant : point de synchro de l'horloge maître + grille globale gmem 99. `sync_ready` mesure l'avance (cycles/s) et part
+  un peu avant le point (latence script) ; looper arrêté (position figée 0,6 s) = part quand même. Éditeur : OFF / `*`
+  gardent le suffixe. Test `tools/tstar.lua`.
+
 ## 21 nov. : rushes d'usine = ROM + ordre de la liste
 
 - Usine (64 RC-505 + 64 Effets, `H._fdefs`) : **lecture seule** (`m.rom`, 10e champ `R` de la ligne `M`, le Launchpad
