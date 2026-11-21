@@ -5,11 +5,11 @@ slider1:host_sync_main=0<0,1,1>-Host Sync (Main)
 slider2:host_sync_chorus=0<0,1,1>-Host Sync (Chorus)
 slider3:host_sync_bridge=0<0,1,1>-Host Sync (Bridge)
 slider4:host_sync_meas=1<1,16,1>-Host Sync Measures (Reaper)
-slider5:ui_scale=100<25,150,25>UI Zoom (%)
-slider6:sync_grid=0<0,4,1{Bar,Beat,1/8,Triplet,1/16}>Exit Grid (Loop Sync)
-slider7:sync_start=0<0,1,1{Off,On}>Start Sync (wait grid before REC)
-slider8:rephase_on=1<0,1,1{Off,On}>Re-phase Host loops
-slider9:rephase_ms=2<0.5,20,0.5>Re-phase tolerance (ms)
+slider5:ui_scale=100<25,150,25>-UI Zoom (%)
+slider6:sync_grid=0<0,4,1{Bar,Beat,1/8,Triplet,1/16}>-Exit Grid (Loop Sync)
+slider7:sync_start=0<0,1,1{Off,On}>-Start Sync (wait grid before REC)
+slider8:rephase_on=1<0,1,1{Off,On}>-Re-phase Host loops
+slider9:rephase_ms=2<0.5,20,0.5>-Re-phase tolerance (ms)
 slider10:at_force=0<0,64,1>-Auto-Tempo : temps forces (0 = Auto)
 
 @init
@@ -26,6 +26,7 @@ at_c = 200;
 at_c[0] = 1; at_c[1] = 2; at_c[2] = 3; at_c[3] = 4; at_c[4] = 5; at_c[5] = 6; at_c[6] = 7; at_c[7] = 8;
 at_c[8] = 12; at_c[9] = 16; at_c[10] = 24; at_c[11] = 32; at_c[12] = 48; at_c[13] = 64;
 at_mv = 240;
+mb_tv = 280;
 
 // Réinitialise à 100 si la valeur en mémoire est hors-bornes (notamment l'ancien 1)
 (slider5 < 25 || slider5 > 150) ? slider5 = 100;
@@ -192,7 +193,7 @@ at_compute();
 
 @sample
 
-@gfx 330 360
+@gfx 330 390
 gfx_clear = 35 + 12 * 256 + 15 * 65536;
 
 (slider5 < 25 || slider5 > 150) ? slider5 = 100;
@@ -463,14 +464,53 @@ mouse_click && rhov_ ? (
     gmem[93] = rephase_on;
 );
 
+// --- REGLAGES (avant : sliders natifs, maintenant caches) : mesures du Host Sync | tolerance du Re-phase (menus) ---
+function menu_btn(x, y, w, h, txt) local(hov) (
+    hov = mx >= x && mx <= x + w && my >= y && my <= y + h;
+    hov ? gfx_set(0.28, 0.35, 0.48, 1) : gfx_set(0.20, 0.25, 0.35, 1);
+    draw_rect(x, y, w, h);
+    gfx_set(1, 1, 1, 0.2); draw_frame(x, y, w, h);
+    gfx_setfont(2, "Arial", f_ui_sz, 'b');
+    gfx_set(1, 1, 1, 0.9);
+    set_pos(x + 8, y + 6);
+    gfx_drawstr(txt);
+    mouse_click && hov;
+);
+sprintf(#mb_t, "HOST : %d MESURE%s  v", slider4, slider4 > 1 ? "S" : "");
+menu_btn(10, 298, 150, 22, #mb_t) ? (
+    #mb_m = ""; mb_k = 1;
+    loop(16,
+        sprintf(#mb_i, "%s%s%d mesure%s", mb_k > 1 ? "|" : "", floor(slider4 + 0.5) == mb_k ? "!" : "", mb_k, mb_k > 1 ? "s" : "");
+        strcat(#mb_m, #mb_i);
+        mb_k += 1;
+    );
+    set_pos(10, 320);
+    mb_p = gfx_showmenu(#mb_m);
+    mb_p >= 1 ? ( slider4 = mb_p; sliderchange(8); slider_automate(8); );
+);
+sprintf(#mb_t, "TOLERANCE RE-PHASE : %.1f ms  v", slider9);
+menu_btn(166, 298, 154, 22, #mb_t) ? (
+    #mb_m = ""; mb_k = 0;
+    loop(10,
+        mb_v = mb_k == 0 ? 0.5 : (mb_k == 1 ? 1 : (mb_k == 2 ? 1.5 : (mb_k == 3 ? 2 : (mb_k == 4 ? 3 : (mb_k == 5 ? 4 : (mb_k == 6 ? 5 : (mb_k == 7 ? 8 : (mb_k == 8 ? 12 : 20))))))));
+        mb_tv[mb_k] = mb_v;
+        sprintf(#mb_i, "%s%s%.1f ms", mb_k > 0 ? "|" : "", abs(slider9 - mb_v) < 0.01 ? "!" : "", mb_v);
+        strcat(#mb_m, #mb_i);
+        mb_k += 1;
+    );
+    set_pos(166, 320);
+    mb_p = gfx_showmenu(#mb_m);
+    mb_p >= 1 ? ( slider9 = mb_tv[mb_p - 1]; rephase_ms = slider9; sliderchange(256); slider_automate(256); gmem[92] = slider9; );
+);
+
 // --- AUTO-TEMPO : temps de la boucle maitre (applique a REAPER par le Launchpad quand AUTO-SYNC est ON) ---
 gfx_setfont(4, "Arial", f_ui_sz);
 gfx_set(0.9, 0.8, 0.2, 1);
-set_pos(12, 300);
+set_pos(12, 330);
 gfx_drawstr("Auto-Tempo (AUTO-SYNC ON) : temps de la boucle maitre");
 at_i = 0;
 loop(5,
-    at_x = 10 + at_i * 62; at_y = 314; at_w = 58; at_h = 22;
+    at_x = 10 + at_i * 62; at_y = 344; at_w = 58; at_h = 22;
     at_v = at_i == 0 ? 0 : (at_i == 1 ? at_mb : (at_i == 2 ? at_mb * 2 : at_mb * 4));
     at_other = slider10 >= 1 && slider10 != at_mb && slider10 != at_mb * 2 && slider10 != at_mb * 4;
     at_on = at_i == 4 ? at_other : (floor(slider10 + 0.5) == at_v);
@@ -508,7 +548,7 @@ loop(5,
     at_i += 1;
 );
 gfx_setfont(4, "Arial", f_ui_sz);
-set_pos(12, 342);
+set_pos(12, 372);
 at_dur > 0.001 ? (
     gfx_set(0.95, 0.9, 0.4, 1);
     sprintf(#at_t, "Boucle %.3f s -> %d temps = %.2f BPM   (REAPER %.2f)", at_dur, at_b, at_bpm, tempo);
