@@ -4002,7 +4002,13 @@ function VL.dash_publish(force, t)
     for a = 1, NLOOP do if a ~= i and S.routing.l_l[a][i] then l = l | (1 << (a - 1)) end end
     lm[i] = l
   end
-  local sig = table.concat(gm, ",") .. "|" .. table.concat(im, ",") .. "|" .. table.concat(lm, ",") .. "|" .. table.concat(fm, ",")
+  local xm = {}                            -- V3.27 : masque des slots FX actifs de chaque ENTREE (gmem 6040+n, rushes "in1 fx 2")
+  for k = 1, NIN do
+    local f = 0
+    for sl = 1, NSLOT do if S.fx.input[k] and S.fx.input[k][sl] then f = f | (1 << (sl - 1)) end end
+    xm[k] = f
+  end
+  local sig = table.concat(gm, ",") .. "|" .. table.concat(im, ",") .. "|" .. table.concat(lm, ",") .. "|" .. table.concat(fm, ",") .. "|" .. table.concat(xm, ",")
   if not force and sig == DASH.last_sig and (t - DASH.last_t) < 1.0 then return end   -- changement, ou rafraichissement 1 Hz
   DASH.last_sig, DASH.last_t = sig, t
   reaper.gmem_attach("nowundo_sync")
@@ -4012,6 +4018,7 @@ function VL.dash_publish(force, t)
     reaper.gmem_write(DASH.base + 20 + i, lm[i])
     reaper.gmem_write(DASH.base + 30 + i, fm[i])
   end
+  for k = 1, NIN do reaper.gmem_write(DASH.base + 40 + k, xm[k]) end
 end
 
 -- Pedal Board : commandes de selection de looper (ExtState "NowUndo_Pedal/lp_cmd" = ts \t nom \t arg)

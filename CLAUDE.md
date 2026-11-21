@@ -41,7 +41,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
 (sert aussi d'enregistrement au drop), **drop de groupe (V3.25)** : `300 + k*10` accusé du looper k (+0 jeton, +1 horloge
 du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 abandon), `381` cible, `393` départ capture,
-`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Tableau de bord (Launchpad)** : `6000+i` groupe, `6010+i` / `6020+i` masques des sources, `6030+i` masque des slots FX actifs du looper i (V3.26). **Nouveau REC (V3.25)** : `398` heure, `399` id.
+`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Tableau de bord (Launchpad)** : `6000+i` groupe, `6010+i` / `6020+i` masques des sources, `6030+i` masque des slots FX actifs du looper i (V3.26), `6040+n` masque des slots FX actifs de l'entrée n (V3.27). **Nouveau REC (V3.25)** : `398` heure, `399` id.
 
 **Commandes JSFX (+48)** : 1 rec/dub, 2 clear, 3 stop/play, 4 reverse, 5 ping-pong, 6 slicer, 7 cloud, 8 link,
 9 replace, 10 auto-replace, 11 clear full, 12 part, 13 multiply, 14 undo, 15 redo, 16 restart, 17 re-rec, 18 one-shot,
@@ -297,8 +297,13 @@ nouvelles fonctionnalités, et **demander des captures / messages d'erreur** ava
   **`go t3`** (Twister) → `lppage_` / `p4page_` / `twpage_` (`H._go`). Palette « Groupes / pages ».
 - REC / Re-Rec d'un rush : heure de l'appui du pad écrite en gmem 950/951 (comme le Launchpad) → REC calé sur l'appui
   aussi via les rushes (`run_macro(..., press_t)`, pas pour `*`).
+- **Effets en rushes** : `l1 fx 2` = `l1 e2` (`fx(2)` aussi, `H._norm`) ; **entrées** `in1` / `i1` / `in2-4` / `in(1/3)`
+  (codées 100 + n dans les cibles, seulement `fx` / `e` dessus) → `fxin_<n>_<slot>_<on|off>`. Page **« Effets »** créée
+  une fois en dernière page (`H._fxpage`, ExtState persistant `NowUndo_Macros/fx_page` = 1) : rangées 1-4 = FX 1-4 de
+  IN1-8, rangées 5-8 = FX 1-4 de L1-8, en toggle. Rushes toggle **miroir** (`H._mirror` : 1re action = effet ou `to g`) :
+  pad allumé = état réel (masques 6030 / 6040, groupe 6000), un appui inverse l'état réel (pas la pile).
 - Limites connues : LED des pads RC-505 = allumé / éteint (plus de rouge / orange / clignotant du REC) ; Restart n'est plus
-  en gate ; effets des **entrées** (ancienne couche Effects, rangées 1-4) : plus de pad (FX Router + D5-D8, ou web).
+  en gate ; effets des entrées : revenus en rushes (`in1 fx 2`, page Effets).
 - Tests : mocks lupa (`tools/trush_tgt.lua` + scénario pages / commandes) ; non testé dans REAPER.
 
 ## 21 nov. : cibles dans les rushes (préparation du chantier « tout est rush »)

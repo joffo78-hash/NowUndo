@@ -357,8 +357,16 @@ end
 
 -- CIBLE : all | l1 | l1/3/6 | l2-4 | l(1/3) | g2 | g1/3 | g(2) | l1/g2 ...  (V3.27 : groupes = gmem 6000+i, lus a l'execution)
 -- is_tgt : le mot est-il une cible ?  ("g(2)" SEUL dans une action reste le rappel du preset de groupe, traite avant)
+-- V3.27 : entrees in1..in8 (ou i1) : seulement pour les effets (fx 1..4 / e1..e4), codees 100 + n dans la liste des cibles
 local function is_tgt(w)
   return w == "all" or w == "tous" or w == "*" or w:match("^l?%d") ~= nil or w:match("^[lg]%(") ~= nil or w:match("^g%d") ~= nil
+      or w:match("^in?%d") ~= nil or w:match("^in?%(") ~= nil
+end
+H._norm = function(text)                  -- e(2) = e2 ; V3.27 : fx 2 / fx(2) = e2
+  text = text:gsub("%f[%a]([eE])%s*%(%s*([1-4])%s*%)", "%1%2")
+  text = text:gsub("%f[%a][fF][xX]%s*%(%s*([1-4])%s*%)", "e%1")
+  text = text:gsub("%f[%a][fF][xX]%s*([1-4])%f[%D]", "e%1")
+  return text
 end
 local function parse_target(s)
   if s == "all" or s == "tous" or s == "*" then
@@ -367,7 +375,9 @@ local function parse_target(s)
   s = s:gsub("[%(%)]", "")
   local t, pre, grp, seen = {}, "l", false, {}
   for piece in s:gmatch("[^/]+") do
-    local p, rest = piece:match("^([lg]?)(.*)$")
+    local p, rest = piece:match("^(in)(%d.*)$")
+    if not p then p, rest = piece:match("^([lgi]?)(.*)$") end
+    if p == "i" then p = "in" end
     if p ~= "" then pre = p end
     local a, b = rest:match("^(%d+)%-(%d+)$")
     if not a and rest:match("^%d+$") then a, b = rest, rest end
@@ -376,6 +386,9 @@ local function parse_target(s)
       if pre == "g" then
         grp = true
         for i = 1, NLOOP do if rd(6000 + i) == n and not seen[i] then seen[i] = true; t[#t + 1] = i end end
+      elseif pre == "in" then
+        if n < 1 or n > 8 then return nil, "entree " .. n .. " inexistante (in1-in8)" end
+        if not seen[100 + n] then seen[100 + n] = true; t[#t + 1] = 100 + n end
       elseif not seen[n] then
         if n < 1 or n > NLOOP then return nil, "looper " .. n .. " inexistant (1-" .. NLOOP .. ")" end
         seen[n] = true; t[#t + 1] = n
@@ -384,7 +397,7 @@ local function parse_target(s)
   end
   if #t == 0 and not grp then return nil, "cible manquante" end
   for _, i in ipairs(t) do
-    if i < 1 or i > NLOOP then return nil, "looper " .. i .. " inexistant (1-" .. NLOOP .. ")" end
+    if (i < 1 or i > NLOOP) and i <= 100 then return nil, "looper " .. i .. " inexistant (1-" .. NLOOP .. ")" end
   end
   return t
 end
@@ -422,7 +435,7 @@ local function compile(text, forced, toggle, gate_off)
   tmode = toggle and true or false
   H._omode = gate_off and true or false     -- macro GATE au relachement : chaque action est defaite
   text = (text:gsub("//.*$", ""))
-  text = (text:gsub("%f[%a]([eE])%s*%(%s*([1-4])%s*%)", "%1%2"))   -- e(2) = e2
+  text = H._norm(text)                                             -- e(2) = e2, fx 2 = e2
   for act in (text .. ","):gmatch("([^,]*),") do
     act = trim(act)
     local sync = false
@@ -512,6 +525,7 @@ local function compile(text, forced, toggle, gate_off)
             if not ops then errs[#errs + 1] = "[" .. act .. "] " .. k .. " : " .. err; ok = false; break end
             for _, i in ipairs(targets) do
               for _, op in ipairs(ops) do
+                if i > 100 and op.glob ~= "fx" then errs[#errs + 1] = "[" .. act .. "] sur une entree (in" .. (i - 100) .. ") : seulement fx 1..4"; ok = false; break end
                 if not op.all then items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, glob = op.glob, slot = op.slot, want = op.want, key = k .. (op.slot and ("#" .. op.slot) or "") } end
               end
             end
@@ -686,7 +700,7 @@ end
 local function fire_glob(it)
   local name
   if it.glob == "fx" then
-    name = string.format("fx_%d_%d_%s", it.i, it.slot, it.want == nil and "tog" or (it.want and "on" or "off"))
+    name = string.format(it.i > 100 and "fxin_%d_%d_%s" or "fx_%d_%d_%s", it.i > 100 and it.i - 100 or it.i, it.slot, it.want == nil and "tog" or (it.want and "on" or "off"))
   elseif it.glob == "sync" then
     name = "sync_" .. (it.parts_all and "all_" or "") .. (it.on and "on" or "off")
   elseif it.qname then
@@ -900,6 +914,7 @@ local HELP = {
   { ".", "separateur decimal (0.25) : la virgule separe les actions" },
   { "//", "commentaire jusqu'a la fin de la ligne" },
   { "R(n)  G(n)", "rappelle le preset de ROUTING (R) / de GROUPE (G) n°1-8 de la page principale du Launchpad  (r(2), g(3))" },
+  { "in1 fx 2", "effet 2 de l'entree 1 (in1-in8, ou i1) ; l1 fx 2 = l1 e2 = effet 2 du looper 1. Sur une entree : seulement fx" },
   { "l3 to g2", "met L3 dans le groupe 2 (il quitte son ancien groupe) ; to g0 = sans groupe. En toggle / gate : OFF = sort du groupe" },
   { "go lp 2  go 4c  go t3", "appelle la page 2 du Launchpad | la page de rushes c (page 4) | la page 3 du Twister" },
   { "double-clic", "sur un pas de la liste : l'editer   (GO / Espace : l'executer)" },
@@ -1660,6 +1675,24 @@ H._rc505 = function()
     end
   end
 end
+-- V3.27 : ancienne couche Effects en rushes (ajoutee une fois, en derniere page) : rangees 1-4 = FX 1-4 des entrees
+-- IN1..IN8 (colonnes), rangees 5-8 = FX 1-4 des loopers L1..L8 ; toggle, pad allume = effet actif
+H._fxpage = function()
+  if #H._pages >= H._PMAX then return end
+  H._pages[#H._pages + 1] = "Effets"
+  local p0 = (#H._pages - 1) * 64
+  for r = 1, 8 do
+    for col = 1, 8 do
+      local inp, sl = r <= 4, (r - 1) % 4 + 1
+      local id = mac_next_id; mac_next_id = id + 1
+      local m = { id = id, name = (inp and "IN" or "L") .. col .. " FX" .. sl, color = inp and 0x99FF66 or 0xFFFF99,
+                  text = (inp and "in" or "l") .. col .. " fx " .. sl, toggle = true }
+      mac_check(m)
+      macros[#macros + 1] = m
+      layout[p0 + (r - 1) * 8 + col] = id
+    end
+  end
+end
 local function mac_save()
   local txt = mac_serialize()
   reaper.SetExtState(MAC_EXT, "set", txt, true)
@@ -1689,6 +1722,7 @@ do                                                  -- chargement au demarrage
   else
     mac_apply(list, lay, pages)
   end
+  if reaper.GetExtState(MAC_EXT, "fx_page") ~= "1" then H._fxpage(); reaper.SetExtState(MAC_EXT, "fx_page", "1", true) end
   mac_save()                                        -- publie tout de suite pour le Launchpad
 end
 mac_count = function() return #macros end
@@ -2216,6 +2250,7 @@ local function run_macro(m, targets, gst, press_t)   -- gst : "on" / "off" pour 
     local _, e = H._live_find(m.id)
     local on = not e
     if e and H._probe_ok and H._probe_ok(m) and not H._mac_active(m, e.targets) then on = true end
+    if H._mirror and H._mirror(m) then on = not H._mac_active(m, targets) end   -- V3.27 : effet / groupe : suit l'etat reel
     items = H._rush_live(m, (e and not on) and e.targets or targets, on)
   else
     items = compile(m.text, targets, false)
@@ -2233,7 +2268,7 @@ local function run_macro(m, targets, gst, press_t)   -- gst : "on" / "off" pour 
   end
   local tl_, tseen = {}, {}
   for _, it in ipairs(items) do if it.i and not tseen[it.i] then tseen[it.i] = true; tl_[#tl_ + 1] = it.i end end   -- V3.27 : cibles reelles
-  table.sort(tl_); for n, i in ipairs(tl_) do tl_[n] = "L" .. i end
+  table.sort(tl_); for n, i in ipairs(tl_) do tl_[n] = i > 100 and ("IN" .. (i - 100)) or ("L" .. i) end
   msg = "Rush '" .. mac_label(m) .. "' -> " .. (m.all and "ALL" or table.concat(tl_, ",")) .. (m.toggle and " [toggle]" or "") .. (m.gate and " [gate]" or "")
         .. (#dead > 0 and ("  (looper absent : " .. table.concat(dead, ",") .. ")") or "")
         .. (nsync > 0 and ("  -  " .. nsync .. " action(s) * en attente du point de synchro") or "")
@@ -2258,7 +2293,7 @@ local PROBE = {
 }
 local function mac_active(m, targets)
   if not m.toggle or m.err then return false end
-  local s = m.text:lower():gsub("à", " "):gsub("[=:]", " ")
+  local s = H._norm(m.text):lower():gsub("à", " "):gsub("[=:]", " ")
   local act = s:match("^[^,]*") or ""
   local tgs, tgn = trim(act):match("^(.-)%s*%f[%a]to%s+g%s*%(?%s*(%d+)%s*%)?$")   -- V3.27 : "l3 to g2" allume = L3 dans le groupe 2
   if tgn then
@@ -2276,6 +2311,16 @@ local function mac_active(m, targets)
   end
   local key = split_key(t[1]:match("[^/]+") or "")
   if not key then return false end
+  local fsl = tonumber(key:match("^e([1-4])$"))         -- V3.27 : effet allume = slot actif (gmem 6030+i loopers, 6040+n entrees)
+  if fsl then
+    if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end
+    local want = not (t[2] == "off" or (t[1]:match("off$") ~= nil))
+    for _, i in ipairs(targets) do
+      local mask = (i > 100) and rd(6040 + i - 100) or rd(6030 + i)
+      if ((math.floor(mask) >> (fsl - 1)) & 1 == 1) ~= want then return false end
+    end
+    return #targets > 0
+  end
   local x, kind = nil, nil
   if t[2] then x, kind = num(t[2]) end
   local any = false
@@ -2302,16 +2347,27 @@ local function mac_active(m, targets)
 end
 H._mac_active = mac_active
 H._probe_ok = function(m)
-  local s = m.text:lower():gsub("à", " "):gsub("[=:]", " ")
+  local s = H._norm(m.text):lower():gsub("à", " "):gsub("[=:]", " ")
   if trim(s:match("^[^,]*") or ""):match("%f[%a]to%s+g%s*%(?%s*%d+%s*%)?$") then return true end   -- V3.27 : l3 to g2
   local t = {}
   for w in (s:match("^[^,]*") or ""):gmatch("%S+") do t[#t + 1] = (w:gsub("%*$", "")) end
   if t[1] and is_tgt(t[1]) and #t > 1 then table.remove(t, 1) end   -- V3.27 : cible ecrite dans le rush
   local key = t[1] and split_key(t[1]:match("[^/]+") or "")
   if not key then return false end
-  if PROBE[key] then return true end
+  if PROBE[key] or key:match("^e[1-4]$") then return true end
   local x = t[2] and num(t[2])
   return x ~= nil and (key == "in" or key == "out" or (VPID and VPID[key] ~= nil))
+end
+-- V3.27 : rushes toggle "miroir" (1re action = effet e1..e4 / fx n, ou "to g") : le pad suit l'etat reel (effet actif,
+-- looper membre), meme change ailleurs (Launchpad, web, FX Router), comme l'ancienne couche Effects / la matrice de groupes
+H._mirror = function(m)
+  if not m.toggle or m.err then return false end
+  local a = trim((H._norm(m.text):lower():match("^[^,]*") or ""))
+  if a:match("%f[%a]to%s+g%s*%(?%s*%d+%s*%)?$") then return true end
+  local w = {}
+  for x in a:gmatch("%S+") do w[#w + 1] = x end
+  if w[1] and is_tgt(w[1]) then table.remove(w, 1) end
+  return w[1] ~= nil and w[1]:match("^e[1-4]") ~= nil
 end
 local mac_on_t, mac_on_s = 0, nil
 
@@ -2324,7 +2380,8 @@ local function mac_poll()
     for _, m in ipairs(macros) do
       if m.toggle then
         local _, e = H._live_find(m.id)
-        if e and (not H._probe_ok(m) or mac_active(m, e.targets)) then ids[#ids + 1] = m.id end
+        if H._mirror(m) then if mac_active(m, tg) then ids[#ids + 1] = m.id end
+        elseif e and (not H._probe_ok(m) or mac_active(m, e.targets)) then ids[#ids + 1] = m.id end
       end
     end
     local s = table.concat(ids, ",")
