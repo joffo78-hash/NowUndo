@@ -1777,8 +1777,9 @@ function dr_commit_begin(tok) (
   // un ancien script Launchpad : on ne fait rien.
   0;
 );
-function dr_install() local(t, idx, k, i, f) (
+function dr_install() local(t, idx, k, i, f, lc, d) (
   idx = active_part - 1;
+  lc = dr_L;                                           // duree d'un tour (avant de passer a K tours)
   // V3.27 : tout ce qui a ete capture depuis DROP ON est garde : n = 0 .. X-1 = amorce, n = X .. K+X-1 = la boucle (K = tours
   // entiers), rangee a l'index (debut + n) mod K -> chaque index = son instant du cycle (calage sur l'horloge conserve).
   // Repliage : les index >= K reviennent au debut ; la fin (n = K .. K+X-1) glisse vers l'amorce (raccord fondu).
@@ -1786,7 +1787,9 @@ function dr_install() local(t, idx, k, i, f) (
   i = 0; loop(dr_js, dr_nl[i] = dr_nl[dr_L + i]; dr_nr[i] = dr_nr[dr_L + i]; i += 1; );
   k = 0; loop(dr_X, i = dr_js + k; f = (k + 1) / (dr_X + 1);
     dr_nl[i] = dr_nl[dr_L + i] * (1 - f) + dr_nl[i] * f; dr_nr[i] = dr_nr[dr_L + i] * (1 - f) + dr_nr[i] * f; k += 1; );
-  t = dr_js + dr_cp - 1; t -= dr_L * floor(t / dr_L);   // lecture a plat : on entend pos + 1
+  // position : le tour vient de l'index de la capture, l'instant exact de l'horloge du looper (non arrondi, comme avant)
+  t = dr_js + dr_cp - 1; d = (dr_t0 + dr_cnt - 1) - t; d -= lc * floor(d / lc + 0.5); t += d;
+  t -= dr_L * floor(t / dr_L);                         // lecture a plat : on entend pos + 1
   dub_flush();
   br_on ? do_beat_repeat(0);
   switch_history_slot(dr_ni); history_head = dr_ni; hist_len[dr_ni] = dr_L;
