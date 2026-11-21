@@ -2265,8 +2265,9 @@ PAD_LABEL[1]["5,2"] = "SYNC/UNSYNC"; PAD_RGB[1]["5,2"] = 0x40C0FF   -- court = p
 -- DROP de groupe (remplace QUANTISE IN/OUT ; pad final B2 apres la permutation [LAYOUT]) : le groupe actif est mixe dans
 -- sa boucle la plus longue (voir VL.drop_group). Allume pendant le calcul. Quantise reste dispo par MIDI Learn / Twister.
 bind(1, 5, 7, fn(function() if pedal_capture_action("drop_group") then return end VL.drop_group() end,
-                 function() return VL.DROP.run and "on" or "idle" end))
-PAD_LABEL[1]["5,7"] = "DROP (groupe : mixdown dans la boucle la plus longue ; sans groupe : le looper seul, a plat)"; PAD_RGB[1]["5,7"] = 0xFF66CC
+                 function() local R = VL.DROP.run; return R and ((R.phase == "cap" and not R.exit) and "armed" or "on") or "idle" end),
+               fn(function() VL.drop_cancel() end))   -- V3.27 : appui long = annuler le drop en cours
+PAD_LABEL[1]["5,7"] = "DROP : 1er appui = capture, 2e = bascule au prochain cycle, long = annuler (groupe ou looper seul)"; PAD_RGB[1]["5,7"] = 0xFF66CC
 bind(1, 5, 8, act("full_loop"))
 -- Miroirs FX : helpers (les binds sont UNIQUEMENT sur D5-D8 = 5,5..5,8 plus bas).
 -- Maintenir PAGE 1 (5,9) puis appuyer sur D5-D8 pour changer le mode Toggle/Gate du slot.
@@ -2463,6 +2464,7 @@ end
 -- duree entendue d'une boucle (samples) : fenetre In/Out / vitesse de lecture
 function VL.drop_period(i)
   local L = S.loopers[i] or {}
+  if L.slicer then return L.length or 0 end   -- V3.27 : en Slicer, le JSFX capture un cycle de son horloge (= la longueur)
   local w = (L.loop_width or 0) > 0 and L.loop_width or (L.length or 0)
   local r = L.speed or 1
   if L.link or L.slicer or L.cloud then r = r * 2 ^ ((L.pitch or 0) / 12) end
@@ -2471,7 +2473,18 @@ end
 function VL.drop_group()
   local D = VL.DROP
   if VL.mirror_mode or not (reaper and reaper.gmem_attach and reaper.gmem_read and reaper.gmem_write) then return end
-  if D.run then VL.drop_note("deja en cours") return end
+  -- V3.27 : DROP ON / OFF. 1er appui = la capture demarre (elle tourne en continu sur un cycle) ; 2e appui = sortie au
+  -- prochain debut de cycle (la cible bascule seule, a l'echantillon pres) ; appui long = annuler (VL.drop_cancel).
+  if D.run then
+    local R = D.run
+    if R.phase == "cap" and not R.exit then
+      reaper.gmem_attach(GMEM_NAME)
+      reaper.gmem_write(D.BASE + 80, D.tok + 0.25)
+      R.exit = true
+      VL.drop_note("DROP OFF : bascule au prochain debut de cycle du looper %d", R.tgt)
+    else VL.drop_note(R.exit and "bascule en attente du debut de cycle" or "capture en preparation") end
+    return
+  end
   local g = S.sel_group or 0
   if VL.group_inhibit and VL.group_inhibit() then g = 0 end
   -- V3.27 : sans groupe = DROP SOLO du looper selectionne (il enregistre ce qu'il fait entendre : vitesse, reverse, slicer,
@@ -2525,6 +2538,7 @@ function VL.drop_group()
   D.last_tok = D.tok
   reaper.gmem_attach(GMEM_NAME)
   reaper.gmem_write(D.BASE + 80, 0); reaper.gmem_write(D.BASE + 94, 0)
+  reaper.gmem_write(D.BASE + 97, 0); reaper.gmem_write(D.BASE + 92, 0); reaper.gmem_write(D.BASE + 90, 0)   -- V3.27 : compteurs de la capture
   reaper.gmem_write(D.BASE + 81, tgt)
   reaper.gmem_write(D.BASE + 95, tv > 0.01 and 1 / tv or 1)
   reaper.gmem_write(D.BASE + 96, pdc)
@@ -2543,40 +2557,31 @@ function VL.drop_tick(t)
     local all = (a == tok)
     for _, i in ipairs(R.src) do if VL.drop_rd(i, 0) ~= tok then all = false end end
     if not all then
-      if t - R.t0 > 1.5 then VL.drop_abort(R, "un looper ne repond pas (JSFX V3.25 charge partout ?)") end
+      if t - R.t0 > 1.5 then VL.drop_abort(R, "un looper ne repond pas (JSFX V3.27 charge partout ?)") end
       return
     end
-    if t - R.t0 < 0.15 then return end                       -- laisse aux sends le temps d'etre actifs
-    local sr = reaper.gmem_read(1000 + (R.tgt - 1) * 600 + ((S.loopers[R.tgt].part or 1) - 1) * 200 + 186) or 0
-    if sr < 8000 then sr = 48000 end
-    R.limit = t + VL.drop_rd(R.tgt, 5) / sr + 3
+    if #R.src > 0 and t - R.t0 < 0.15 then return end        -- laisse aux sends le temps d'etre actifs
     reaper.gmem_write(D.BASE + 93, tok)
-    R.phase = "cap"
+    R.phase = "cap"; R.t1 = t
+    VL.drop_note("DROP ON : capture du looper %d en cours (DROP a nouveau = bascule au prochain cycle, appui long = annuler)", R.tgt)
     return
   end
   if R.phase == "cap" then
-    local c = reaper.gmem_read(D.BASE + 94) or 0
-    if c == tok then
-      gmem_write_cmd(R.tgt, 36, tok); R.phase = "copy"; R.t1 = t
-    elseif c == tok + 0.75 then VL.drop_abort(R, "la capture a refuse le passage")
-    elseif t > R.limit then VL.drop_abort(R, "capture trop longue : NU_DropCapture ne tourne pas sur la piste ?") end
-    return
-  end
-  if R.phase == "copy" then
+    if (reaper.gmem_read(D.BASE + 94) or 0) == tok + 0.75 then VL.drop_abort(R, "la capture a refuse le cycle") return end
     local a = VL.drop_rd(R.tgt, 0)
-    if a == tok + 0.25 then
-      -- les effets de la cible sont dans l'enregistrement : on les coupe AVANT le signal de bascule (meme instant)
-      for slot = 1, NSLOT do
-        if S.fx.looper[R.tgt][slot] then VL.set_fx("looper", R.tgt, slot, false) end
+    if a == tok + 0.75 then VL.drop_abort(R, "drop annule : la boucle du looper %d a change (part, longueur, overdub...)", R.tgt) return end
+    if a ~= tok + 0.5 then
+      if R.exit and t - R.t1 > 1 and (reaper.gmem_read(D.BASE + 97) or 0) == 0 then
+        VL.drop_abort(R, "capture muette : NU_DropCapture ne tourne pas sur la piste ?")
       end
-      if VL.apply_fx then VL.apply_fx() end
-      reaper.gmem_write(D.BASE + 80, tok + 0.5)
-      R.phase = "done"; R.t1 = t
-    elseif a == tok + 0.75 or t - R.t1 > 4 then VL.drop_abort(R, "echec de la copie dans le looper %d (rien n'a change)", R.tgt) end
-    return
-  end
-  if R.phase == "done" then
-    if VL.drop_rd(R.tgt, 0) ~= tok + 0.5 and t - R.t1 < 1 then return end
+      return
+    end
+    -- la cible a bascule (a l'echantillon pres, au debut de son cycle) : ses effets sont dans l'enregistrement
+    for slot = 1, NSLOT do
+      if S.fx.looper[R.tgt][slot] then VL.set_fx("looper", R.tgt, slot, false) end
+    end
+    if VL.apply_fx then VL.apply_fx() end
+    reaper.gmem_write(D.BASE + 80, tok + 0.5)                   -- (anciens JSFX) + fin pour tout le monde
     VL.drop_unsend(R)
     D.run = nil
     if R.g == 0 then
@@ -2588,6 +2593,10 @@ function VL.drop_tick(t)
     VL.drop_note("%d boucle(s) enregistree(s) dans le looper %d, les autres sont effacees, groupe %d supprime (UNDO sur le looper %d = sa boucle d'avant)",
       #R.cand, R.tgt, R.g, R.tgt)
   end
+end
+function VL.drop_cancel()
+  local R = VL.DROP.run
+  if R then VL.drop_abort(R, "drop annule (rien n'a change)") else VL.drop_note("aucun drop en cours") end
 end
 
 -- commandes externes (script MIDI learn) : ExtState NowUndo_VLcmd/q = lignes "nom<TAB>temps"

@@ -6,7 +6,9 @@ Usage : cd tools && cp ../NowUndo/NowUndo_V3.25.jsfx v325.jsfx && cp ../NowUndo/
         && python3 tdrop.py . [base|arev|gran|speed]
   base  : B normal + effet          arev : A en reverse (la cible est remise a plat apres le drop)
   gran  : B vitesse x2 SANS Link (granulaire)      speed : A vitesse x2 avec Link (passage = moitie de sa boucle)
-  solo  : DROP SOLO (V3.27) : A seul en reverse, pas de send ni de source ; B continue sans etre touche"""
+  solo  : DROP SOLO (V3.27) : A seul en reverse, pas de send ni de source ; B continue sans etre touche
+  slc / slcp : DROP SOLO de A en SLICER (slcp : pitch -5) ; fidelite = apres la bascule, A rejoue exactement ce qu'il
+         faisait entendre pendant la capture au meme instant du cycle (V3.27 : duree / phase prises sur l'horloge)"""
 import sys, math
 sys.path.insert(0, sys.argv[1])
 import bench
@@ -23,7 +25,8 @@ bench.jsfx_path_of[C] = 'cap.jsfx'
 B.GM = A.GM; B._clock = A._clock; C.GM = A.GM; C._clock = A._clock
 GM = A.GM
 
-def sigA(n): return 0.25 * math.sin(2 * math.pi * 110 * n / SR)
+SLC = len(sys.argv) > 2 and sys.argv[2] in ('slc', 'slcp')
+def sigA(n): return 0.3 * sig_drums(n) if SLC else 0.25 * math.sin(2 * math.pi * 110 * n / SR)   # slicer : des attaques
 def sigB(n): return 0.3 * sig_drums(n)
 
 class R(Run):
@@ -41,7 +44,7 @@ class R(Run):
 ra, rb, rc = R(A, sigA, 1, path), R(B, sigB, 2, path), R(C, lambda n: 0.0, 0, 'cap.jsfx')
 feed = {'A': True, 'B': True}
 fx = {'on': True, 'z': [0.0, 0.0]}
-SOLO = len(sys.argv) > 2 and sys.argv[2] == 'solo'      # drop solo : aucun send vers la piste cible
+SOLO = len(sys.argv) > 2 and sys.argv[2] in ('solo', 'slc', 'slcp')      # drop solo : aucun send vers la piste cible
 outB = []          # sortie de la piste B APRES son effet
 
 def fxB(x, ch):
@@ -95,6 +98,9 @@ def scenario(which):
     feed['B'] = False
     print('A length', A.v_length, '| B length', B.v_length, 'state', B.v_state)
     if which in ('arev', 'solo'): cmd(A, 4); step(2)
+    if which in ('slc', 'slcp'):
+        cmd(A, 6); step(2)
+        if which == 'slcp': GM[base(A) + 181] = -5; GM[base(A) + 180] = 4; step(2)
     if which == 'gran': B.v_speed = 2.0; B.sec_slider()
     if which == 'speed': A.v_speed = 2.0; A.v_link_on = 1.0; A.sec_slider()
     step(secs(1.5))
@@ -110,20 +116,38 @@ def scenario(which):
     if not SOLO: cmd(B, 35, tok)
     step(1)
     print('arm : A', GM[300], 'L', GM[305], '| B', GM[310])
-    GM[393] = tok
-    print('debut de capture : instant', GM[301])
-    k = wait(lambda: GM[394] == tok); print('capture : %d blocs (%.2f s), fin %s' % (k, k * BLK / SR, GM[394]))
-    cmd(A, 36, tok)
-    k = wait(lambda: GM[300] == tok + 0.25); print('copie : %d blocs' % k)
-    fx['on'] = False                      # le script coupe les effets de la piste cible (ici : B n'a plus rien a filtrer)
+    GM[393] = tok; ncap = ra.n
+    print('debut de capture : instant', GM[301], '| duree demandee L', GM[305])
+    # V3.27 : DROP ON -> la capture tourne ; DROP OFF un peu plus d'un cycle plus tard, a un instant quelconque
+    L0 = int(GM[305]); step(int(math.ceil(L0 / BLK)) + 37)
+    GM[380] = tok + 0.25
+    k = wait(lambda: GM[300] == tok + 0.5); print('DROP OFF -> bascule %d blocs plus tard, au debut du cycle (phase %d / %d) | B state %d' % (k, int(A.v_pos), L0, B.v_state))
+    fx['on'] = False                      # le script coupe les effets de la piste cible apres l'accuse
     GM[380] = tok + 0.5
-    nsw = ra.n
-    A_pos_sw = None
-    step(1); A_pos_sw = A.v_pos - BLK; step(1)
+    nsw = ra.n - BLK                      # la cible a bascule au debut du dernier bloc
+    A_pos_sw = A.v_pos - BLK; step(1)
     if which == 'speed':
         for _ in range(6):
             print('   pos %.1f master_pos %.1f len %d base %d sm_speed %.3f gmem2 %.0f gmem3 %.0f' % (A.v_pos, A.v_master_pos, A.v_length, A.v_base_loop_length, A.v_sm_speed, GM[2], GM[3]))
             step(40)
+    if which in ('slc', 'slcp'):
+        L = int(GM[305]); step(int(math.ceil(L / BLK)) + 4)
+        e = 0.0; ref = 0.0; s1 = nsw
+        for n in range(s1, s1 + L - 8 * BLK):
+            nb = n - ((n - nsw) // L + 1) * L          # meme instant du dernier cycle capture (avant la bascule)
+            e = max(e, abs(ra.out[n][0] - ra.out[nb][0])); ref = max(ref, abs(ra.out[nb][0]))
+        def el(lag):
+            ee = 0.0
+            for n in range(s1, s1 + L - 8 * BLK, 3):
+                nb = n - ((n - nsw) // L + 1) * L + lag
+                ee = max(ee, abs(ra.out[n][0] - ra.out[nb][0]))
+            return ee
+        bl = min(range(-48, 49), key=el)
+        zs = [n - s1 for n in range(s1, s1 + L - 8 * BLK) if abs(ra.out[n][0] - ra.out[n - ((n - nsw) // L + 1) * L][0]) > 0.005]
+        print('  meilleur decalage %d -> ecart %.5f | zones d\'ecart (debut, fin, nb) : %s' % (bl, el(bl), (zs[0], zs[-1], len(zs)) if zs else None))
+        print('SLICER : longueur capturee %d (cycle de l\'horloge = %d) | ecart apres bascule vs capture au meme instant = %.5f (crete %.3f) | A state %d slicer %d' % (
+            L, int(A.v_loop_width / max(0.01, A.v_sm_speed)), e, ref, A.v_state, A.v_play_mode))
+        return e
     print('apres bascule : A state %d length %d speed %.2f rev %d fade %.1f undo %d | B state %d length %d' % (
         A.v_state, A.v_length, A.v_speed, A.v_rev_on, A.v_fade_ms, A.v_hist_undo, B.v_state, B.v_length))
     step(int(math.ceil(LA / BLK)) * 2 + 4)

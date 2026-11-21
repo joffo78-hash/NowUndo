@@ -308,6 +308,24 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   réécrit automatiquement** (choix de l'utilisateur) : menu « Enregistrer l'état actuel dans le modèle », « Recharger »,
   « Aucun modèle ».
 
+## 21 nov. : DROP ON / OFF + drop fidèle en Slicer (JSFX V3.27 + NU_DropCapture refait)
+
+- **Demande de l'utilisateur** : 1er appui DROP = la capture démarre ; 2e appui = bascule au **prochain début de cycle**
+  (choix du moment laissé au musicien) ; appui long sur B2 = annuler (`VL.drop_cancel`). Pad : clignote (`armed`) pendant la
+  capture, fixe après DROP OFF. MIDI Learn / web / pédalier appellent `VL.drop_group` = même bascule ON / OFF.
+- `NU_DropCapture` tourne **en continu** sur un cycle (index = instant du cycle donné par la cible) et publie `392` (prochain
+  index), `397` (nb écrit), `391` (X = 10 ms), `390` = jeton quand les X valeurs écrasées avant le début du cycle sont gardées
+  (gmem `113000+k` / `114000+k`). La cible **recopie au fil de l'eau** dans la couche d'historique suivante (choisie à
+  l'armement ; un nouvel état d'historique = annulation) ; DROP OFF = `380 = jeton + 0.25` → la cible bascule seule au début
+  de bloc où son horloge repasse par 0 (dès qu'un cycle complet est recopié), fond la fin du cycle vers ce qui précédait son
+  début, publie `jeton + 0.5` ; les sources s'effacent en voyant cet accusé ; le script coupe ensuite les effets de la piste
+  cible (~1 tick de script de double effet), retire sends / capture, supprime le groupe. Commande 36 = sans effet.
+- **Slicer** : durée = un cycle de l'horloge du looper (`length`, ou `mclk_len` si le slicer suit le maître), phase =
+  `master_pos` (ou `mclk_pos`) + 2 (mesuré). Avant : largeur / vitesse « pitchée » (128 145 au lieu de 96 000 en pitch −5) et
+  phase prise sur la tête du slicer (boucle décalée). `VL.drop_period` : slicer = longueur.
+- Test : `tools/tdrop.py . [base|arev|speed|gran|solo|slc|slcp]` (protocole ON / OFF ; slc/slcp : après la bascule, A rejoue
+  exactement le dernier cycle capturé au même instant).
+
 ## 21 nov. : DROP SOLO
 
 - `VL.drop_group()` : **sans groupe sélectionné** (ou groupe où un seul looper joue) = drop du looper seul : il enregistre

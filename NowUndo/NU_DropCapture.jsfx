@@ -1,12 +1,17 @@
-desc:NU Drop Capture (NowUndo V3.25 : enregistre le passage du drop de groupe, sur la piste de la cible)
+desc:NU Drop Capture (NowUndo V3.27 : enregistre en continu le cycle du drop, sur la piste de la cible)
 // Pose TEMPORAIREMENT par le script Launchpad en BOUT de chaine de la piste du looper cible, puis retire.
 // Entrees 1/2 = la cible apres ses effets (avant son fader) ; entrees 3/4 = les autres loopers du groupe, arrives par
-// des sends post-fader sur 2 canaux libres de la piste (le script regle le routage des broches 3/4).
-// Meme piste que la cible = meme bloc audio : l'horloge du passage (gmem[300 + (cible-1)*10 + 1], publiee au debut de
+// des sends post-fader sur 2 canaux libres de la piste (le script regle le routage des broches 3/4). Drop solo : rien en 3/4.
+// Meme piste que la cible = meme bloc audio : l'horloge du cycle (gmem[300 + (cible-1)*10 + 1], publiee au debut de
 // chaque bloc par la cible) est exacte, quels que soient le traitement anticipe et la latence de REAPER.
+// V3.27 : DROP ON / OFF. La capture tourne EN CONTINU sur un cycle (index = instant du cycle) jusqu'a la bascule :
 //   gmem[393] = jeton (depart) | [381] = cible 1..8 | [395] = gain des autres loopers (1 / volume de la piste cible)
-//   fin : gmem[394] = jeton (jeton + 0.75 = refus) ; abandon : gmem[380] = jeton + 0.75
-// Le raccord est fondu : 10 ms de plus, melanges au debut de l'enregistrement. Sorties 1/2 inchangees, 3/4 muettes.
+//   publie a chaque echantillon : [392] = prochain index ecrit, [397] = nombre d'echantillons ecrits (la cible recopie au
+//   fil de l'eau) ; [391] = X (raccord, 10 ms) ; [390] = jeton quand les X echantillons qui precedent le debut du cycle
+//   ont ete gardes (gmem[113000 ..] gauche, [114000 ..] droite = valeurs ecrasees aux index L-X .. L-1 au dernier passage)
+//   -> a la bascule la cible fond la fin du cycle vers ce qui precedait son debut (raccord de boucle sans clic).
+//   Arret : la cible a bascule (gmem[cible] = jeton + 0.5) ou abandon (gmem[380] = jeton + 0.75) ; refus au depart :
+//   gmem[394] = jeton + 0.75.
 options:gmem=nowundo_sync
 in_pin:left
 in_pin:right
@@ -18,36 +23,36 @@ out_pin:groupe left
 out_pin:groupe right
 
 @init
-DR = 300; LD_BASE = 1000000; LD_MAXN = 3500000;
-st = 0; tok = gmem[393]; j = 0; n = 0; L = 0; X = 1; g = 1;
+DR = 300; LD_BASE = 1000000; LD_MAXN = 3500000; AUXL = 113000; AUXR = 114000;
+st = 0; tok = gmem[393]; j = 0; n = 0; L = 0; X = 1; g = 1; tb = DR;
 
 @block
 (st == 0 && gmem[393] > 0 && gmem[393] != tok) ? (
   tok = gmem[393];
   tg = floor(gmem[381] + 0.5); tb = DR + (tg - 1) * 10;
-  L = floor(gmem[tb + 5]); X = max(1, min(floor(srate * 0.01), floor(L / 4)));
-  (tg >= 1 && tg <= 8 && gmem[tb] == tok && L > 256 && L + X <= LD_MAXN) ? (
+  L = floor(gmem[tb + 5]); X = max(1, min(min(floor(srate * 0.01), floor(L / 4)), 960));
+  (tg >= 1 && tg <= 8 && gmem[tb] == tok && L > 256 && L <= LD_MAXN) ? (
     g = gmem[395]; (g <= 0 || g > 100) ? g = 1;
     j = floor(gmem[tb + 1] + 0.5); j -= L * floor(j / L);
     n = 0; st = 1;
+    gmem[391] = X; gmem[390] = 0; gmem[392] = j; gmem[397] = 0;
   ) : ( gmem[394] = tok + 0.75; );
 );
-(st == 1 && gmem[380] == tok + 0.75) ? st = 0;
+(st == 1 && (gmem[380] == tok + 0.75 || gmem[tb] == tok + 0.5)) ? st = 0;
 
 @sample
 st == 1 ? (
   a = LD_BASE + 16 + j;
-  vl = spl0 + spl2 * g; vr = spl1 + spl3 * g;
-  n < L ? (
-    gmem[a] = vl; gmem[a + LD_MAXN] = vr;
-  ) : (
-    // raccord : au debut le plus recent (continuite avec la fin), puis retour progressif a l'enregistrement du debut
-    f = (n - L) / X;
-    gmem[a] = vl * (1 - f) + gmem[a] * f;
-    gmem[a + LD_MAXN] = vr * (1 - f) + gmem[a + LD_MAXN] * f;
+  // fin du cycle : on garde ce qu'on ecrase (le passage d'avant = ce qui precede le debut du cycle)
+  j >= L - X ? (
+    k = j - (L - X);
+    gmem[AUXL + k] = gmem[a]; gmem[AUXR + k] = gmem[a + LD_MAXN];
+    k == 0 ? gmem[390] = 0;
+    k == X - 1 && n >= L + X - 1 ? gmem[390] = tok;
   );
+  gmem[a] = spl0 + spl2 * g; gmem[a + LD_MAXN] = spl1 + spl3 * g;
   j += 1; j >= L ? j = 0;
   n += 1;
-  n >= L + X ? ( st = 0; gmem[394] = tok; );
+  gmem[392] = j; gmem[397] = n;
 );
 spl2 = 0; spl3 = 0;
