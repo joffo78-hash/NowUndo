@@ -346,6 +346,19 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   fait à la main n'est pas repris). Drop en autonome : pas possible (orchestré par le Launchpad), proposé : bouton
   « Resample » dans le JSFX.
 
+## 22 nov. : looper seul à la souris (Mac) : boucle décalée vers la droite
+
+- Signalé : en autonome (sans Launchpad), à la souris sur Mac, la boucle a la bonne longueur mais son contenu est en
+  retard (silence au début), relecture « pas instantanée ». Causes : (1) le clic sur REC n'a pas d'heure d'appui (le
+  Launchpad l'envoie en gmem 950/951) → pas de pré-enregistrement ni de fin ramenée au clic ; (2) la latence aller-retour
+  n'est fournie que par le Launchpad (gmem 955/956) → pas de rotation de latence.
+- Corrigé : `ui_rec_t` = heure du clic sur REC (entrée et sortie) → `rec_lag_pend` (≤ 0,1 s) dans `rec_cmd` ;
+  **slider70 `lat_own`** (-1 = Auto = Launchpad, sinon ms) = bouton **« LAT auto / LAT n ms »** (menu) dans le panneau
+  OUTPUT (VU raccourcis à 300 px). Test `tools/tstart2.py . v327.jsfx <retard_clic_ms> <latence_ms> <LAT>` (latence 30 ms,
+  LAT 30 → 1er son à 0 ms ; LAT auto sans Launchpad → 30 ms). `tools/tstart.py` : REC + son simultanés → 0 ms.
+- Si le décalage reste grand : piste du looper armée avec monitoring (sinon REAPER calcule les effets en avance,
+  « anticipative FX », et le retard dépasse la latence de la carte).
+
 ## 21 nov. : FILTRE de la liste des rushes + clic sur « LP c1.3 »
 
 - Bouton **FILTRE ▾** en haut de la liste (à côté de `< RUSHES … >`), menu `gfx.showmenu` : **Page du Launchpad** (toutes /
