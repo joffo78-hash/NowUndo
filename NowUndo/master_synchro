@@ -188,6 +188,7 @@ ui_scale = slider5 / 100.0;
 handle_host_sync_all();
 
 @block
+gmem[921] = time_precise();   // battement du MSV3 : sans lui, les loopers liberent une synchro Host restee en memoire
 handle_host_sync_all();
 at_compute();
 

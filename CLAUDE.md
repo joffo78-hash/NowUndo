@@ -39,7 +39,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `+50..149` forme d'onde · `+155` BPM estimé · `+160..162` édition In/Out/Width · `+172/+173` VU in/out ·
 `+156/+157/+158` warp (état / grille / force) · `+159` mode d'overdub (V3.27 : 0 = A compensé, 1 = D brut, lecture seule) · `+178/+179` zone des grains du Cloud en % (V3.26) · `+180` id de paramètre à écrire, `+181` valeur (V3.25 : 2 boîtes de plus `+195/+196` et `+197/+198`) · `+19` feedback · `+20` dégradation · `+21` stéréo · `+22` out vol ·
 `+182..184` sync point / ref / len du maître. **Le bloc de 200 et les 60 paramètres (`110000 + (i*3+part)*60`) sont pleins** : publication supplémentaire V3.27 en `112000 + (i*3+part)*20` (+0 = lissage du LFO Random du Cloud). Global : `0..24` Master Sync par part (`[o]==1` maître looper, `==2` Host,
-`[o+2]` longueur, `[o+3]` position), `100+i` vivant, `130+i` heartbeat, `950/951` heure de l'appui + adresse cible (V3.22), `95` AUTO-SYNC, `917/918/919` Auto-Tempo (tempo voulu / temps / compteur, publiés par le MSV3),
+`[o+2]` longueur, `[o+3]` position), `100+i` vivant, `130+i` heartbeat, `950/951` heure de l'appui + adresse cible (V3.22), `95` AUTO-SYNC, `917/918/919` Auto-Tempo, `921` battement du MSV3 (tempo voulu / temps / compteur, publiés par le MSV3),
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
 (sert aussi d'enregistrement au drop), **drop de groupe (V3.25)** : `300 + k*10` accusé du looper k (+0 jeton, +1 horloge
 du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 abandon), `381` cible, `393` départ capture,
@@ -333,6 +333,18 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   chaque VALIDER crée un rush (`H._mk`) et l'ajoute comme pas. Timeline ON/OFF ; **piste = menu des pistes** (nom).
   Export : le fichier garde le texte des rushes (`# nom` au-dessus) ; Import : reconvertit. Exemple de scénario supprimé
   (l'ancien exemple enregistré est vidé). Test `tools/tscn.lua`.
+
+## 22 nov. : looper seul = esclave d'un maître fantôme + Slicer bloqué sur 2 pas (JSFX V3.27 + MSV3)
+
+- Signalé : looper ouvert **seul** (sans MSV3 ni Launchpad) → « MS: SLAVE » et Slicer qui ne joue que 2 pas. Cause unique :
+  gmem garde l'état de la synchro tant que REAPER tourne → maître (`gmem[o]` = 1, id d'un looper disparu) dont l'horloge
+  `[o+3]` est figée ; le Slicer (Slicer Clock = Master) suivait cette horloge (`mclk_trk`). Reproduit : `tools/tghost.py`
+  (avant : pas -1 / 0 seulement ; après : le Slicer avance).
+- Corrigé (@block, après le battement `130+i`, variables `gh_*`) : maître looper sans battement depuis 1,5 s → libéré ;
+  Host libéré si le MSV3 a battu un jour (**`gmem[921]`** = battement du MSV3, ajouté au MSV3) puis s'est arrêté. Un looper
+  **seul depuis 2 s** avec une boucle devient maître (`gh_want` : seulement au chargement ou après un fantôme ; un Unlock
+  fait à la main n'est pas repris). Drop en autonome : pas possible (orchestré par le Launchpad), proposé : bouton
+  « Resample » dans le JSFX.
 
 ## 21 nov. : FILTRE de la liste des rushes + clic sur « LP c1.3 »
 

@@ -150,6 +150,7 @@ part_sep = part_sm + 3;
 rp_pend = 0; rp_cnt = 0; rp_part = 0; ab_len = -1; ab_ts = -1; ab_nb = 4;
 rec_ref_kind = 0; rec_ref_id = 0; rec_ref_len = 0; rec_ref_ph = 0; qs_snap = 0;
 mclk_valid = 0; mclk_pos = 0; mclk_len = 0; mclk_len_prev = 0; mclk_cyc = 0;
+gh_want = 1; gh_al = 0;   // V3.27 : peut devenir maitre s'il est seul (voir MAITRE FANTOME)
 i = 0; loop(3, part_sp[i] = -1; part_sref[i] = 0; part_sm[i] = 0; part_sep[i] = 0; i += 1;);
 
 i = 0;
@@ -2339,6 +2340,33 @@ inst_idx = instance_id - 1;
 
 gmem[100 + inst_idx] = instance_id;
 gmem[130 + inst_idx] = time_precise();
+// V3.27 : MAITRE FANTOME. gmem garde l'etat de la synchro tant que REAPER tourne : un looper ouvert seul (sans MSV3 ni
+// Launchpad) se croyait esclave d'un maitre disparu, et son Slicer suivait l'horloge figee de ce maitre (bloque sur 2 pas).
+// Un maitre looper qui ne bat plus depuis 1,5 s est libere ; une synchro Host est liberee si le MSV3 (gmem[921] = son
+// battement, MSV3 du 22 nov.) a battu un jour puis s'est arrete. Seul et avec une boucle : ce looper devient maitre.
+gh_t = time_precise(); gh_k = 0;
+loop(3,
+  gh_o = gh_k * 10;
+  gmem[gh_o] == 1 ? (
+    gh_i = floor(gmem[gh_o + 1] + 0.5) % 10 - 1;
+    (gh_i < 0 || gh_i > 7 || gh_t - gmem[130 + gh_i] > 1.5) ? ( gmem[gh_o] = 0; gh_want = 1; );
+  ) : gmem[gh_o] == 2 ? (
+    (gmem[921] > 0 && gh_t - gmem[921] > 1.5) ? ( gmem[gh_o] = 0; gh_want = 1; );
+  );
+  gh_k += 1;
+);
+gh_o = (active_part - 1) * 10;
+// (seulement au chargement ou apres un maitre fantome : un Unlock fait a la main n'est pas repris)
+(gh_want && gmem[gh_o] == 0 && length > 0 && base_loop_length > 0 && state != 1 && state != 7 && state != 8) ? (
+  gh_n = 0; gh_k = 0;
+  loop(8, (gh_k != inst_idx && gh_t - gmem[130 + gh_k] < 1.5) ? gh_n += 1; gh_k += 1; );
+  // seul depuis 2 s (au chargement d'un projet, les autres loopers n'ont pas encore battu : on ne s'impose pas)
+  gh_n == 0 ? ( gh_al <= 0 ? gh_al = gh_t; ) : gh_al = 0;
+  (gh_al > 0 && gh_t - gh_al > 2) ? (
+    gmem[gh_o] = 1; gmem[gh_o + 1] = instance_id; gmem[gh_o + 2] = base_loop_length; gmem[gh_o + 3] = master_pos;
+    gh_al = 0; gh_want = 0;
+  );
+) : gh_al = 0;
 gmem[160 + inst_idx] = looper_hue;
 
 // Invalidate old parameter snapshots first. Only the currently active
