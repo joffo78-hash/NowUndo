@@ -346,6 +346,17 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   fait à la main n'est pas repris). Drop en autonome : pas possible (orchestré par le Launchpad), proposé : bouton
   « Resample » dans le JSFX.
 
+## 23 nov. : craquements en STRETCH (vitesse / pitch granulaire sans Link), temps réel seulement
+
+- Signalé : stretch actif = craquements en direct, CPU moyen bas (LatencyMon OK), l'enregistrement de la sortie dans REAPER
+  est propre → décrochages temps réel (blocs de 128 en retard), pas un défaut du son. Cause probable : recherche WSOLA
+  faite **d'un coup à la naissance de chaque grain** (`rd_pick` lecture ~19 500 lectures, `wg_pick` overdub ~74 000
+  produits) ; plusieurs loopers dans le même bloc = bloc trop long.
+- Allégé : `rd_pick` 1 point / 8, pas de 8 + affinage ±7 (~5 600) ; `wg_pick` → `wg_sc` + pas grossier pour ~12 000
+  produits + affinage (~19 000). Banc : même sortie (`tools/tstretch_q.py`), blocs > 4× la médiane 15 → 0
+  (`tools/tcpu.py . v327.jsfx gran`). **Non confirmé dans REAPER** : si ça craque encore, regarder le « RT CPU / longest
+  block » du Performance Meter et essayer un buffer de 256.
+
 ## 23 nov. : Clear du maître = la synchro reste verrouillée (JSFX V3.27)
 
 - Demande : Clear du looper qui a verrouillé la synchro ne doit **pas** la libérer ; elle ne s'arrête que par unsync /

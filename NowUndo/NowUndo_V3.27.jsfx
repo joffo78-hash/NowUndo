@@ -547,30 +547,40 @@ function wg_splat(a, b, env, sb) local(lo, hi, span, k, k_end, steps, seg_a, seg
   );
 );
 // V3.6.10 WSOLA : cherche le decalage source (-Sn..+Sn) dont le debut de grain colle le mieux a la suite du grain precedent.
-function wg_pick(s_nom, t0, Sn, Wn) local(best, bestd, dd, k, c, num, en, sc, stp) (
-  stp = (Sn * Wn > 40000) ? 2 : 1; best = -1000000000; bestd = 0; dd = -Sn;
-  while (dd <= Sn) (
-    num = 0; en = 0.000000001; k = 0;
-    while (k < Wn) (
-      c = ih_l[(s_nom + dd + k) & ih_mask] + ih_r[(s_nom + dd + k) & ih_mask];
-      num += c * (ih_l[(t0 + k) & ih_mask] + ih_r[(t0 + k) & ih_mask]);
-      en += c * c; k += stp;
-    );
-    sc = num / sqrt(en); sc > best ? ( best = sc; bestd = dd; );
-    dd += stp;
+function wg_sc(s_nom, t0, dd, Wn, kst) local(k, c, num, en) (
+  num = 0; en = 0.000000001; k = 0;
+  while (k < Wn) (
+    c = ih_l[(s_nom + dd + k) & ih_mask] + ih_r[(s_nom + dd + k) & ih_mask];
+    num += c * (ih_l[(t0 + k) & ih_mask] + ih_r[(t0 + k) & ih_mask]);
+    en += c * c; k += kst;
+  );
+  num / sqrt(en);
+);
+// V3.27 (23 nov.) : recherche allegee (avant : jusqu'a ~74 000 produits d'un coup a la naissance du grain -> craquements
+// en temps reel a 128 samples) : pas grossier choisi pour rester vers 12 000 produits, puis affinage autour du meilleur.
+function wg_pick(s_nom, t0, Sn, Wn) local(best, bestd, dd, sc, stp, kst, st) (
+  stp = max(1, ceil(sqrt(Sn * Wn / 12000))); kst = stp;
+  best = -1000000000; bestd = 0; dd = -Sn;
+  while (dd <= Sn) ( sc = wg_sc(s_nom, t0, dd, Wn, kst); sc > best ? ( best = sc; bestd = dd; ); dd += stp; );
+  stp > 1 ? (
+    st = bestd; dd = st - stp + 1;
+    while (dd <= st + stp - 1) ( (dd >= -Sn && dd <= Sn && dd != st) ? ( sc = wg_sc(s_nom, t0, dd, Wn, kst); sc > best ? ( best = sc; bestd = dd; ); ); dd += 1; );
   );
   bestd;
 );
 function ih_wrap() local(gi, gb) ( ih_n -= 1073741824; wg_prev_src -= 1073741824; wg_prev_n -= 1073741824; gi = 0; loop(max_wgrains, gb = wg_mem + gi * wg_stride; gb[3] -= 1073741824; gi += 1; ); );
 // V3.6.10 WSOLA LECTURE : le debut de chaque grain de lecture est decale (-Sn..+Sn) pour coller a la suite du grain precedent.
 function rd_tp(x) local(k) ( k = floor(x); k -= floor((k - floor(eff_start)) / max(floor(eff_end) - floor(eff_start), 1)) * max(floor(eff_end) - floor(eff_start), 1); k = max(floor(eff_start), min(floor(eff_end) - 1, k)); left_buf[k] + right_buf[k]; );
-function rd_score(p, stp, n) local(i, num, en, c) ( num = 0; en = 0.000000001; i = 0; while (i < n) ( c = rd_tp(p + stp * i * 4); num += c * rd_tmp[i]; en += c * c; i += 1; ); num / sqrt(en); );
+// V3.27 (23 nov.) : recherche allegee (~5x moins de calcul, faite d'un coup a la naissance du grain : avec 128 samples
+// de buffer, plusieurs loopers qui cherchaient dans le meme bloc faisaient craquer le temps reel). 1 point sur 8, pas de 8,
+// puis affinage +-7 au pas de 1.
+function rd_score(p, stp, n) local(i, num, en, c) ( num = 0; en = 0.000000001; i = 0; while (i < n) ( c = rd_tp(p + stp * i * 8); num += c * rd_tmp[i]; en += c * c; i += 1; ); num / sqrt(en); );
 function rd_pick(p0, ts, ph_prev, Sn, Wn, rr, dir) local(k, n, dd, best, bestd, sc, st, en_) (
-  n = 0; k = 0; while (k < Wn) ( rd_tmp[n] = rd_tp(ts + dir * rr * (ph_prev + k)); n += 1; k += 4; );
+  n = 0; k = 0; while (k < Wn) ( rd_tmp[n] = rd_tp(ts + dir * rr * (ph_prev + k)); n += 1; k += 8; );
   best = -1000000000; bestd = 0; dd = -Sn;
-  while (dd <= Sn) ( sc = rd_score(p0 + dd, dir * rr, n); sc > best ? ( best = sc; bestd = dd; ); dd += 4; );
-  st = bestd; dd = st - 3;
-  while (dd <= st + 3) ( dd >= -Sn && dd <= Sn ? ( sc = rd_score(p0 + dd, dir * rr, n); sc > best ? ( best = sc; bestd = dd; ); ); dd += 1; );
+  while (dd <= Sn) ( sc = rd_score(p0 + dd, dir * rr, n); sc > best ? ( best = sc; bestd = dd; ); dd += 8; );
+  st = bestd; dd = st - 7;
+  while (dd <= st + 7) ( (dd >= -Sn && dd <= Sn && dd != st) ? ( sc = rd_score(p0 + dd, dir * rr, n); sc > best ? ( best = sc; bestd = dd; ); ); dd += 1; );
   bestd;
 );
 function dub_grain_tick(head, rev, spawn_ok) local(dur, hop_t, d, gi, gb, fslot, ph0, ph1, pn, e, a, b, sb, pa, rr, max_l, Sn, Wn, Ln, dl, s_nom, t0, ot, src, si, ip, ic) (
