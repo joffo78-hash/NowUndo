@@ -348,6 +348,18 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   fait à la main n'est pas repris). Drop en autonome : pas possible (orchestré par le Launchpad), proposé : bouton
   « Resample » dans le JSFX.
 
+## 24 nov. : stretch = alignement des grains réparé + Grn Fade sur la lecture
+
+- **Bug introduit le 23 nov.** (limite « pas de recherche au-delà de ×2,5 ») : un commentaire `//` posé au milieu de la ligne
+  de naissance des grains cachait `rd_Wn = min(512, ...)` → `rd_Wn` jamais calculé → **alignement WSOLA de la lecture coupé**
+  (bourdon à la fréquence des grains sur les notes graves, répétitions audibles). Réparé. Nouvel outil
+  **`python3 tools/eelcomment.py f.jsfx`** (code caché derrière un `//` sur la même ligne) : à lancer avec `eelorder.py`.
+- **Grn Fade** (`grain_fade`, 5..50 %) règle maintenant aussi le fondu des grains de **lecture** (avant : 2 % fixes, il ne
+  servait qu'aux grains de l'overdub).
+- Test `tools/tgrain.py . f.jsfx <pitch> <speed>` (note de 65 Hz, modulation d'enveloppe) : avant 6-16 %, après 0,1 % à
+  40 ms, ~5 % à 80/150 ms dont 2-4 % viennent du raccord de boucle dans la mesure (même valeur sans transposition).
+- Drop solo : le banc montre que la bascule remet déjà le pitch à 0 (`dr_install`) ; question posée à l'utilisateur.
+
 ## 23 nov. : clavier MIDI = sélection + transposition en lecture + SCALER (JSFX V3.27, Launchpad, Scenario)
 
 - **Sélection** : le Launchpad publie `gmem 6060` = masque des loopers visés (bit i-1 = looper i sélectionné ou dans le
@@ -665,7 +677,7 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 
 ## Outils de test (`tools/`)
 
-- **`python3 tools/eelorder.py f.jsfx`** (EEL2 : fonction appelée avant sa définition = « undefined » dans REAPER, invisible au banc Python ; à lancer après chaque modif du JSFX) · `python3 tools/lualoc.py f.lua` (locales au niveau principal) · `python3 tools/luabal.py f.lua` (équilibre des blocs ;
+- **`python3 tools/eelcomment.py f.jsfx`** (un `//` au milieu d'une ligne de code cache la suite : déjà arrivé) · **`python3 tools/eelorder.py f.jsfx`** (EEL2 : fonction appelée avant sa définition = « undefined » dans REAPER, invisible au banc Python ; à lancer après chaque modif du JSFX) · `python3 tools/lualoc.py f.lua` (locales au niveau principal) · `python3 tools/luabal.py f.lua` (équilibre des blocs ;
   l'écart de parenthèses peut être un faux positif dû à `"%("` dans un motif).
 - `eel2py.py` + `bench.py` : traduisent le JSFX en Python pour mesurer clics / calage. Copier le JSFX en `v322.jsfx` /
   `v323.jsfx` / `v325.jsfx` (+ `cap.jsfx` pour `tdrop.py`) dans `tools/`, puis `cd tools && python3 tlat.py .` (REC calé), `tlat2.py .` (latence overdub),
