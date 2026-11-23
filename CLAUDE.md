@@ -361,6 +361,10 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   ×1 → ×10** (3 sauts dans le signal, `tools/tstretch2.py`) : moteur au repos = aucun grain, ~12 ms de trou pendant le fondu
   puis 1er grain normalisé par `total_w` ≈ 0 = plein volume d'un coup → `spawn_timer` forcé quand `grain_mix` = 0 (1er grain
   dès le démarrage) + `total_w = max(total_w, 0.35)`. Banc : 0 clic sur 1→10, 10→1, 1→0,25.
+- **Cloud, 4 loopers** : RT longest-block **5,04 ms** pour 2,90 ms (128 samples à 44,1 kHz) = décrochages. Fenêtre des grains
+  lue dans `lut_cos` interpolée au lieu d’un `cos()` par grain et par sample (même son à −108 dB, `tools/tcloudcpu.py`) ;
+  gain réel dans REAPER inconnu (le banc Python ne mesure pas le coût EEL2). Un « hold » de 248 ms = rechargement du JSFX,
+  pas le calcul : remettre le hold à zéro avant de mesurer.
 
 ## 23 nov. : Clear du maître = la synchro reste verrouillée (JSFX V3.27)
 

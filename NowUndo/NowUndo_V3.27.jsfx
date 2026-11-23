@@ -3360,7 +3360,11 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
         cl_ph = g_base[1]; cl_x = cl_ph / g_base[3];
         cl_x >= 1 ? ( g_base[2] = 0; ) : (
           cl_atk = g_base[8];
-          cl_w = cl_x < cl_atk ? 0.5 - 0.5 * cos($pi * cl_x / cl_atk) : 0.5 + 0.5 * cos($pi * (cl_x - cl_atk) / (1 - cl_atk));
+          // V3.27 (23 nov.) : fenetre lue dans la table lut_cos (interpolee) au lieu d'un cos() par grain et par sample
+          // (4 loopers en Cloud = ~4 millions de cos/s : bloc le plus long 5 ms pour 2,9 ms disponibles a 128 samples)
+          cl_t = (cl_x < cl_atk ? cl_x / cl_atk : (cl_x - cl_atk) / (1 - cl_atk)) * 512; cl_ti = floor(cl_t); cl_ti > 511 ? cl_ti = 511;
+          cl_w = lut_cos[cl_ti] + (cl_t - cl_ti) * (lut_cos[cl_ti + 1] - lut_cos[cl_ti]);
+          cl_x >= cl_atk ? cl_w = 1 - cl_w;
           g_base[9] > 1.001 ? cl_w = cl_w ^ g_base[9];
           cl_p = g_base[0] + g_base[5] * cl_ph; cl_p -= cl_ws; cl_p -= floor(cl_p / cl_wl) * cl_wl; cl_p += cl_ws;
           cl_i1 = floor(cl_p); cl_fr = cl_p - cl_i1; cl_i0 = cl_i1 - 1; cl_i0 < cl_ws ? cl_i0 += cl_wl; cl_i2 = cl_i1 + 1; cl_i2 >= cl_ws + cl_wl ? cl_i2 -= cl_wl; cl_i3 = cl_i2 + 1; cl_i3 >= cl_ws + cl_wl ? cl_i3 -= cl_wl;
