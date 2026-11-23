@@ -1074,8 +1074,8 @@ local function param_pickup_ok(t, n)
 end
 
 -- v2.5 : NAVIGATION AUTO du Twister (meme regle que le Launchpad). Valeur = BOUTON de page (1 Vol, 2 Pitch, 3 In/Out...)
-local AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,
-                  rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
+local AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2,               -- V3.27 : 9 = page Looper (avant : 1 = Volume)
+                  rec_overdub = 9, rerec = 9, clear_all = 9, clear_all_full = 9, quantise_inout = 3 }
 -- Relache -> Volume (page 1) : couper Slicer / Cloud, pitch revenu a 0, speed revenu a 100 %.
 local function auto_twister(action, looper, args)
   local pg = AUTO_TW[action]
@@ -1086,13 +1086,13 @@ local function auto_twister(action, looper, args)
     local b = gbase(s, active_part(s))
     if action == "slicer" or action == "cloud" then
       local on = (action == "slicer") and ((reaper.gmem_read(b + 8) or 0) == 1) or ((reaper.gmem_read(b + 24) or 0) > 0.5)
-      if on then pg = 1 end                                        -- on coupe le mode -> Volume
+      if on then pg = 9 end                                        -- on coupe le mode -> Volume
     elseif action == "pitch_step" then
       local np = math.max(-48, math.min(48, (reaper.gmem_read(b + 4) or 0) + (tonumber(args) or 12)))
-      if math.abs(np) < 0.01 then pg = 1 end
+      if math.abs(np) < 0.01 then pg = 9 end
     elseif action == "speed_step" then
       local ns = math.max(0.01, math.min(100, (reaper.gmem_read(b + 3) or 1) * (2 ^ ((tonumber(args) or 12) / 12))))
-      if math.abs(ns - 1) < 0.001 then pg = 1 end
+      if math.abs(ns - 1) < 0.001 then pg = 9 end
     end
   end
   fire_ui({ fighter = pg })

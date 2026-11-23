@@ -1944,8 +1944,8 @@ end
 -- RELACHE -> retour sur Volume (page 1) : couper Slicer / Cloud, pitch qui revient a 0, speed qui revient a 100 %,
 -- Reset Pitch / Reset Speed (et desactiver un effet : voir la couche Effects).
 -- (champs de VL et non locales : le chunk principal est a la limite Lua de 200 variables locales)
-VL.AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2, reset_pitch = 1, reset_speed = 1,
-               rec_overdub = 1, rerec = 1, clear_all = 1, clear_all_full = 1, quantise_inout = 3 }
+VL.AUTO_TW = { slicer = 4, cloud = 5, speed_step = 2, pitch_step = 2, reset_pitch = 9, reset_speed = 9,     -- V3.27 : 9 = page Looper
+               rec_overdub = 9, rerec = 9, clear_all = 9, clear_all_full = 9, quantise_inout = 3 }               -- (avant : 1 = Volume)
 -- Verrou des pages (ExtState nowundo_vl/tw_lock = "1") : plus de navigation automatique, seuls les rappels manuels
 -- (boutons de page du Launchpad / du Twister, MIDI Learn, web) changent la page
 function VL.tw_locked() return reaper and reaper.GetExtState and reaper.GetExtState("nowundo_vl", "tw_lock") == "1" end
@@ -1954,16 +1954,16 @@ function VL.auto_twister(action, targets, args)
   if not pg or VL.tw_locked() then return end                      -- (le miroir interactif navigue aussi : son etat est synchronise)
   if action == "slicer" or action == "cloud" then
     local def = ACTIONS[action]
-    if def and toggle_on(def.key, targets) then pg = 1 end            -- on coupe le mode -> Volume
+    if def and toggle_on(def.key, targets) then pg = 9 end            -- on coupe le mode -> Volume
   elseif action == "pitch_step" or action == "speed_step" then
     local L = S.loopers[ref_looper(targets)] or {}
     local st = tonumber(args) or 12
     if action == "pitch_step" then
       local np = math.max(-48, math.min(48, (L.pitch or 0) + st))
-      if math.abs(np) < 0.01 then pg = 1 end                          -- pitch revenu a 0 -> Volume
+      if math.abs(np) < 0.01 then pg = 9 end                          -- pitch revenu a 0 -> Volume
     else
       local ns = math.max(0.01, math.min(100, (L.speed or 1) * (2 ^ (st / 12))))
-      if math.abs(ns - 1) < 0.001 then pg = 1 end                     -- speed revenu a 100 % -> Volume
+      if math.abs(ns - 1) < 0.001 then pg = 9 end                     -- speed revenu a 100 % -> Volume
     end
   end
   VL.set_fighter_page(pg)
@@ -2048,7 +2048,7 @@ function VL.fx_nav(kind, id, slot)
     VL.set_fx_slot(on_slot)
     if not VL.tw_locked() then VL.set_fighter_page(6) end
   elseif not VL.tw_locked() then
-    VL.set_fighter_page(1)
+    VL.set_fighter_page(9)                                 -- V3.27 : plus d'effet actif -> page Looper (avant : Volume)
   end
 end
 

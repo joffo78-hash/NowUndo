@@ -362,6 +362,9 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 - **Sélection d'un looper → page 9** si les pages ne sont pas verrouillées (`tw_lock`) : `VL.tw_follow_sel()` dans
   `VL.select_looper` / `VL.step_looper` (pas en miroir) ; MIDI Learn `fire_ui` sel_looper (sauf si l'action demande une page).
   Une action qui suit la sélection (REC, Slicer…) garde sa navigation auto (`VL.auto_twister` passe après).
+- **Navigation auto vers la page 9 au lieu de la page 1 (Volume)** : REC / Re-Rec / Clear All (Full) / Reset Pitch / Speed,
+  Slicer ou Cloud coupés, pitch revenu à 0, speed revenu à 1, plus aucun effet actif (`VL.fx_nav`) ; `VL.AUTO_TW` du
+  Launchpad et `AUTO_TW` du MIDI Learn.
 - Test : mock lupa (lectures, knob Volume, pushes REC 1 / Stop-Play 3 / Full Loop 22 / BR 33 / Auto 19, Out ↔ Width).
   Non testé dans REAPER ; la page web n'a pas de bouton 9 (elle affiche la page quand elle est active).
 
