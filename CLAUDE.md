@@ -346,6 +346,17 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   fait à la main n'est pas repris). Drop en autonome : pas possible (orchestré par le Launchpad), proposé : bouton
   « Resample » dans le JSFX.
 
+## 23 nov. : Clear du maître = la synchro reste verrouillée (JSFX V3.27)
+
+- Demande : Clear du looper qui a verrouillé la synchro ne doit **pas** la libérer ; elle ne s'arrête que par unsync /
+  Unlock manuel ou quand **plus aucun looper** n'a de boucle. Avant : `do_clear` remettait `gmem[o]` à 0.
+- Maintenant (`ck_keep(p)`, `ck_others()`, `ck_active(p)`, variables `ck_on/len/pos/cyc1..3`) : au Clear, si un autre looper
+  vivant a une boucle, le looper effacé **garde l'horloge** de la part (même longueur, même phase, publiée en
+  `gmem[o+2..4]` à chaque sample, dans `@sample` après les horloges des parts) ; sinon libère. Fin : `gmem[o]` changé par
+  quelqu'un (Unlock, unsync) ou plus aucune boucle (`@block`). S'il réenregistre sur cette part, il se cale sur l'horloge
+  gardée comme un esclave (`is_self` annulé dans `rec_ref_capture` / `try_finish_rec`). Test `tools/tclearsync.py` (Clear
+  de L1 maître : verrouillé, horloge qui tourne ; L1 réenregistre 1,3 s → 2 s calé ; tout effacé → libre ; Unlock → libre).
+
 ## 22 nov. : looper seul à la souris (Mac) : boucle décalée vers la droite
 
 - Signalé : en autonome (sans Launchpad), à la souris sur Mac, la boucle a la bonne longueur mais son contenu est en

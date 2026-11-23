@@ -151,7 +151,7 @@ part_sep = part_sm + 3;
 rp_pend = 0; rp_cnt = 0; rp_part = 0; ab_len = -1; ab_ts = -1; ab_nb = 4;
 rec_ref_kind = 0; rec_ref_id = 0; rec_ref_len = 0; rec_ref_ph = 0; qs_snap = 0;
 mclk_valid = 0; mclk_pos = 0; mclk_len = 0; mclk_len_prev = 0; mclk_cyc = 0;
-gh_want = 1; gh_al = 0;   // V3.27 : peut devenir maitre s'il est seul (voir MAITRE FANTOME)
+gh_want = 1; gh_al = 0; ck_on1 = 0; ck_on2 = 0; ck_on3 = 0;   // V3.27 : peut devenir maitre s'il est seul (voir MAITRE FANTOME)
 i = 0; loop(3, part_sp[i] = -1; part_sref[i] = 0; part_sm[i] = 0; part_sep[i] = 0; i += 1;);
 
 i = 0;
@@ -715,6 +715,7 @@ function rec_ref_capture() local(ms_off, locked, mid, is_self, mb, ms_s) (
   rec_ref_kind = 0; rec_ref_id = 0; rec_ref_len = 0; rec_ref_ph = 0;
   ms_off = (active_part - 1) * 10; locked = gmem[ms_off]; mid = gmem[ms_off + 1];
   is_self = (locked == 1 && (mid == instance_id || mid == instance_alias));
+  is_self && ck_active(active_part - 1) ? is_self = 0;   // V3.27 : horloge gardee = reference comme un maitre
   (locked == 2 && (play_state & 1)) ? (
     rec_ref_kind = 2; rec_ref_id = 9; rec_ref_len = host_measure_len(); rec_ref_ph = ref_host_phase();
   ) : (locked == 1 && !is_self && gmem[ms_off + 2] > 0) ? (
@@ -910,6 +911,7 @@ function try_finish_rec(target, from_auto) local(ms_off, locked, mid, is_self, i
   locked = gmem[ms_off];
   mid = gmem[ms_off + 1];
   is_self = (locked == 1 && (mid == instance_id || mid == instance_alias));
+  is_self && ck_active(active_part - 1) ? is_self = 0;   // V3.27 : horloge gardee
   is_host = (locked == 2);
   master_len = is_host ? host_measure_len() 
              : (locked == 1 && !is_self && gmem[ms_off + 2] > 0) ? gmem[ms_off + 2] 
@@ -1368,6 +1370,32 @@ function reset_all_params() (
       ((det_thresh != 0.01) || (det_hold_ms != 120)) ? ( det_thresh = 0.01; slider50 = det_thresh; det_hold_ms = 120; slider51 = det_hold_ms; last_det_t = det_thresh; last_det_h = det_hold_ms; start_analysis(); );
       (length > 0) ? ( loop_start = 0; loop_width = length; sync_hard_resync = 1; );
 );
+// V3.27 (23 nov.) : HORLOGE GARDEE. Clear du looper qui a verrouille la synchro : la synchro reste verrouillee (demande de
+// l'utilisateur). Ce looper garde l'horloge de la part (meme longueur, meme phase, elle continue de tourner et d'etre
+// publiee en gmem[o+2..4]) tant qu'un autre looper a une boucle. Fin : Unlock / unsync manuel, ou plus aucune boucle.
+// S'il reenregistre sur cette part, il se cale sur cette horloge comme un esclave (rec_ref_capture / try_finish_rec).
+function ck_others() local(i, b, ap, n) (
+  n = 0; i = 0;
+  loop(8,
+    i != inst_idx && time_precise() - gmem[130 + i] < 1.5 ? (
+      b = 1000 + i * 600; ap = max(1, min(3, floor(gmem[b + 42] + 0.5)));
+      gmem[b + (ap - 1) * 200 + 46] > 0 ? n += 1;
+    );
+    i += 1;
+  );
+  n;
+);
+function ck_keep(p) local(o) (
+  o = p * 10;
+  (gmem[o] == 1 && (gmem[o + 1] == instance_id || gmem[o + 1] == instance_alias)) ? (
+    (gmem[o + 2] > 0 && ck_others() > 0) ? (
+      p == 0 ? ( ck_on1 = 1; ck_len1 = gmem[o + 2]; ck_pos1 = gmem[o + 3]; ck_cyc1 = gmem[o + 4]; ) :
+      p == 1 ? ( ck_on2 = 1; ck_len2 = gmem[o + 2]; ck_pos2 = gmem[o + 3]; ck_cyc2 = gmem[o + 4]; ) :
+               ( ck_on3 = 1; ck_len3 = gmem[o + 2]; ck_pos3 = gmem[o + 3]; ck_cyc3 = gmem[o + 4]; );
+    ) : ( gmem[o] = 0; );
+  );
+);
+function ck_active(p) ( p == 0 ? ck_on1 : (p == 1 ? ck_on2 : ck_on3); );
 function do_clear(clear_type) local(ms_off, wipe_n, wipe1, wipe2, wipe3, hi) (
   // Sauver tailles a zero AVANT de reset length/dirty_len
   wipe_n = max(dirty_len, length);
@@ -1408,15 +1436,13 @@ function do_clear(clear_type) local(ms_off, wipe_n, wipe1, wipe2, wipe3, hi) (
     len_part1 = 0; len_part2 = 0; len_part3 = 0; base_len_part1 = 0; base_len_part2 = 0; base_len_part3 = 0; master_pos1 = 0; master_pos2 = 0; master_pos3 = 0; active_part = 1; target_part = 1; pending_part_switch = 0;
     i = 0; loop(3, part_speed[i] = 1.0; part_pitch[i] = 0.0; part_rev[i] = 0; part_pingpong[i] = 0; part_play_mode[i] = 0; part_cloud_on[i] = 0; part_link_on[i] = 0; i += 1; ); switch_history_slot(0);
     history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; active_history_idx = 0;
-    (gmem[0] == 1 && (gmem[1] == instance_id || gmem[1] == instance_alias)) ? gmem[0] = 0;
-    (gmem[10] == 1 && (gmem[11] == instance_id || gmem[11] == instance_alias)) ? gmem[10] = 0;
-    (gmem[20] == 1 && (gmem[21] == instance_id || gmem[21] == instance_alias)) ? gmem[20] = 0;
+    ck_keep(0); ck_keep(1); ck_keep(2);   // V3.27 : la synchro reste verrouillee (horloge gardee) s'il reste des boucles
   ) : (
     active_part == 1 ? (len_part1 = 0; base_len_part1 = 0; master_pos1 = 0;) : active_part == 2 ? (len_part2 = 0; base_len_part2 = 0; master_pos2 = 0;) : (len_part3 = 0; base_len_part3 = 0; master_pos3 = 0;);
     idx_clr = active_part - 1; part_speed[idx_clr] = 1.0; part_pitch[idx_clr] = 0.0; part_rev[idx_clr] = 0; part_pingpong[idx_clr] = 0; part_play_mode[idx_clr] = 0; part_cloud_on[idx_clr] = 0; part_link_on[idx_clr] = 0; switch_history_slot(0);
     history_head = 0; history_count = 1; hist_undo = 0; hist_redo = 0; active_history_idx = 0;
     pending_part_switch = 0;
-    ms_off = (active_part - 1) * 10; (gmem[ms_off] == 1 && (gmem[ms_off+1] == instance_id || gmem[ms_off+1] == instance_alias)) ? gmem[ms_off] = 0;
+    ck_keep(active_part - 1);   // V3.27 : la synchro reste verrouillee (horloge gardee) s'il reste des boucles
   );
   last_state_target = 0; state = 0;
   state_transition_fade = 0; xf_on = 0; rd_valid = 0; rp_tail_on = 0; frz_ready = 0; frz_copying = 0; frz_prev = -1;
@@ -2357,6 +2383,14 @@ loop(3,
   );
   gh_k += 1;
 );
+// V3.27 : horloge gardee -> fin quand plus aucun looper (ni celui-ci) n'a de boucle
+(ck_on1 || ck_on2 || ck_on3) ? (
+  (length <= 0 && ck_others() == 0) ? (
+    ck_on1 ? ( (gmem[0] == 1 && (gmem[1] == instance_id || gmem[1] == instance_alias)) ? gmem[0] = 0; ck_on1 = 0; );
+    ck_on2 ? ( (gmem[10] == 1 && (gmem[11] == instance_id || gmem[11] == instance_alias)) ? gmem[10] = 0; ck_on2 = 0; );
+    ck_on3 ? ( (gmem[20] == 1 && (gmem[21] == instance_id || gmem[21] == instance_alias)) ? gmem[20] = 0; ck_on3 = 0; );
+  );
+);
 gh_o = (active_part - 1) * 10;
 // (seulement au chargement ou apres un maitre fantome : un Unlock fait a la main n'est pas repris)
 (gh_want && gmem[gh_o] == 0 && length > 0 && base_loop_length > 0 && state != 1 && state != 7 && state != 8) ? (
@@ -2881,6 +2915,13 @@ is_slave && length > 0 ? (
     );
     active_part == 1 ? master_pos = master_pos1 : (active_part == 2 ? master_pos = master_pos2 : master_pos = master_pos3);
 );
+// V3.27 : horloges gardees apres un Clear du maitre (publiees a la place de la boucle)
+ck_on1 ? ( ck_pos1 += 1; ck_pos1 >= ck_len1 ? ( ck_pos1 -= ck_len1; ck_cyc1 = (ck_cyc1 + 1) % 840; );
+  (gmem[0] == 1 && (gmem[1] == instance_id || gmem[1] == instance_alias)) ? ( gmem[2] = ck_len1; gmem[3] = ck_pos1; gmem[4] = ck_cyc1; ) : ck_on1 = 0; );
+ck_on2 ? ( ck_pos2 += 1; ck_pos2 >= ck_len2 ? ( ck_pos2 -= ck_len2; ck_cyc2 = (ck_cyc2 + 1) % 840; );
+  (gmem[10] == 1 && (gmem[11] == instance_id || gmem[11] == instance_alias)) ? ( gmem[12] = ck_len2; gmem[13] = ck_pos2; gmem[14] = ck_cyc2; ) : ck_on2 = 0; );
+ck_on3 ? ( ck_pos3 += 1; ck_pos3 >= ck_len3 ? ( ck_pos3 -= ck_len3; ck_cyc3 = (ck_cyc3 + 1) % 840; );
+  (gmem[20] == 1 && (gmem[21] == instance_id || gmem[21] == instance_alias)) ? ( gmem[22] = ck_len3; gmem[23] = ck_pos3; gmem[24] = ck_cyc3; ) : ck_on3 = 0; );
 
 curr_peak = max(abs(in0), abs(in1));
 ih_n += 1; ih_n >= 1073741824 ? ih_wrap(); ih_l[ih_n & ih_mask] = in0; ih_r[ih_n & ih_mask] = in1;
