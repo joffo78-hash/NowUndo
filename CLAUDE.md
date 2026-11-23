@@ -444,7 +444,7 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 ## 21 nov. : page Cloud du Twister refaite + LFO Random / Smooth (JSFX V3.27 en place)
 
 - Page 5 (disposition de l'utilisateur), A en haut : **A** Pos (push = Link/Free) | Density | Size | Agitation ;
-  **B** Spread | LFO forme (Sine / Saw / InvSaw / **Random**) | Rate | Depth ; **C** Width | Diffuse (push = **Freeze**) | - |
+  **B** Spread | LFO forme (Sine / Saw / InvSaw / **Random**) | Rate | Depth ; **C** Width | Diffuse (push = **Freeze**) | **PSpread** (23 nov., param 35, 0-100 %) |
   **Smooth** ; **D** - | - | - | Dry/Wet. Push = valeur par défaut ailleurs. PSpread (pitch) retiré de la page (reste en page 7
   Custom / MIDI Learn). `SCN.P5` (capture du Scenario) suit la nouvelle disposition.
 - JSFX : forme 3 = Random sample & hold (`cl_lfo_rnd` tiré à chaque période) ; Smooth (`cloud_lfo_smooth`, param 68) =

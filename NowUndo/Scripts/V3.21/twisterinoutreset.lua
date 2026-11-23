@@ -604,9 +604,9 @@ local function make_cloud_page()
   -- NowUndo V3.27 (disposition de l'utilisateur, 21 nov.). Lignes A(haut) .. D(bas), colonnes 1..4 :
   --   A : Pos (push = Link/Free) | Density | Size (log) | Agitation
   --   B : Spread | LFO forme (Sine / Saw / InvSaw / Random) | Rate | Depth
-  --   C : Width (= Stereo de la section Output) | Diffuse (push = Freeze on/off) | - | Smooth (lissage du LFO Random)
+  --   C : Width (= Stereo de la section Output) | Diffuse (push = Freeze on/off) | PSpread (pitch des grains) | Smooth (lissage du LFO Random)
   --   D : - | - | - | Dry/Wet
-  -- Push : valeur par defaut, sauf Pos (Link/Free) et Diffuse (Freeze). PSpread (pitch) : page 7 Custom / MIDI Learn.
+  -- Push : valeur par defaut, sauf Pos (Link/Free) et Diffuse (Freeze). PSpread (23 nov.) : en C3, aussi page 7 / MIDI Learn.
   local cells = {}
   local function cell(r, c, label, off, id, lo, hi, def, disp)
     cells[r .. "," .. c] = {
@@ -658,6 +658,7 @@ local function make_cloud_page()
   cell(2, 0, "Width", 21, PID.stereo_width, 0, 1, 0, pct)
   cell(2, 1, "Diffuse", 192, PID.cloud_diffuse, 0, 1, 0, function(v) return pct(v) .. (tgt_get(191) > 0.5 and " FRZ" or "") end)
   cells["2,1"].push = function() tgt_set_param(PID.cloud_freeze, tgt_get(191) > 0.5 and 0 or 1) end   -- push = Freeze
+  cell(2, 2, "PSpread", 35, PID.cloud_pitch, 0, 100, 0, function(v) return string.format("%.0f%%", v) end)   -- dispersion de pitch des grains
   cell(2, 3, "Smooth", nil, 68, 0, 1, 0, pct)                     -- lissage du LFO Random (param 68)
   cells["2,3"].get = function()                                    -- relu dans la zone 112000 + (looper*3 + part)*20 (V3.27)
     local i = page_targets()[1]
@@ -1717,8 +1718,8 @@ function SCN.emit(line, prefix)
   reaper.SetExtState("NowUndo_Scn", "q", q .. line .. "\n", false)
 end
 -- page 5 Cloud (V3.27) : numero du knob (rangee * 4 + colonne) -> mot du scenario ; Size / Width / Diffuse / Dry-Wet : pas de mot
-SCN.P5 = { [0] = "cpos", [1] = "cdens", [3] = "cchaos", [4] = "cspread", [5] = "clfoshape", [6] = "clfo", [7] = "clfodepth" }
-SCN.P5R = { [0] = {0,100}, [1] = {0,1}, [3] = {0,1}, [4] = {0,1}, [5] = {0,3}, [6] = {0.1,4}, [7] = {0,100} }
+SCN.P5 = { [0] = "cpos", [1] = "cdens", [3] = "cchaos", [4] = "cspread", [5] = "clfoshape", [6] = "clfo", [7] = "clfodepth", [10] = "cpitch" }
+SCN.P5R = { [0] = {0,100}, [1] = {0,1}, [3] = {0,1}, [4] = {0,1}, [5] = {0,3}, [6] = {0.1,4}, [7] = {0,100}, [10] = {0,100} }
 function SCN.knob(idx, norm, page)
   if not SCN.on() then return end
   norm = clamp(norm, 0, 1)
