@@ -2218,7 +2218,13 @@ function VL.status_pad_tap(i)
   if VL.sync_out then VL.sync_out() end
 end
 
-for n = 1, 8 do bind(1, 2, n, fn(function() VL.set_fighter_page(n) end, function() return S.fighter_page == n and "on" or "idle" end)) end   -- 7 Custom, 8 Display (ex Prev / Next looper)
+-- V3.27 : re-appui sur Twister 7 (deja en page 7) = sous-page Custom suivante 7a -> 7b -> 7c -> 7d -> 7a
+function VL.tw_cu_sub(k)
+  if not (reaper and reaper.SetExtState) then return end
+  if not k then k = (math.floor(tonumber(reaper.GetExtState("nowundo_vl", "tw_cu_sub")) or 1) % 4) + 1 end
+  reaper.SetExtState("nowundo_vl", "tw_cu_sub", tostring(clamp(k, 1, 4)), true)
+end
+for n = 1, 8 do bind(1, 2, n, fn(function() if n == 7 and S.fighter_page == 7 then VL.tw_cu_sub() end VL.set_fighter_page(n) end, function() return S.fighter_page == n and "on" or "idle" end)) end   -- 7 Custom, 8 Display (ex Prev / Next looper)
 
 -- Rangee statut (row 1) : appui intelligent play/stop / sortie de mode
 for i = 1, NLOOP do
@@ -2671,8 +2677,9 @@ function VL.ext_cmd_poll()
       local mk, mm = name:match("^inmute_(%d+)_(%a+)$")                    -- V3.27 : rush "in1 mute" / "in1 mute off"
       mk = tonumber(mk)
       if mk and mk >= 1 and mk <= NIN then VL.set_input_mute(mk, mm) end
-      local tw = tonumber(name:match("^twpage_(%d+)$"))
-      if tw and tw >= 1 and tw <= 8 then VL.set_fighter_page(tw) end
+      local tw, tws = name:match("^twpage_(%d+)_?(%d*)$")                  -- twpage_7_2 = page 7, sous-page b (rush "go t7b")
+      tw = tonumber(tw)
+      if tw and tw >= 1 and tw <= 8 then if tw == 7 and tonumber(tws) then VL.tw_cu_sub(tonumber(tws)) end VL.set_fighter_page(tw) end
       -- V3.27 (8 Waves interactif) : sel_<i> = selectionne L i ; stap_<i> = tap du pad de la 2e rangee (statut) de L i ;
       -- ctrlgrp_<i>_1 = 1er Ctrl+clic (L i libre -> nouveau groupe, groupe -> on edite le sien) ; ctrlgrp_<i>_0 = clics
       -- suivants, Ctrl toujours tenu : L i entre / sort de ce groupe (meme geste que Ctrl + clic sur la rangee du haut)

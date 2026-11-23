@@ -678,6 +678,7 @@ end
 CU_KNOBS = {
   { "speed",     "Speed",              "pitch",  3,  3,   0.01,  100,  1,    "log" },
   { "pitch",     "Pitch",              "pitch",  4,  4,   -48,   48,   0 },
+  { "scale",     "Scaler (gamme)",     "pitch",  70, "x3", 0,     9,    0,    nil, 1 },   -- V3.27 : lu en 112000 + (l*3+part)*20 + 3
   { "grain",     "Grain (ms)",         "pitch",  6,  6,   20,    200,  80 },
   { "grain_fade","Grain Fade %",       "pitch",  13, 13,  5,     50,   25 },
   { "mix",       "Mix",                "play",   5,  5,   0,     1,    1 },
@@ -781,6 +782,16 @@ function CU.v_of(k, n)
   if st then v = math.floor(v / st + 0.5) * st end
   return clamp(v, lo, hi)
 end
+-- V3.27 : offset de lecture "xN" = zone de publication supplementaire 112000 + (looper*3 + part)*20 + N
+function CU.rd(k, s)
+  local x = type(k[5]) == "string" and tonumber(k[5]:match("^x(%d+)$"))
+  if x then return reaper.gmem_read(112000 + ((s - 1) * 3 + active_part(s) - 1) * 20 + x) or 0 end
+  return read_fb(s, k[5])
+end
+CU.SCALE = { [0] = "Free", "1/2 ton", "Par ton", "Penta", "Majeure", "Min harm", "Min mel", "Dimin.", "Augm.", "Octave" }
+-- V3.27 : sous-page de la page 7 (1..4 = 7a..7d), ExtState nowundo_vl/tw_cu_sub ; assignations "custom", "custom2".."custom4"
+function CU.sub() return math.max(1, math.min(4, math.floor(tonumber(reaper.GetExtState(VL_SEC, "tw_cu_sub")) or 1))) end
+function CU.ext(sub) return sub == 1 and "custom" or ("custom" .. sub) end
 -- valeur normalisee 0..1 du knob k sur le looper s
 function CU.get_n(k, s)
   if k[11] then
@@ -791,7 +802,7 @@ function CU.get_n(k, s)
     if k[11] == "out" then return clamp((i0 + w0) / len, 0, 1) end
     return clamp(w0 / len, 0, 1)
   end
-  return CU.n_of(k, read_fb(s, k[5]))
+  return CU.n_of(k, CU.rd(k, s))
 end
 function CU.set_n(k, s, n)
   if not looper_alive(s, reaper.time_precise()) then return end
@@ -824,7 +835,8 @@ function CU.set_group(k, idx, n)
 end
 function CU.disp(k, s)
   if k[11] then return string.format("%.0f%%", CU.get_n(k, s) * 100) end
-  local v = read_fb(s, k[5])
+  local v = CU.rd(k, s)
+  if k[1] == "scale" then return CU.SCALE[math.floor(v + 0.5)] or "?" end
   if k[1] == "speed" then return string.format("%.2fx", v) end
   if k[1] == "pitch" then return string.format("%+.1fst", v) end
   if k[1] == "io_frac" then return CU.FRAC[math.floor(v + 0.5)] or "?" end
@@ -864,7 +876,8 @@ function CU.cells()
   local now = reaper.time_precise()
   if now - CU.t < 0.25 then return CU.cache end
   CU.t = now
-  local raw = reaper.GetExtState("NowUndo_MIDILearn", "custom") or ""
+  local sub = CU.sub()
+  local raw = sub .. "|" .. (reaper.GetExtState("NowUndo_MIDILearn", CU.ext(sub)) or "")
   if raw == CU.raw then return CU.cache end
   CU.raw, CU.recolor = raw, true
   local asg = {}
@@ -2345,7 +2358,7 @@ function main()
   local lk_hov = gfx.mouse_x >= lk_x and gfx.mouse_y >= lk_y and gfx.mouse_y <= lk_y + 11 * s
   if mouse_click and lk_hov then
     reaper.SetExtState(VL_SEC, "tw_lock", lk_on and "0" or "1", true)
-  elseif mouse_click and gfx.mouse_y < 26 * s then
+  elseif mouse_click and gfx.mouse_y < 26 * s and not (page == 7 and CU.sub_hov) then
     pick_midi_out()
   end
   if page == 7 then
@@ -2353,7 +2366,23 @@ function main()
     gfx.set(0.7, 0.7, 0.7, 1)
     gfx.x = 6 * s
     gfx.y = 16 * s
-    gfx.drawstr("→ L" .. table.concat(page_targets(), ",L") .. "   (assignations : MIDI Learn > Custom P7)")
+    -- V3.27 : 4 sous-pages 7a..7d (clic = choisir ; re-appui sur le pad Twister 7 du Launchpad = suivante)
+    local sub, hov = CU.sub(), false
+    for k = 1, 4 do
+      local bx, by, bw, bh = (6 + (k - 1) * 15) * s, 15 * s, 13 * s, 11 * s
+      local hv = gfx.mouse_x >= bx and gfx.mouse_x < bx + bw and gfx.mouse_y >= by and gfx.mouse_y < by + bh
+      hov = hov or hv
+      if k == sub then gfx.set(0.85, 0.85, 0.88, 1) else gfx.set(hv and 0.4 or 0.25, hv and 0.4 or 0.25, hv and 0.45 or 0.3, 1) end
+      gfx.rect(bx, by, bw, bh, 1)
+      gfx.set(k == sub and 0 or 0.85, k == sub and 0 or 0.85, k == sub and 0 or 0.9, 1)
+      gfx.x, gfx.y = bx + 4 * s, by + 1 * s
+      gfx.drawstr(string.char(96 + k))
+      if hv and mouse_click then reaper.SetExtState(VL_SEC, "tw_cu_sub", tostring(k), true) end
+    end
+    CU.sub_hov = hov
+    gfx.set(0.7, 0.7, 0.7, 1)
+    gfx.x, gfx.y = 68 * s, 16 * s
+    gfx.drawstr("Custom 7" .. string.char(96 + sub) .. "  → L" .. table.concat(page_targets(), ",L") .. "   (assignations : MIDI Learn > Custom P7" .. string.char(96 + sub) .. ")")
   elseif page >= 4 and page <= 5 then
     gfx.setfont(1, "Arial", math.floor(9 * s))
     gfx.set(0.7, 0.7, 0.7, 1)
@@ -2618,7 +2647,7 @@ function CU.model_boot()
   if not f then return end
   local text = f:read("*a"); f:close()
   if not text or not text:find("^NOWUNDO_MIDI_MODEL") then return end
-  local ok = { maps = 1, maps_aux = 1, maps_dev = 1, pickup = 1, custom = 1, maps_kbd = 1, midi_out = 2, midi_out_name = 2 }
+  local ok = { maps = 1, maps_aux = 1, maps_dev = 1, pickup = 1, custom = 1, custom2 = 1, custom3 = 1, custom4 = 1, maps_kbd = 1, midi_out = 2, midi_out_name = 2 }
   for pg = 1, 8 do ok["aux_out_" .. pg] = 1; ok["aux_out_name_" .. pg] = 1; ok["aux_excl_" .. pg] = 1 end
   for line in text:gmatch("[^\r\n]+") do
     local k, v = line:match("^([^\t]+)\t(.*)$")

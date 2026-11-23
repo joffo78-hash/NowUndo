@@ -102,6 +102,10 @@ for n = 1, NFIGHTER do
   TARGETS[#TARGETS + 1] = U("fighter:" .. n, "Twister page " .. n .. " (" .. SLOT_NAMES[n] .. ")", "Pages", { fighter = n })
 end
 -- Verrou : les actions ne changent plus la page du Twister (seuls les rappels manuels la font bouger)
+-- V3.27 : sous-pages de la page 7 Custom (7a..7d) ; "Twister page 7" quand on y est deja = sous-page suivante
+for k = 1, 4 do
+  TARGETS[#TARGETS + 1] = U("fighter:7" .. string.char(96 + k), "Twister page 7" .. string.char(96 + k) .. " (Custom)", "Pages", { fighter = 7, cusub = k })
+end
 TARGETS[#TARGETS + 1] = U("fighter:lock", "Twister : verrou des pages (bascule)", "Pages", { twlock = true })
 for i = 1, 8 do
   TARGETS[#TARGETS + 1] = U("status:" .. i, "Status L" .. i .. " (smart)", "Status", { status = i })
@@ -259,6 +263,7 @@ end
 CU_KNOBS = {
   { "speed",     "Speed",              "pitch",  3,  3,   0.01,  100,  1,    "log" },
   { "pitch",     "Pitch",              "pitch",  4,  4,   -48,   48,   0 },
+  { "scale",     "Scaler (gamme)",     "pitch",  70, "x3", 0,     9,    0,    nil, 1 },   -- V3.27 : lu en 112000 + (l*3+part)*20 + 3
   { "grain",     "Grain (ms)",         "pitch",  6,  6,   20,    200,  80 },
   { "grain_fade","Grain Fade %",       "pitch",  13, 13,  5,     50,   25 },
   { "mix",       "Mix",                "play",   5,  5,   0,     1,    1 },
@@ -338,37 +343,43 @@ CU_FAM_NAME = { { "play", "Lecture / Sortie / Transport" }, { "pitch", "Pitch / 
                 { "inout", "In / Out / Rec" }, { "slicer", "Slicer" }, { "cloud", "Cloud" }, { "fx", "Effets" }, { "", "Autre" } }
 
 -- v2.6 : page Twister 7 "Custom" : pas de learn, un MENU par knob / push (assignation lue par le script Twister)
-for idx = 0, 15 do
-  local row, col = math.floor(idx / 4) + 1, (idx % 4) + 1
-  TARGETS[#TARGETS + 1] = { id = "cu:knob:" .. idx, name = string.format("P7 Custom - Knob %d (r%d c%d)", idx + 1, row, col),
-                            cat = "Custom P7", kind = "cu_knob", idx = idx }
-  TARGETS[#TARGETS + 1] = { id = "cu:btn:" .. idx, name = string.format("P7 Custom - Push %d (r%d c%d)", idx + 1, row, col),
-                            cat = "Custom P7", kind = "cu_btn", idx = idx }
+-- V3.27 : 4 sous-pages 7a..7d (ExtState "custom" = 7a, "custom2".."custom4" = 7b..7d)
+for sub = 1, 4 do
+  local L, pre = string.char(96 + sub), (sub == 1) and "cu:" or ("cu" .. sub .. ":")
+  for idx = 0, 15 do
+    local row, col = math.floor(idx / 4) + 1, (idx % 4) + 1
+    TARGETS[#TARGETS + 1] = { id = pre .. "knob:" .. idx, name = string.format("P7%s Custom - Knob %d (r%d c%d)", L, idx + 1, row, col),
+                              cat = "Custom P7" .. L, kind = "cu_knob", idx = idx, sub = sub }
+    TARGETS[#TARGETS + 1] = { id = pre .. "btn:" .. idx, name = string.format("P7%s Custom - Push %d (r%d c%d)", L, idx + 1, row, col),
+                              cat = "Custom P7" .. L, kind = "cu_btn", idx = idx, sub = sub }
+  end
 end
-local CUL = { raw = nil, a = {},
+local CUL = { raw = {}, a = {},
   RGB = { play = {0.95, 0.40, 0.38}, pitch = {0.95, 0.55, 0.82}, inout = {0.32, 0.88, 0.52},
           slicer = {0.98, 0.83, 0.22}, cloud = {0.35, 0.70, 1.00}, fx = {1.00, 0.18, 0.63} } }
 function CUL.is(t) return t.kind == "cu_knob" or t.kind == "cu_btn" end
-function CUL.parse()
-  local raw = reaper.GetExtState(EXT, "custom") or ""
-  if raw ~= CUL.raw then
-    CUL.raw, CUL.a = raw, {}
-    for key, id in raw:gmatch("([kb]%d+)=([%w_]+)") do CUL.a[key] = id end
+function CUL.ext(sub) return (sub or 1) == 1 and "custom" or ("custom" .. sub) end
+function CUL.parse(sub)
+  sub = sub or 1
+  local raw = reaper.GetExtState(EXT, CUL.ext(sub)) or ""
+  if raw ~= CUL.raw[sub] then
+    CUL.raw[sub], CUL.a[sub] = raw, {}
+    for key, id in raw:gmatch("([kb]%d+)=([%w_]+)") do CUL.a[sub][key] = id end
   end
-  return CUL.a
+  return CUL.a[sub]
 end
 function CUL.key(t) return (t.kind == "cu_knob" and "k" or "b") .. t.idx end
-function CUL.get(t) return CUL.parse()[CUL.key(t)] end
+function CUL.get(t) return CUL.parse(t.sub)[CUL.key(t)] end
 function CUL.list(t) return t.kind == "cu_knob" and CU_KNOBS or CU_BTNS end
 function CUL.find(t, id) for _, e in ipairs(CUL.list(t)) do if e[1] == id then return e end end end
 function CUL.set(t, id)
-  local a = CUL.parse()
+  local a = CUL.parse(t.sub)
   a[CUL.key(t)] = id
   local parts = {}
   for i = 0, 15 do for _, pfx in ipairs({ "k", "b" }) do if a[pfx .. i] then parts[#parts + 1] = pfx .. i .. "=" .. a[pfx .. i] end end end
   local raw = table.concat(parts, ";")
-  reaper.SetExtState(EXT, "custom", raw, true)
-  CUL.raw = raw
+  reaper.SetExtState(EXT, CUL.ext(t.sub), raw, true)
+  CUL.raw[t.sub or 1] = raw
 end
 function CUL.text(t)
   local e = CUL.find(t, CUL.get(t) or "")
@@ -884,6 +895,11 @@ local function fire_ui(ui)
   if ui.page then reaper.SetExtState(VL_SEC, "midi_ui", "page:" .. ui.page, false) end
   if ui.fighter then
     local n = math.max(1, math.min(NFIGHTER, math.floor(ui.fighter)))
+    local was7 = (tonumber(reaper.GetExtState(VL_SEC, "fighter_page")) or 1) == 7
+    if ui.cusub or (n == 7 and was7) then
+      local sub = ui.cusub or ((math.floor(tonumber(reaper.GetExtState(VL_SEC, "tw_cu_sub")) or 1) % 4) + 1)
+      reaper.SetExtState(VL_SEC, "tw_cu_sub", tostring(sub), true)
+    end
     vl_state_edit(function(t) t.fighter_page = n end)
     reaper.SetExtState(VL_SEC, "fighter_page", tostring(n), false)
   end
@@ -1444,7 +1460,7 @@ end
 -- Fichier : nowundo_midi_learn_model.txt, dans le dossier du script. Charge par defaut au demarrage.
 -- Boutons / touches : T sauver | L recharger | E exporter | I importer | M demarrer sur modele on/off
 --------------------------------------------------------------------------
-local TPL_KEYS = { "maps", "maps_aux", "maps_dev", "pickup", "midi_out", "midi_out_name", "custom", "maps_kbd" }
+local TPL_KEYS = { "maps", "maps_aux", "maps_dev", "pickup", "midi_out", "midi_out_name", "custom", "custom2", "custom3", "custom4", "maps_kbd" }
 local model_blob = nil          -- contenu du modele tel que sauve/charge (pour detecter les modifications)
 local model_dirty_t, model_dirty = -10, false
 

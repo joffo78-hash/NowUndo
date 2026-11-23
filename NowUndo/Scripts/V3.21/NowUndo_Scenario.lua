@@ -412,10 +412,14 @@ local PRESET_MAX = 8      -- presets de routing / de groupe du Launchpad (NPRESE
 H._go = function(a)
   if not a:match("^go%f[%A]") then return nil end
   local r = a:gsub("^go", ""):gsub("%s+", "")
-  local tw = r:match("^t(%d+)$")
+  local tw, tws = r:match("^t(%d+)([a-d]?)$")
   if tw then
     tw = tonumber(tw)
     if tw < 1 or tw > 8 then return nil, "page du Twister 1-8" end
+    if tws ~= "" then
+      if tw ~= 7 then return nil, "sous-pages a-d : seulement t7 (Custom)" end
+      return "twpage_7_" .. (tws:byte() - 96)
+    end
     return "twpage_" .. tw
   end
   r = r:gsub("^lp", "")
@@ -1969,7 +1973,7 @@ ED.VALS = {
   scale = { "free", "demi", "ton", "penta", "maj", "mharm", "mmel", "dim", "aug", "oct" },
   sattack = { "0", "10", "50", "100", "reset" }, spitch = { "0", "25", "50", "100", "reset" }, smax = { "4", "8", "16", "32", "reset" },
   ["to"] = { "g1", "g2", "g3", "g4", "g0" },
-  ["go"] = { "lp 1", "lp 2", "lp 3", "4a", "4b", "4c", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8" },
+  ["go"] = { "lp 1", "lp 2", "lp 3", "4a", "4b", "4c", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t7b", "t7c", "t7d", "t8" },
   ["r(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" }, ["g(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" },
 }
 function ED.add(tok)                       -- ajoute une action (apres une virgule) a l'emplacement du curseur

@@ -365,9 +365,20 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   Changer de gamme par param 70 ne recale pas le Pitch (un rush garde sa valeur) ; le menu du JSFX, si.
   **Pitch Spread** Slicer / Cloud en gamme (`sc_spread`, sauf Free / Octave = sauts d'octave d'origine) : proportion
   min(1, 2×%) des slices / grains, hauteur au hasard dans ±24×% demi-tons calée sur la gamme ; regénéré au changement.
-  Publié en `112000 + (i*3+part)*20 + 3`. Pas encore dans le Twister / MIDI Learn (CU_KNOBS).
+  Publié en `112000 + (i*3+part)*20 + 3`. Knob **« Scaler (gamme) »** dans `CU_KNOBS` (param 70, offset de lecture `"x3"` =
+  zone supplémentaire, lu par `CU.rd` dans le Twister, affiché par nom) : posable sur la page 7 Custom.
 - Rushes : `pitch` → param 69 (absolu, `pitch 3.5` = 3,5) ; mot **`scale`** 0..9 ou `free demi ton penta maj mharm mmel
   dim aug oct` (`H._scnames`, palette « Niveaux »). Test `tools/tscale.py . v327.jsfx` (midirecv simulé par une file).
+
+## 23 nov. : page 7 Custom du Twister = 4 sous-pages 7a..7d
+
+- Sous-page courante : ExtState persistant `nowundo_vl/tw_cu_sub` (1..4). Assignations : `NowUndo_MIDILearn/custom` (7a,
+  inchangé) et `custom2` / `custom3` / `custom4` (7b..7d), toutes dans le modèle du MIDI Learn (`TPL_KEYS`) et rechargées par
+  le Twister (`CU.model_boot`). Twister : `CU.sub()`, `CU.ext(sub)`, `CU.cells()` (cache par sous-page) ; fenêtre : boutons
+  a b c d en haut à gauche + « Custom 7b ». MIDI Learn : groupes « Custom P7a..P7d » (ids `cu:` = 7a, `cu2:`..`cu4:`),
+  `CUL.parse(sub)` ; actions « Twister page 7a..7d » (`fighter:7a`..) ; « Twister page 7 » déjà en page 7 = sous-page
+  suivante. Launchpad : re-appui sur le pad Twister 7 = suivante (`VL.tw_cu_sub`), commande `twpage_7_<k>`. Rush :
+  `go t7b` (`H._go`, palette). Non testé dans REAPER (syntaxe + locales vérifiées seulement).
 
 ## 23 nov. : craquements en STRETCH (vitesse / pitch granulaire sans Link), temps réel seulement
 
