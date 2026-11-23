@@ -128,6 +128,20 @@ d'abord ses retours à l'utilisateur. Détails dans les sections datées du 21 n
 Idées proposées pas faites : recherche texte + tags perso dans les rushes ; retirer aussi `virtual_launchpad_web.lua` de
 `__startup.lua` (obsolète) ; chantiers « tout est rush » et « Quantize global » (plus bas).
 
+## 24 nov. : partage du projet (ReaPack) — inventaire des effets MonRig
+
+- But de l'utilisateur : rendre NowUndo **facile à partager** → rester dans REAPER, paquet ReaPack à jour (l'`index.xml`
+  actuel pointe encore sur les fichiers du 1er nov.), installateur / modèle de projet, `__startup.lua` par nom de fichier
+  (les ids `_RS…` changent d'une installation à l'autre), notice. Projet de l'utilisateur reçu : pistes 1 « inputs »,
+  2-9 entrées (4 containers), 10 « loopers » (MSV3, chargé depuis `js fx addons/mises à jour du 19 octobre/`), 11-18
+  loopers (fichier `aNowUndo_V3.6` du même dossier), 19 `NowundoMidi.jsfx` **en bypass** (looper MIDI étape 1, ID Auto
+  → prendrait l'ID 1 avec 8 loopers : à ne pas activer tel quel, pas dans le paquet), 20-24 « effets », 25-30 instruments perso.
+- `tools/NowUndo_FX_Inventaire.lua` : inventaire de `Effects/MonRig` (72 effets ; poids = 307 PNG, 76 Mo, interfaces Tukan).
+  Utilisés : joffo_stutter, Filters_LPHP, --bbddelay.jsfx, Lexikan (Tukan), 16rec.jsfx, Bricastic.jsfx (chmaha, GPLv3).
+  Licences : Cockos (LGPL, déjà livrés avec REAPER), Stillwell (BSD), Liteon Tape (GPL), chmaha (GPLv3), chokehold (MIT),
+  Justin Johnson / Theo Niessink (libs LGPL / GPL) = partageables avec leur en-tête ; Tukan = à installer par leur propre
+  dépôt ReaPack (pas redistribués) ; Neurotype = pas de licence écrite → pas dans le paquet. Doublons à la racine et dans `Tukan/`.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par
