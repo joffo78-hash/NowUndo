@@ -86,6 +86,8 @@ propre page Launchpad** (`VL.web_with_page`).
   groupes titrés, tous les boutons de taille normale).
 
 - Répondre en français, simplement, sans jargon inutile ; il teste et revient avec des captures.
+- Machines de test : PC fixe (Antelope Discrete 4, buffer 128) **et** portable avec la carte **Realtek + ASIO4ALL** (exprès,
+  « pires conditions ») : latence annoncée par ASIO4ALL peu fiable → régler LAT / `NowUndo_Latency` à la main.
 - **Proposer des alternatives quand son idée n'est pas optimale** (demandé explicitement), avec une recommandation.
 - Il veut garder la cohérence entre Launchpad, web, MIDI Learn, Twister (même logique partout : groupes, double appui…).
 - Il n'aime pas les ergonomies « à l'envers » (ex. choisir OFF avant l'action) ni l'absence de Retour arrière.
