@@ -357,13 +357,10 @@ VL.backend = {
       local width = L.loop_width or len
       local min_w = math.max(1, len * 0.01)
       if action == "loop_in_step" then
-        local new_in = math.max(0, math.min(start + delta, len - min_w))
-        local endp = start + width
-        start = new_in
-        width = math.max(min_w, endp - start)
-        width = math.min(width, len - start)
-        L.loop_start, L.loop_width = start, width
-        gmem_write_edit(looper, 1, start, nil)  -- edit_cmd 1 = set In, keep Out
+        -- REGLE ABSOLUE : In decale la fenetre, l'ecart (Width) ne bouge pas (edit_cmd 5)
+        start = math.max(0, math.min(start + delta, len - width))
+        L.loop_start = start
+        gmem_write_edit(looper, 5, start, nil)
       else
         local new_out = math.max(start + min_w, math.min(start + width + delta, len))
         width = new_out - start
@@ -399,7 +396,7 @@ VL.backend = {
     end
     if action == "reset_loop_in" then
       S.loopers[looper].loop_start = 0
-      gmem_write_edit(looper, 1, 0, nil)             -- edit_cmd 1 = In a 0
+      gmem_write_edit(looper, 5, 0, nil)             -- edit_cmd 5 = In a 0 (ecart garde), puis Out a la fin
       return
     end
     if action == "reset_loop_out" then

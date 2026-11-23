@@ -2627,7 +2627,9 @@ loop(3,
   edit_cmd > 0 ? (
     p != (active_part - 1) ? switch_part(p + 1);
     length > 0 ? (
-      br_on && edit_cmd == 1 ? edit_cmd = 5;   // BR : la fraction (écart) ne change pas quand In bouge
+      // REGLE ABSOLUE (utilisateur) : In DECALE la fenetre, l'ecart (Width) ne bouge JAMAIS quand In bouge.
+      // La commande 1 (« In, Out fixe ») passe donc toujours par la commande 5 (In, Width fixe), quel que soit l'envoyeur.
+      edit_cmd == 1 ? edit_cmd = 5;
       br_on && (edit_cmd == 2 || edit_cmd == 3) ? (
         // BR : Out / Width = choix de la fraction
         br_set_width(edit_cmd == 2 ? gmem[gmem_base + 162] - loop_start : gmem[gmem_base + 162]);
@@ -3954,9 +3956,10 @@ ui_dv_on = 1; ui_dv = loop_start / srate;
 v = ui_knob(10, 420, ky, 16, in_raw, 0, max(ml_s, 0.2), "In", "%.2fs", 0);
 ui_chg ? (
   keep_w = max(min_width(), io_w_lock);
-  in_raw = max(0, min(v, max(0, (loop_max_len() - ((loop_edit_mode == 0 || br_on) ? keep_w : min_width())) / srate)));
+  // REGLE ABSOLUE : In decale la fenetre, l'ecart ne bouge jamais (modes Out et Width)
+  in_raw = max(0, min(v, max(0, (loop_max_len() - keep_w) / srate)));
   new_start = apply_quant_start(in_raw * srate);
-  (loop_edit_mode == 0 || br_on) ? (
+  1 ? (
     // Width mode: In = position de la sélection, Out = In + écart FIXE (jamais rogné)
     new_start = max(0, min(new_start, loop_max_len() - keep_w));
     loop_start = new_start;

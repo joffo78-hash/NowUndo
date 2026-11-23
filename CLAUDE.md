@@ -66,11 +66,13 @@ propre page Launchpad** (`VL.web_with_page`).
 
 ## Règles de code (pièges déjà rencontrés)
 
-- **RÈGLE ABSOLUE In / Out / Width (l'utilisateur l'a répétée ~20 fois, ne JAMAIS la changer)** : **Width règle l'écart entre
-  In et Out ; In DÉCALE la fenêtre et l'écart ne bouge PAS quand In bouge** (commande d'édition 5, In borné à
-  longueur − width). Partout : page 1 (mode Width), pages 7 Custom et 9 Looper (`CU.set_n` « in »). Le 24 nov. le knob
-  « in » de `CU_KNOBS` utilisait la commande 1 (Out fixe = l'écart changeait) : corrigé.
-
+- **RÈGLE ABSOLUE In / Out / Width (répétée ~20 fois par l'utilisateur, NE JAMAIS la changer, NULLE PART)** : **Width règle
+  l'écart entre In et Out ; In DÉCALE la fenêtre et l'écart ne bouge PAS quand In bouge** (In borné à longueur − width ;
+  Out, lui, règle Out et donc l'écart). Appliqué le 24 nov. partout : **JSFX** (commande d'édition 1 = toujours la 5 ;
+  knob In de la fenêtre du looper dans les deux modes), Twister pages 1 (« page 3 » du Launchpad, modes Out **et** Width,
+  knob, souris, pairs du groupe) / 7 / 9 (`CU.set_n`), MIDI Learn (aux page 1), Launchpad (`loop_in_step`), 8Waves
+  (poignée In), pont web (`set_io` : In seul = décalage ; fenêtre posée = Width d'abord si elle rétrécit vers la fin),
+  rushes (`in 0.25`). Tout script envoie la commande **5** pour In (resets compris : In 0 puis Out fin).
 - **Lua : 200 variables locales max au niveau principal.** `virtuallaunchpad_main.lua` ≈ 143 (fonctions rangées dans
   `VL.*`, `LPF.*`), `NowUndo_Scenario.lua` ≈ 193 (**presque plein** : ranger le neuf dans la table `ED` ou `H._xxx`),
   `twisterinoutreset.lua` ≈ 172. Vérifier avec `python3 tools/lualoc.py <fichier>` après chaque modif.

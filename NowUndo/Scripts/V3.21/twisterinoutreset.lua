@@ -224,11 +224,10 @@ local function apply_peers_io(peers, kind, d_norm)
     if len > 0 then
       local b = gbase(peer, snap.part or active_part(peer))
       if kind == "in" then
-        local out_pos = math.min(len, snap.out0)
-        local new_in = math.max(0, math.min(out_pos, snap.in0 + d))
+        -- REGLE ABSOLUE : In decale la fenetre, l'ecart (Width) du pair ne bouge pas (cmd 5)
+        local new_in = math.max(0, math.min(math.max(0, len - snap.w0), snap.in0 + d))
         reaper.gmem_write(b + 161, new_in)
-        reaper.gmem_write(b + 160, 1)
-        -- JSFX cmd1 garde Out ; pas de cmd3 qui ecraserait
+        reaper.gmem_write(b + 160, 5)
       elseif kind == "shift" then
         -- Mode In/Width : la reference du groupe est la position du OUT du looper source (= In + Width constant).
         -- Les pairs decalent donc In ET Out du meme delta, en gardant leur propre largeur (cmd 5 : Width fixe).
@@ -1897,11 +1896,10 @@ local function midi_apply_knob(idx, norm, page)
         reaper.gmem_write(b + 160, 5)
         kind = "shift"      -- les pairs suivent la position du Out reel (decalage de fenetre), pas celle du bouton
       else
-        -- garder Out : cmd 1 (JSFX recalcule width)
-        local out_pos = math.min(len, in_s + w_s)
-        new_in = math.max(0, math.min(out_pos, new_in))
+        -- REGLE ABSOLUE (aussi en mode Out) : In decale la fenetre, l'ecart ne bouge pas (cmd 5)
+        new_in = math.min(new_in, math.max(0, len - w_s))
         reaper.gmem_write(b + 161, new_in)
-        reaper.gmem_write(b + 160, 1)
+        reaper.gmem_write(b + 160, 5)
       end
       d_norm = (new_in - g.in0) / g.len0
     end
@@ -2375,7 +2373,7 @@ function main()
   for i, pr in pairs(pending_reset) do
     if pr.step == 1 then
       reaper.gmem_write(pr.gbase + 161, 0)
-      reaper.gmem_write(pr.gbase + 160, 1)
+      reaper.gmem_write(pr.gbase + 160, 5)   -- reset : In a 0 (ecart garde), puis Out a la fin
       pr.step = 2
     elseif pr.step == 2 then
       reaper.gmem_write(pr.gbase + 162, pr.len)
@@ -2574,12 +2572,11 @@ function main()
                   reaper.gmem_write(b + 160, 5)
                   kind, d_norm = "shift", (drag.len0 > 0) and ((new_in - drag.in0) / drag.len0) or 0
                 else
-                  local out_pos = lock_out[tw_id] or math.min(len, out_s)
-                  new_in = math.max(0, math.min(out_pos, val * len))
+                  -- REGLE ABSOLUE (aussi en mode Out) : In decale la fenetre, l'ecart ne bouge pas (cmd 5)
+                  new_in = math.max(0, math.min(math.max(0, len - (out_s - in_s)), val * len))
                   val = new_in / len
                   reaper.gmem_write(b + 161, new_in)
-                  reaper.gmem_write(b + 160, 1)
-                  -- pas de pending_width : JSFX garde Out
+                  reaper.gmem_write(b + 160, 5)
                   kind, d_norm = "in", (drag.len0 > 0) and ((new_in - drag.in0) / drag.len0) or 0
                 end
               end
