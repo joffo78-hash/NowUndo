@@ -142,7 +142,8 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   saisie de texte**, cumul clavier + MIDI. V3.25 : saisie détectée aussi dans l'éditeur de code JSFX / ReaScript
   (`KB.text_focus` : classe contenant « edit », ou fenêtre « Development Environment » / titre .jsfx .lua .eel).
 - **Twister** : boutons d'effets du web = looper sélectionné + son groupe ; page 7 Custom : « Effet du slot (type) ».
-  Page 4 Slicer réorganisée : C = Detect | Detect Hold | Pitch | Link ; D = Root | Release | - | **Dry/Wet**.
+  Page 4 Slicer réorganisée : C = Detect | Detect Hold | Pitch | Link ; D = Root | Release | **Scaler** (24 nov., rose, param 70,
+  lu en `112000+…+3`) | **Dry/Wet**. Une case peut avoir sa couleur sur toute page (`spec.col` fenêtre / web, `spec.twc` Twister).
 - **8 Panel** : import Adapter/Étirer dès qu'une référence existe ; étirement fait dans le script (Hermite) ; le 1er
   fichier fixe le tempo du projet (A2).
 - **Scenario / Rushes** : rushes gate (appui = tel qu'écrit, relâchement = tout défait) ; éditeur avec champ texte,

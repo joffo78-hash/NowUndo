@@ -595,6 +595,15 @@ local function make_slicer_page()
   })
   cell_lin(2, 2, "Pitch", 34, 34, 0, 100, 0, 1,
     function(v) return string.format("%.0fst", v) end)
+  -- V3.27 : D3 = SCALER (gamme du Pitch / clavier / Pitch Spread), en ROSE (famille Pitch) pour le distinguer du Slicer.
+  -- Lu dans la zone de publication supplementaire du JSFX (112000 + (looper*3 + part)*20 + 3), ecrit par le param 70.
+  local SC_LBL = { [0] = "Free", "1/2 ton", "Ton", "Penta", "Majeure", "MinHarm", "MinMel", "Dimin", "Augm", "Octave" }
+  cell_list(3, 2, "Scaler", 0, 70, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 0, nil, SC_LBL)
+  cells["3,2"].get = function()
+    local li = page_targets()[1]
+    return reaper.gmem_read(112000 + ((li - 1) * 3 + active_part(li) - 1) * 20 + 3) or 0
+  end
+  cells["3,2"].col = { 0.95, 0.40, 0.70 }; cells["3,2"].twc = 108
   cell_lin(3, 3, "Dry/Wet", 193, 61, 0, 1, 1, 0.01,             -- Slicer Dry/Wet : 0 = boucle d'origine, 1 = slicer
     function(v) return string.format("%.0f%%", v * 100) end)
   return cells
@@ -1656,9 +1665,12 @@ local function twister_send_colors(page)
       pcall(reaper.SendMIDIMessageToHardware, midi_out_idx, string.char(0xB0 + TW_COLOR_CH, enc, val))
     end
   else
-    local val = TW_PAGE_COLOR[page]
-    if not val then return end
+    local pv = TW_PAGE_COLOR[page]
+    if not pv then return end
+    local pc = PAGES[page] or {}
     for enc = 0, 15 do
+      local sp = pc[math.floor(enc / 4) .. "," .. (enc % 4)]
+      local val = (sp and sp.twc) or pv                 -- V3.27 : une case peut avoir sa couleur (Scaler rose, page Slicer)
       log_sent(0xB0, TW_COLOR_CH, enc, val)   -- anti-echo : ne pas le prendre pour un appui de push
       pcall(reaper.SendMIDIMessageToHardware, midi_out_idx, string.char(0xB0 + TW_COLOR_CH, enc, val))
     end
@@ -2199,7 +2211,7 @@ function CU.web_tick()
       end
       local n = read_knob_norm(page, idx, now)
       if disp == "" then disp = string.format("%.0f%%", n * 100) end
-      local kc = (page == 6) and (PAGE6_COL[c] or col) or ((page == 7 and spec.col) or col)
+      local kc = (page == 6) and (PAGE6_COL[c] or col) or (spec.col or col)
       local hex = string.format("%02X%02X%02X", math.floor(kc[1] * 255 + 0.5), math.floor(kc[2] * 255 + 0.5), math.floor(kc[3] * 255 + 0.5))
       local flags = ((spec.inactive and spec.inactive()) or not alive) and "d" or ""
       if page == 8 then flags = flags .. "r" end                    -- page Display : lecture seule
@@ -2540,7 +2552,7 @@ function main()
         local cx = start_x + coln * cell_w + cell_w * 0.5
         local cy = start_y + row * cell_h + 22 * s
         -- couleur par colonne sur la page 6, sinon couleur de page
-        local kcol = (page == 6) and (PAGE6_COL[coln] or col) or ((page == 7 and spec and spec.col) or col)
+        local kcol = (page == 6) and (PAGE6_COL[coln] or col) or ((spec and spec.col) or col)
         if not spec then
           -- empty cell
           gfx.set(0.12, 0.12, 0.14, 0.5)
