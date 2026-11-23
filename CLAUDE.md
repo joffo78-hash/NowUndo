@@ -141,6 +141,9 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   Licences : Cockos (LGPL, déjà livrés avec REAPER), Stillwell (BSD), Liteon Tape (GPL), chmaha (GPLv3), chokehold (MIT),
   Justin Johnson / Theo Niessink (libs LGPL / GPL) = partageables avec leur en-tête ; Tukan = à installer par leur propre
   dépôt ReaPack (pas redistribués) ; Neurotype = pas de licence écrite → pas dans le paquet. Doublons à la racine et dans `Tukan/`.
+  **À l'utilisateur** (confirmé 24 nov.) : `Manipulator_Formant`, `grm_sweep_comb` (+ `joffo_stutter`, `16rec` d'après leur
+  en-tête). **Pas à lui / origine inconnue** : `--bbddelay.jsfx` (utilisé partout), `freezer`, « GRM comb v2 »
+  (`Lexikan2gui/SC Filter (Tukan)`) ; `Filters_LPHP` = dérivé du SC Filter de Tukan.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
