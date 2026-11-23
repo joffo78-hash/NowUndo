@@ -978,13 +978,24 @@ end
 function CU.p9_build()
   local P, R, K, G = {}, CU.RED, CU.PINK, CU.GREEN
   local L = { { "out_vol", "Volume", R }, { "feedback", "Feedback", R }, { "stereo", "Stereo", R }, { "grain", "Grain", K },
-              { "speed", "Speed", K }, { "pitch", "Pitch", K }, { "scale", "Scaler", K }, { "grain_fade", "Grn Fade", K },
+              { "speed", "Speed", K }, { "pitch", "Pitch", K, "link" }, { "scale", "Scaler", K }, { "grain_fade", "Grn Fade", K },
               { "in", "In", G, "full_loop" }, { "out", "Out", G }, { "br_mix", "BR Mix", G, "beat_rep" }, { "io_frac", "Quantize", G, "full_loop" },
               { "rec_dens", "Rec Dens", R, "rec" }, nil, nil, { "auto_thr", "Auto Seuil", R, "auto" } }
   CU.p9idx = {}
   for i = 1, 16 do
     local e = L[i]
     if e then CU.p9idx[e[1]] = i; P[math.floor((i - 1) / 4) .. "," .. ((i - 1) % 4)] = CU.p9_cell(e[1], e[2], e[3], e[4]) end
+  end
+  -- Speed : le push remet Speed a 1 ET Pitch a 0 (Pitch : push = Link P/S on / off, via le bouton "link")
+  P["1,0"].push = function()
+    local now = reaper.time_precise()
+    for _, li in ipairs(page_targets()) do
+      if looper_alive(li, now) then
+        write_param(li, 3, 1)                                          -- boite 1 (+180/+181) : Speed = 1
+        local b = gbase(li, active_part(li))                           -- boite 2 (+195/+196) : Pitch = 0 (meme cycle)
+        reaper.gmem_write(b + 196, 0); reaper.gmem_write(b + 195, 4)
+      end
+    end
   end
   -- Out : le push bascule le knob entre Out et Width (comme la page In/Out)
   local o = P["2,1"]

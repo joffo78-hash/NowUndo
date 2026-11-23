@@ -353,7 +353,7 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 
 - `CU.P9` (`CU.p9_build`, `CU.p9_cell` : cellules faites avec `CU_KNOBS` / `CU_BTNS`, règle de groupe `CU.set_group`, push
   `CU.fire`) ; `CU.page_cells(9)`. Disposition (rangées haut → bas, colonnes A..D) : **1** Volume | Feedback | Stereo (rouge) |
-  Grain (rose) ; **2** Speed | Pitch | Scaler | Grn Fade (rose) ; **3** In (push = Full Loop = reset In/Out) | Out (push =
+  Grain (rose) ; **2** Speed (push = Speed 1 + Pitch 0, boîtes +180 et +195) | Pitch (push = Link P/S) | Scaler | Grn Fade (rose) ; **3** In (push = Full Loop = reset In/Out) | Out (push =
   Out ↔ Width, `CU.p9w`) | BR Mix (push = Beat Repeat) | Quantize `io_frac` (push = Full Loop) (vert) ; **4** Rec Dens (push =
   REC) | Play (knob inactif, anneau = joue, push = Stop/Play) | Clear (knob inactif, anneau = boucle, push = Clear) | Auto
   Seuil (push = Auto) (rouge). Push non précisé = défaut du knob.
