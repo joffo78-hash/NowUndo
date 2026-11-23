@@ -406,6 +406,24 @@ end
 --   C : Detect | Detect Hold | Pitch | Link Rate (push seulement)
 --   D : Root note | Release | - | Dry/Wet
 -- Push : remet la valeur d'init, sauf B2 (bascule Trans/Grid), B3 (Regen), D1 (Tape/Pitch si moteur arrete).
+-- V3.27 : case SCALER (gamme du Pitch / clavier / Pitch Spread), en ROSE (famille Pitch), posee en D3 des pages Slicer et
+-- Cloud. 10 zones egales sur la course du knob ; push = Free. Lu en 112000 + (looper*3 + part)*20 + 3, ecrit par le param 70.
+local function scaler_cell()
+  local LBL = { [0] = "Free", "1/2 ton", "Ton", "Penta", "Majeure", "MinHarm", "MinMel", "Dimin", "Augm", "Octave" }
+  return {
+    label = "Scaler", pid = 70, col = { 0.95, 0.40, 0.70 }, twc = 108,
+    get = function()
+      local li = page_targets()[1]
+      return reaper.gmem_read(112000 + ((li - 1) * 3 + active_part(li) - 1) * 20 + 3) or 0
+    end,
+    set = function(_, v) tgt_set_param(70, clamp(math.floor(v + 0.5), 0, 9)) end,
+    to_n = function(v) return (clamp(math.floor(v + 0.5), 0, 9) + 0.5) / 10 end,
+    from_n = function(n) return math.min(9, math.floor(clamp(n, 0, 1) * 10)) end,
+    def = 0,
+    push = function() tgt_set_param(70, 0) end,
+    disp = function(v) return LBL[clamp(math.floor(v + 0.5), 0, 9)] or "?" end,
+  }
+end
 local function make_slicer_page()
   local cells = {}
   local function put(r, c, spec) cells[r .. "," .. c] = spec end
@@ -597,13 +615,7 @@ local function make_slicer_page()
     function(v) return string.format("%.0fst", v) end)
   -- V3.27 : D3 = SCALER (gamme du Pitch / clavier / Pitch Spread), en ROSE (famille Pitch) pour le distinguer du Slicer.
   -- Lu dans la zone de publication supplementaire du JSFX (112000 + (looper*3 + part)*20 + 3), ecrit par le param 70.
-  local SC_LBL = { [0] = "Free", "1/2 ton", "Ton", "Penta", "Majeure", "MinHarm", "MinMel", "Dimin", "Augm", "Octave" }
-  cell_list(3, 2, "Scaler", 0, 70, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 0, nil, SC_LBL)
-  cells["3,2"].get = function()
-    local li = page_targets()[1]
-    return reaper.gmem_read(112000 + ((li - 1) * 3 + active_part(li) - 1) * 20 + 3) or 0
-  end
-  cells["3,2"].col = { 0.95, 0.40, 0.70 }; cells["3,2"].twc = 108
+  put(3, 2, scaler_cell())
   cell_lin(3, 3, "Dry/Wet", 193, 61, 0, 1, 1, 0.01,             -- Slicer Dry/Wet : 0 = boucle d'origine, 1 = slicer
     function(v) return string.format("%.0f%%", v * 100) end)
   return cells
@@ -614,7 +626,7 @@ local function make_cloud_page()
   --   A : Pos (push = Link/Free) | Density | Size (log) | Agitation
   --   B : Spread | LFO forme (Sine / Saw / InvSaw / Random) | Rate | Depth
   --   C : Width (= Stereo de la section Output) | Diffuse (push = Freeze on/off) | PSpread (pitch des grains) | Smooth (lissage du LFO Random)
-  --   D : - | - | - | Dry/Wet
+  --   D : - | - | Scaler (rose, 24 nov.) | Dry/Wet
   -- Push : valeur par defaut, sauf Pos (Link/Free) et Diffuse (Freeze). PSpread (23 nov.) : en C3, aussi page 7 / MIDI Learn.
   local cells = {}
   local function cell(r, c, label, off, id, lo, hi, def, disp)
@@ -674,6 +686,7 @@ local function make_cloud_page()
     return reaper.gmem_read(112000 + ((i - 1) * 3 + active_part(i) - 1) * 20) or 0
   end
   -- D
+  cells["3,2"] = scaler_cell()                                    -- V3.27 : Scaler (rose), meme place que sur la page Slicer
   cell(3, 3, "Dry/Wet", 36, PID.cloud_mix, 0, 1, 1, pct)
   return cells
 end
