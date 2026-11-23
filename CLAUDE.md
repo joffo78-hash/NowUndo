@@ -365,6 +365,12 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   lue dans `lut_cos` interpolée au lieu d’un `cos()` par grain et par sample (même son à −108 dB, `tools/tcloudcpu.py`) ;
   gain réel dans REAPER inconnu (le banc Python ne mesure pas le coût EEL2). Un « hold » de 248 ms = rechargement du JSFX,
   pas le calcul : remettre le hold à zéro avant de mesurer.
+- **Conclusion (mesures de l'utilisateur)** : 4 loopers en lecture simple = 4,34 ms, 1 looper ≈ 3,5 ms, et **2,68 ms sans
+  ses plugins Roland Cloud** (piste « rodhes ») → le dépassement venait surtout des plugins Roland, pas de NowUndo.
+- Ajouté : **mesure intégrée** du temps de calcul par bloc dans le JSFX (`pf_*` : `@block` → dernier sample du bloc),
+  bandeau du haut « CPU bloc max x / y ms (analyse | freeze | warp | drop | import | cloud | stretch | overdub | rec) »,
+  vert < 50 %, orange < 100 %, rouge ≥ durée du bloc ; clic = remise à zéro ; publié en `112000 + i*60 + 1` (ms) / `+ 2`
+  (tag). Libellé du bandeau passé de « V3.26 » à « V3.27 ».
 
 ## 23 nov. : Clear du maître = la synchro reste verrouillée (JSFX V3.27)
 
