@@ -143,7 +143,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   dépôt ReaPack (pas redistribués) ; Neurotype = pas de licence écrite → pas dans le paquet. Doublons à la racine et dans `Tukan/`.
   **À l'utilisateur** (confirmé 24 nov.) : `Manipulator_Formant`, `grm_sweep_comb` (+ `joffo_stutter`, `16rec` d'après leur
   en-tête). **Pas à lui / origine inconnue** : `--bbddelay.jsfx` (utilisé partout), `freezer`, « GRM comb v2 »
-  (`Lexikan2gui/SC Filter (Tukan)`). `Filters_LPHP` = à lui aussi, mais « simplifié du SC Filter de Tukan » (licence Tukan à vérifier si du code est repris).
+  (`Lexikan2gui/SC Filter (Tukan)`). `Filters_LPHP` = à lui aussi, mais « simplifié du SC Filter de Tukan » (**recopie du code de Tukan** → à réécrire par nous).
+  **Convention des effets du pack (demandée)** : le Twister (page FX) et le FX Router montrent les **4 premiers paramètres**
+  de chaque effet → slider1 = **Dry/Wet** quand il a un sens, puis les paramètres principaux (4 au total en tête).
+  Effets réordonnés = **nouveaux fichiers** (« NU … ») pour ne pas casser les projets / réglages mémorisés par index.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
