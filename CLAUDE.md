@@ -401,6 +401,10 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   incohérents / non entendus) et LAT inchangé ; re-clic = annuler ; message 8 s sur la ligne d'aide du bas. Mémoire
   `cal_d = sm_r + 528` (16 cases). Mesure l'aller-retour réel (pilote + effets après le looper + air). Test `tools/tcal.py`
   (23 ms → 22,9 ; 47,3 ms faible → 47,4 ; trop faible → « non entendus »).
+- **Calibration partagée** : `gmem[958]` = ms mesurés, `gmem[959]` = date (`time()`) ; sliders 71/72 `cal_sv_ms` /
+  `cal_sv_d` (sauvés avec le projet, la plus récente gagne, republiée au chargement) ; LAT « auto » = calibration si
+  présente, sinon Launchpad (955 + 956) ; après CAL le looper repasse en Auto ; menu LAT : « Oublier la calibration ».
+  Test `tools/tcal2.py`.
 - Si le décalage reste grand : piste du looper armée avec monitoring (sinon REAPER calcule les effets en avance,
   « anticipative FX », et le retard dépasse la latence de la carte).
 
