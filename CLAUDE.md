@@ -349,6 +349,22 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   fait à la main n'est pas repris). Drop en autonome : pas possible (orchestré par le Launchpad), proposé : bouton
   « Resample » dans le JSFX.
 
+## 24 nov. : page 9 « LOOPER » du Twister (réglages principaux du looper sélectionné)
+
+- `CU.P9` (`CU.p9_build`, `CU.p9_cell` : cellules faites avec `CU_KNOBS` / `CU_BTNS`, règle de groupe `CU.set_group`, push
+  `CU.fire`) ; `CU.page_cells(9)`. Disposition (rangées haut → bas, colonnes A..D) : **1** Volume | Feedback | Stereo (rouge) |
+  Grain (rose) ; **2** Speed | Pitch | Scaler | Grn Fade (rose) ; **3** In (push = Full Loop = reset In/Out) | Out (push =
+  Out ↔ Width, `CU.p9w`) | BR Mix (push = Beat Repeat) | Quantize `io_frac` (push = Full Loop) (vert) ; **4** Rec Dens (push =
+  REC) | Play (knob inactif, anneau = joue, push = Stop/Play) | Clear (knob inactif, anneau = boucle, push = Clear) | Auto
+  Seuil (push = Auto) (rouge). Push non précisé = défaut du knob.
+- Pages 1..9 partout : `fighter_page()` du Twister, `VL.set_fighter_page` (clamp 9), `twpage_9`, MIDI Learn (`FIGHTER_NAMES`
+  + « Looper » → action « Twister page 9 (Looper) » ; pas d'aux pour la page 9), rush `go t9`.
+- **Sélection d'un looper → page 9** si les pages ne sont pas verrouillées (`tw_lock`) : `VL.tw_follow_sel()` dans
+  `VL.select_looper` / `VL.step_looper` (pas en miroir) ; MIDI Learn `fire_ui` sel_looper (sauf si l'action demande une page).
+  Une action qui suit la sélection (REC, Slicer…) garde sa navigation auto (`VL.auto_twister` passe après).
+- Test : mock lupa (lectures, knob Volume, pushes REC 1 / Stop-Play 3 / Full Loop 22 / BR 33 / Auto 19, Out ↔ Width).
+  Non testé dans REAPER ; la page web n'a pas de bouton 9 (elle affiche la page quand elle est active).
+
 ## 24 nov. : stretch = alignement des grains réparé + Grn Fade sur la lecture
 
 - **Bug introduit le 23 nov.** (limite « pas de recherche au-delà de ×2,5 ») : un commentaire `//` posé au milieu de la ligne

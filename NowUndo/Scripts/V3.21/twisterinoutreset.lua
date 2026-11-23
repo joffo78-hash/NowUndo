@@ -39,6 +39,7 @@ local PAGE_COL = {
   [6] = {0.20, 0.85, 0.90},  -- cyan (header page 6)
   [7] = {0.85, 0.85, 0.88},  -- Custom (chaque knob a la couleur de sa fonction)
   [8] = {0.55, 0.57, 0.62},  -- Display
+  [9] = {0.85, 0.85, 0.88},  -- Looper (V3.27 : reglages principaux du looper selectionne, chaque knob a sa couleur)
 }
 -- Page 6 : couleur par colonne (slot 1..4) — teintes adoucies
 local PAGE6_COL = {
@@ -49,7 +50,7 @@ local PAGE6_COL = {
 }
 local PAGE_NAME = {
   [1] = "In/Out", [2] = "Pitch/Speed", [3] = "Vol/Feedback",
-  [4] = "Slicer", [5] = "Cloud", [6] = "Effets", [7] = "Custom", [8] = "Display",
+  [4] = "Slicer", [5] = "Cloud", [6] = "Effets", [7] = "Custom", [8] = "Display", [9] = "Looper",
 }
 
 --------------------------------------------------------------------------
@@ -141,7 +142,7 @@ end
 local PAGE_SLOT_SWAP = { [1] = 3, [3] = 1 }
 local function fighter_page()
   local p = tonumber(reaper.GetExtState(VL_SEC, "fighter_page")) or 1
-  p = math.max(1, math.min(8, math.floor(p)))
+  p = math.max(1, math.min(9, math.floor(p)))
   return PAGE_SLOT_SWAP[p] or p
 end
 
@@ -954,7 +955,60 @@ for i = 1, 8 do
     disp = function(v) if v < 0.0001 then return "-inf" end return string.format("%.0fdB", 20 * math.log(v, 10)) end,
   }
 end
-function CU.page_cells(page) if page == 7 then return CU.cells() end return CU.P8 end
+-- V3.27 : page 9 « LOOPER » = reglages principaux du looper selectionne (et de son groupe, meme regle que la page 7).
+-- Appelee par le MIDI Learn / un rush (go t9) et, si les pages ne sont pas verrouillees, a chaque selection d'un looper.
+-- Rangees de haut en bas, colonnes A..D :
+--   1 : Volume | Feedback | Stereo | Grain (rose)              (rouge sauf Grain)
+--   2 : Speed | Pitch | Scaler | Grain Fade                     (rose)
+--   3 : In (push = reset In/Out) | Out (push = Out <-> Width) | BR Mix (push = Beat Repeat) | Quantize (push = Full Loop)  (vert)
+--   4 : Rec Density (push = REC) | Play (push = Stop/Play) | Clear (push = Clear) | Auto Seuil (push = Auto)  (rouge)
+-- Push non precise = valeur par defaut du knob.
+CU.RED, CU.PINK, CU.GREEN = { 0.90, 0.25, 0.25, 84 }, { 0.95, 0.40, 0.70, 108 }, { 0.20, 0.75, 0.40, 50 }
+function CU.p9_cell(kid, label, fam, bid)
+  local k = CU.K[kid]
+  return {
+    label = label, col = { fam[1], fam[2], fam[3] }, twc = fam[4],
+    get = function() return CU.get_n(k, sel_looper()) end,
+    set = function(_, n) CU.set_group(k, 900 + (CU.p9idx[kid] or 0), n) end,
+    to_n = function(n) return n end, from_n = function(n) return n end,
+    push = function() CU.fire(bid or "knob_def", kid) end,
+    disp = function() return CU.disp(k, sel_looper()) end,
+  }
+end
+function CU.p9_build()
+  local P, R, K, G = {}, CU.RED, CU.PINK, CU.GREEN
+  local L = { { "out_vol", "Volume", R }, { "feedback", "Feedback", R }, { "stereo", "Stereo", R }, { "grain", "Grain", K },
+              { "speed", "Speed", K }, { "pitch", "Pitch", K }, { "scale", "Scaler", K }, { "grain_fade", "Grn Fade", K },
+              { "in", "In", G, "full_loop" }, { "out", "Out", G }, { "br_mix", "BR Mix", G, "beat_rep" }, { "io_frac", "Quantize", G, "full_loop" },
+              { "rec_dens", "Rec Dens", R, "rec" }, nil, nil, { "auto_thr", "Auto Seuil", R, "auto" } }
+  CU.p9idx = {}
+  for i = 1, 16 do
+    local e = L[i]
+    if e then CU.p9idx[e[1]] = i; P[math.floor((i - 1) / 4) .. "," .. ((i - 1) % 4)] = CU.p9_cell(e[1], e[2], e[3], e[4]) end
+  end
+  -- Out : le push bascule le knob entre Out et Width (comme la page In/Out)
+  local o = P["2,1"]
+  CU.p9w = false
+  o.get = function() return CU.get_n(CU.K[CU.p9w and "width" or "out"], sel_looper()) end
+  o.set = function(_, n) CU.set_group(CU.K[CU.p9w and "width" or "out"], 910, n) end
+  o.disp = function() return (CU.p9w and "W " or "") .. CU.disp(CU.K[CU.p9w and "width" or "out"], sel_looper()) end
+  o.push = function() CU.p9w = not CU.p9w; o.label = CU.p9w and "Width" or "Out" end
+  -- Play / Clear : le knob ne fait rien, seul le push agit ; l'anneau montre l'etat
+  local function st() return read_fb(sel_looper(), 2) end
+  P["3,1"] = { label = "Play", col = { R[1], R[2], R[3] }, twc = R[4],
+    get = function() local v = st(); return (v >= 2 and v <= 6) and 1 or 0 end, set = function() end,
+    to_n = function(n) return n end, from_n = function(n) return n end,
+    push = function() CU.fire("stop_play") end,
+    disp = function() local v = st(); return v == 1 and "REC" or ((v >= 2 and v <= 6) and "PLAY" or (v >= 7 and "ATTENTE" or "STOP")) end }
+  P["3,2"] = { label = "Clear", col = { R[1], R[2], R[3] }, twc = R[4],
+    get = function() return read_fb(sel_looper(), 46) > 0 and 1 or 0 end, set = function() end,
+    to_n = function(n) return n end, from_n = function(n) return n end,
+    push = function() CU.fire("clear") end,
+    disp = function() return read_fb(sel_looper(), 46) > 0 and "boucle" or "vide" end }
+  return P
+end
+CU.P9 = CU.p9_build()
+function CU.page_cells(page) if page == 7 then return CU.cells() elseif page == 9 then return CU.P9 end return CU.P8 end
 
 local PAGES = {
   [2] = make_scalar_page_pitch_speed(),
@@ -1547,7 +1601,7 @@ local function read_knob_norm(page, idx, now_t)
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     return clamp(fx_get_param_norm(s, p) or 0, 0, 1)
-  elseif page == 7 or page == 8 then
+  elseif page == 7 or page == 8 or page == 9 then
     local spec = CU.page_cells(page)[math.floor(idx / 4) .. "," .. (idx % 4)]
     if not spec then return 0 end
     local li = spec.looper or sel_looper()
@@ -1657,8 +1711,8 @@ local function twister_send_colors(page)
     log_sent(0xB0, 2, enc, v)
     pcall(reaper.SendMIDIMessageToHardware, midi_out_idx, string.char(0xB2, enc, v))
   end
-  if page == 7 or page == 8 then
-    local cells = (page == 7) and CU.cells() or {}
+  if page == 7 or page == 8 or page == 9 then
+    local cells = (page ~= 8) and CU.page_cells(page) or {}
     for enc = 0, 15 do
       local spec = cells[math.floor(enc / 4) .. "," .. (enc % 4)]
       local val = spec and spec.twc
@@ -1875,8 +1929,8 @@ local function midi_apply_knob(idx, norm, page)
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     fx_set_param(s, p, norm)
-  elseif page == 7 then
-    local spec = CU.cells()[math.floor(idx / 4) .. "," .. (idx % 4)]
+  elseif page == 7 or page == 9 then
+    local spec = CU.page_cells(page)[math.floor(idx / 4) .. "," .. (idx % 4)]
     if spec then spec.set(nil, norm) end
   end                                                  -- page 8 : affichage seul
 end
@@ -1928,8 +1982,8 @@ local function midi_apply_btn(idx, page)
   elseif page == 6 then
     local s, p = fx_idx_to_slot_param(idx)
     fx_reset_param(s, p)
-  elseif page == 7 then
-    local spec = CU.cells()[math.floor(idx / 4) .. "," .. (idx % 4)]
+  elseif page == 7 or page == 9 then
+    local spec = CU.page_cells(page)[math.floor(idx / 4) .. "," .. (idx % 4)]
     if spec and spec.push then spec.push() end
   end
 end
@@ -2408,7 +2462,7 @@ function main()
     gfx.set(0.7, 0.7, 0.7, 1)
     gfx.x, gfx.y = 68 * s, 16 * s
     gfx.drawstr("Custom 7" .. string.char(96 + sub) .. "  → L" .. table.concat(page_targets(), ",L") .. "   (assignations : MIDI Learn > Custom P7" .. string.char(96 + sub) .. ")")
-  elseif page >= 4 and page <= 5 then
+  elseif (page >= 4 and page <= 5) or page == 9 then
     gfx.setfont(1, "Arial", math.floor(9 * s))
     gfx.set(0.7, 0.7, 0.7, 1)
     gfx.x = 6 * s

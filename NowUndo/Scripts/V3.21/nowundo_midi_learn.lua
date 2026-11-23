@@ -94,9 +94,9 @@ for p = 1, 4 do
   TARGETS[#TARGETS + 1] = U("page:" .. p, "Launchpad Page " .. p, "Pages", { page = p })
 end
 -- Noms LOGIQUES des pages (contenu) : utilises par les learns aux "aux:P" (P = contenu, inchange)
-local FIGHTER_NAMES = { "In/Out", "Pitch/Speed", "Vol/Fdbk", "Slicer", "Cloud", "Effets", "Custom", "Display" }
+local FIGHTER_NAMES = { "In/Out", "Pitch/Speed", "Vol/Fdbk", "Slicer", "Cloud", "Effets", "Custom", "Display", "Looper" }
 -- v2.5 : nom de la page appelee par chaque BOUTON (Twister v3.3 : pages 1 et 3 permutees)
-local SLOT_NAMES = { "Vol/Fdbk", "Pitch/Speed", "In/Out", "Slicer", "Cloud", "Effets", "Custom", "Display" }
+local SLOT_NAMES = { "Vol/Fdbk", "Pitch/Speed", "In/Out", "Slicer", "Cloud", "Effets", "Custom", "Display", "Looper" }
 local NFIGHTER = #FIGHTER_NAMES
 for n = 1, NFIGHTER do
   TARGETS[#TARGETS + 1] = U("fighter:" .. n, "Twister page " .. n .. " (" .. SLOT_NAMES[n] .. ")", "Pages", { fighter = n })
@@ -238,7 +238,7 @@ end
 
 -- LEARN AUX : 16 knobs + 16 push pour CHAQUE page Twister (1..7 ; la page 8 Display n'a rien a piloter)
 -- Un controleur appris ici pilote la page en permanence (page active ou non).
-for p = 1, NFIGHTER - 1 do
+for p = 1, 7 do                                    -- V3.27 : pas d'aux pour la page 9 Looper (comme la page 8 Display)
   for idx = 0, 15 do
     local row, col = math.floor(idx / 4) + 1, (idx % 4) + 1
     TARGETS[#TARGETS + 1] = {
@@ -885,6 +885,11 @@ local function fire_ui(ui)
       t.sel_group = (type(t.group_of) == "table" and t.group_of[i]) or 0   -- comme follow_group() du Launchpad
     end)
     reaper.SetExtState(VL_SEC, "sel_looper", tostring(i), false)   -- lecture immediate (Twister, pas suivants)
+    -- V3.27 : selectionner un looper amene le Twister sur la page 9 « Looper » (sauf pages verrouillees ou page demandee)
+    if not ui.fighter and reaper.GetExtState(VL_SEC, "tw_lock") ~= "1" then
+      vl_state_edit(function(t) t.fighter_page = 9 end)
+      reaper.SetExtState(VL_SEC, "fighter_page", "9", false)
+    end
   end
   if ui.sel_group then
     local g = ui.sel_group

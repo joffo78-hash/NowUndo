@@ -1023,8 +1023,14 @@ local function follow_group()
   if g ~= S.sel_group then log("info", "group %d active", g) end
   S.sel_group = g
 end
+-- V3.27 : selectionner un looper amene le Twister sur sa page 9 « Looper » (reglages principaux), sauf pages verrouillees
+function VL.tw_follow_sel()
+  if VL.mirror_mode or not VL.tw_locked or VL.tw_locked() then return end
+  VL.set_fighter_page(9)
+end
 function VL.select_looper(i)
   S.sel_looper = clamp(i, 1, NLOOP)
+  VL.tw_follow_sel()
   follow_group()
   S.fx_source = NIN + S.sel_looper
   VL.publish_fx_source()
@@ -1033,6 +1039,7 @@ function VL.select_looper(i)
 end
 function VL.step_looper(d)
   S.sel_looper = ((S.sel_looper - 1 + d) % NLOOP) + 1
+  VL.tw_follow_sel()
   follow_group()
   S.fx_source = NIN + S.sel_looper
   VL.publish_fx_source()
@@ -1068,7 +1075,7 @@ function VL.set_page(p)
   end
 end
 function VL.set_fighter_page(n)
-  S.fighter_page = clamp(n, 1, 8)
+  S.fighter_page = clamp(n, 1, 9)                      -- V3.27 : 9 = page Looper
   VL.hooks.fighter_page(S.fighter_page)
   if reaper and reaper.SetExtState then
     reaper.SetExtState("nowundo_vl", "fighter_page", tostring(S.fighter_page), false)
@@ -2690,7 +2697,7 @@ function VL.ext_cmd_poll()
       if mk and mk >= 1 and mk <= NIN then VL.set_input_mute(mk, mm) end
       local tw, tws = name:match("^twpage_(%d+)_?(%d*)$")                  -- twpage_7_2 = page 7, sous-page b (rush "go t7b")
       tw = tonumber(tw)
-      if tw and tw >= 1 and tw <= 8 then if tw == 7 and tonumber(tws) then VL.tw_cu_sub(tonumber(tws)) end VL.set_fighter_page(tw) end
+      if tw and tw >= 1 and tw <= 9 then if tw == 7 and tonumber(tws) then VL.tw_cu_sub(tonumber(tws)) end VL.set_fighter_page(tw) end
       -- V3.27 (8 Waves interactif) : sel_<i> = selectionne L i ; stap_<i> = tap du pad de la 2e rangee (statut) de L i ;
       -- ctrlgrp_<i>_1 = 1er Ctrl+clic (L i libre -> nouveau groupe, groupe -> on edite le sien) ; ctrlgrp_<i>_0 = clics
       -- suivants, Ctrl toujours tenu : L i entre / sort de ce groupe (meme geste que Ctrl + clic sur la rangee du haut)
