@@ -833,7 +833,9 @@ function CU.set_n(k, s, n)
     local len = read_fb(s, 46)
     if len <= 0 then return end
     local i0, w0 = read_fb(s, 44), read_fb(s, 45)
-    if k[11] == "in" then write_edit(s, 1, math.max(0, math.min(i0 + w0, n * len)), nil)      -- In (Out fixe)
+    -- In DECALE la fenetre : l'ecart (Width) ne bouge jamais quand In bouge (commande 5, comme la page 1 en mode Width).
+    -- Width regle l'ecart entre In et Out. (Corrige le 24 nov. : avant, commande 1 = Out fixe -> l'ecart changeait.)
+    if k[11] == "in" then write_edit(s, 5, math.max(0, math.min(math.max(0, len - w0), n * len)), nil)
     elseif k[11] == "out" then write_edit(s, 2, nil, math.max(i0, math.min(len, n * len)))   -- Out
     else write_edit(s, 3, nil, math.max(0, math.min(len - i0, n * len))) end                  -- Width
     return

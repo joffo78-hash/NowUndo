@@ -66,6 +66,11 @@ propre page Launchpad** (`VL.web_with_page`).
 
 ## Règles de code (pièges déjà rencontrés)
 
+- **RÈGLE ABSOLUE In / Out / Width (l'utilisateur l'a répétée ~20 fois, ne JAMAIS la changer)** : **Width règle l'écart entre
+  In et Out ; In DÉCALE la fenêtre et l'écart ne bouge PAS quand In bouge** (commande d'édition 5, In borné à
+  longueur − width). Partout : page 1 (mode Width), pages 7 Custom et 9 Looper (`CU.set_n` « in »). Le 24 nov. le knob
+  « in » de `CU_KNOBS` utilisait la commande 1 (Out fixe = l'écart changeait) : corrigé.
+
 - **Lua : 200 variables locales max au niveau principal.** `virtuallaunchpad_main.lua` ≈ 143 (fonctions rangées dans
   `VL.*`, `LPF.*`), `NowUndo_Scenario.lua` ≈ 193 (**presque plein** : ranger le neuf dans la table `ED` ou `H._xxx`),
   `twisterinoutreset.lua` ≈ 172. Vérifier avec `python3 tools/lualoc.py <fichier>` après chaque modif.
