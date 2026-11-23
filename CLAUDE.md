@@ -359,6 +359,11 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 - Test `tools/tgrain.py . f.jsfx <pitch> <speed>` (note de 65 Hz, modulation d'enveloppe) : avant 6-16 %, après 0,1 % à
   40 ms, ~5 % à 80/150 ms dont 2-4 % viennent du raccord de boucle dans la mesure (même valeur sans transposition).
 - Drop solo : le banc montre que la bascule remet déjà le pitch à 0 (`dr_install`) ; question posée à l'utilisateur.
+- **Transposition par un autre contrôleur** (signalé : entrée MIDI de la piste du looper = piano canal 9, mais le QuNeo canal 1
+  transposait) : les **envois** créés par le Launchpad (entrées → loopers, looper → looper, drop) transportaient le MIDI
+  (défaut REAPER) et contournaient l'entrée MIDI de la piste. Maintenant `LPF.send_nomidi` met `I_MIDIFLAGS` = 31 (MIDI
+  coupé) à la création **et** sur les envois existants (`ensure_send` / `set_send_open`, repassé au démarrage par
+  `VL.apply_routing()`). Envois faits à la main dans REAPER : non touchés.
 
 ## 23 nov. : clavier MIDI = sélection + transposition en lecture + SCALER (JSFX V3.27, Launchpad, Scenario)
 

@@ -582,9 +582,17 @@ function LPF.find_send(src, dst)
   return nil
 end
 
+-- V3.27 : les envois du Launchpad ne transportent PAS de MIDI (I_MIDIFLAGS = 31). Sinon le MIDI des pistes d'entree
+-- (QuNeo, Launchpad...) arrivait dans les loopers par ces envois, sans passer par l'entree MIDI choisie sur la piste du
+-- looper -> il transposait le looper. Corrige aussi les envois deja crees.
+function LPF.send_nomidi(src, idx)
+  if (reaper.GetTrackSendInfo_Value(src, 0, idx, "I_MIDIFLAGS") or 0) % 32 ~= 31 then
+    reaper.SetTrackSendInfo_Value(src, 0, idx, "I_MIDIFLAGS", 31)
+  end
+end
 function LPF.ensure_send(src, dst)
   local idx = LPF.find_send(src, dst)
-  if idx then return idx end
+  if idx then LPF.send_nomidi(src, idx) return idx end
   if not (src and dst) then return nil end
   idx = reaper.CreateTrackSend(src, dst)
   if idx and idx >= 0 then
@@ -592,6 +600,7 @@ function LPF.ensure_send(src, dst)
     reaper.SetTrackSendInfo_Value(src, 0, idx, "I_SENDMODE", 0)  -- post-fader
     reaper.SetTrackSendInfo_Value(src, 0, idx, "I_SRCCHAN", 0)    -- stereo 1/2
     reaper.SetTrackSendInfo_Value(src, 0, idx, "I_DSTCHAN", 0)
+    LPF.send_nomidi(src, idx)
     return idx
   end
   return nil
@@ -601,6 +610,7 @@ function LPF.set_send_open(src, dst, open, gain_db)
   if not (src and dst) then return false end
   local idx = open and LPF.ensure_send(src, dst) or LPF.find_send(src, dst)
   if not idx then return false end
+  LPF.send_nomidi(src, idx)
   -- mute si ferme ; unmute + volume si ouvert
   reaper.SetTrackSendInfo_Value(src, 0, idx, "B_MUTE", open and 0 or 1)
   if open then
@@ -2533,6 +2543,7 @@ function VL.drop_group()
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_SENDMODE", 0)
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_SRCCHAN", 0)
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "I_DSTCHAN", ch)
+      LPF.send_nomidi(tr, idx)
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "D_VOL", 1)
       reaper.SetTrackSendInfo_Value(tr, 0, idx, "B_MUTE", 0)
       R.sends[#R.sends + 1] = tr
