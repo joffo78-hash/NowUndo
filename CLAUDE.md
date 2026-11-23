@@ -395,6 +395,12 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   **slider70 `lat_own`** (-1 = Auto = Launchpad, sinon ms) = bouton **« LAT auto / LAT n ms »** (menu) dans le panneau
   OUTPUT (VU raccourcis à 300 px). Test `tools/tstart2.py . v327.jsfx <retard_clic_ms> <latence_ms> <LAT>` (latence 30 ms,
   LAT 30 → 1er son à 0 ms ; LAT auto sans Launchpad → 30 ms). `tools/tstart.py` : REC + son simultanés → 0 ms.
+- **Bouton CAL (23 nov.)** sous LAT (panneau OUTPUT, 330, 592) : 8 clics (2 kHz, 1,5 ms, 0,6) joués **à la place de la
+  sortie** du looper toutes les ~0,47 s, retour écouté à l'entrée (bruit de fond 120 ms avant, pic dans les 300 ms
+  après) ; délai = pic − milieu du clic ; tri, médiane, ≥ 3 retours à ±1 ms → `lat_own` (LAT) ; sinon message (retours
+  incohérents / non entendus) et LAT inchangé ; re-clic = annuler ; message 8 s sur la ligne d'aide du bas. Mémoire
+  `cal_d = sm_r + 528` (16 cases). Mesure l'aller-retour réel (pilote + effets après le looper + air). Test `tools/tcal.py`
+  (23 ms → 22,9 ; 47,3 ms faible → 47,4 ; trop faible → « non entendus »).
 - Si le décalage reste grand : piste du looper armée avec monitoring (sinon REAPER calcule les effets en avance,
   « anticipative FX », et le retard dépasse la latence de la carte).
 

@@ -235,6 +235,26 @@ wp_max = 1024; wp_mk = st_fft + 8192; wp_sr = wp_mk + wp_max + 16; wp_tg = wp_sr
 // au-dessus de 0 dB ecretes en sortie = craquements (voix tenue, densite 95 %)
 cl_lk = wp_dd + wp_max + 16; memset(cl_lk, 0, 512); cl_lD = max(8, min(250, floor(srate * 0.002))); cl_li = 0;
 sm_l = cl_lk + 512 + 16; sm_r = sm_l + 512; sm_ok = 0; sm_N = 0; rp_D = 0;   // V3.26 : raccord de boucle soude a la fin du REC
+// V3.27 (23 nov.) : CALIBRATION DE LA LATENCE (bouton CAL du panneau OUTPUT). Le looper joue 8 petits clics (2 kHz, 1,5 ms)
+// a la place de sa sortie et les ecoute revenir a son entree (cable sortie -> entree, ou haut-parleurs -> micro d'un
+// portable). Delai = pic du retour - milieu du clic emis ; mediane des retours coherents -> LAT (lat_own, slider70).
+cal_d = sm_r + 512 + 16; cal_on = 0; cal_k = 0; cal_n = 0; cal_t = 0; cal_nf = 0; cal_pk = 0; cal_pt = 0; cal_msg = 0; cal_msg_t = 0; cal_res = 0;
+function cal_start() (
+  cal_emit = floor(0.12 * srate); cal_win = floor(0.30 * srate); cal_per = cal_emit + cal_win + floor(0.05 * srate);
+  cal_cl = max(16, floor(0.0015 * srate));
+  cal_on = 1; cal_k = 0; cal_n = 0; cal_t = 0; cal_nf = 0; cal_pk = 0; cal_pt = 0; cal_msg = 0;
+);
+function cal_finish() local(i, j, v, med, ok) (
+  cal_on = 0; cal_msg_t = time_precise();
+  i = 1; loop(max(0, cal_n - 1), v = cal_d[i]; j = i - 1; while (j >= 0 && cal_d[j] > v) ( cal_d[j + 1] = cal_d[j]; j -= 1; ); cal_d[j + 1] = v; i += 1; );
+  cal_n >= 3 ? (
+    med = cal_d[floor(cal_n / 2)]; ok = 0; i = 0;
+    loop(cal_n, abs(cal_d[i] - med) <= srate * 0.001 ? ok += 1; i += 1; );
+    ok >= 3 ? (
+      cal_res = med * 1000 / srate; lat_own = max(0, min(150, floor(cal_res + 0.5))); slider70 = lat_own; cal_msg = 1;
+    ) : ( cal_msg = 2; );
+  ) : ( cal_msg = 3; );
+);
 cl_lg = 1; cl_lh = 1; cl_lc = 0; cl_lth = 0.8; cl_latt = 1 - exp(-4 / cl_lD); cl_lrel = 1 - exp(-1 / (srate * 0.08));
 wp_busy = 0; wp_phase = 0; wp_live = 0; wp_scan = 0; wp_prev_on = 0; wp_mn = 0; wp_n = 0; wp_orig = 0; wp_wsl = 0; wp_tgt = 0; wp_from = 0;
 wp_sig = -1; wp_sig_seen = -1; wp_sig_t = 0; wp_len = 0; an_after_wp = 0; wp_ls = 0; wp_lw = 1;
@@ -2887,6 +2907,13 @@ loop_start != prev_loop_start || loop_width != prev_loop_width ? sync_hard_resyn
 
 @sample
 in0 = spl0; in1 = spl1; wet_s0 = 0; wet_s1 = 0;
+// V3.27 : calibration -> ecoute du retour (bruit de fond avant le clic, pic dans la fenetre apres)
+cal_on ? (
+  cal_x = max(abs(in0), abs(in1));
+  cal_t < cal_emit ? ( cal_nf = max(cal_nf, cal_x); ) : (
+    (cal_t >= cal_emit + 8 && cal_t < cal_emit + cal_win && cal_x > cal_pk) ? ( cal_pk = cal_x; cal_pt = cal_t; );
+  );
+);
 (cloud_on && !cl_on_prev) ? cl_snap = 1; cl_on_prev = cloud_on;   // V3.21 : activation du Cloud -> calage de Pos sur la tete
 qs_i += 1;
 pos_step = 0;
@@ -3576,6 +3603,21 @@ spl0 = max(-1.0, min(1.0, out0)); spl1 = max(-1.0, min(1.0, out1));
 peak_out_vu = max(peak_out_vu * vu_rel, max(abs(spl0), abs(spl1)));
 peak_loop_vu = max(peak_loop_vu * vu_rel, max(abs(wet_s0), abs(wet_s1)));
 slider22 = length > 0 ? (master_pos / length) * 100.0 : 0;
+// V3.27 : calibration -> le clic remplace la sortie du looper ; fin de periode = mesure, 8 clics = resultat
+cal_on ? (
+  cal_c = 0;
+  (cal_t >= cal_emit && cal_t < cal_emit + cal_cl) ? (
+    cal_u = (cal_t - cal_emit) / cal_cl;
+    cal_c = 0.6 * sin(2 * $pi * 2000 * (cal_t - cal_emit) / srate) * (0.5 - 0.5 * cos(2 * $pi * cal_u));
+  );
+  spl0 = cal_c; spl1 = cal_c;
+  cal_t += 1;
+  cal_t >= cal_per ? (
+    (cal_pk > max(cal_nf * 4, 0.002) && cal_n < 16) ? ( cal_d[cal_n] = cal_pt - cal_emit - cal_cl * 0.5; cal_n += 1; );
+    cal_k += 1; cal_t = 0; cal_nf = 0; cal_pk = 0; cal_pt = 0;
+    cal_k >= 8 ? cal_finish();
+  );
+);
 pf_k += 1; pf_k == samplesblock ? ( pf_d = time_precise() - pf_t0; pf_d > pf_max ? ( pf_max = pf_d; pf_tag = pf_fl; ); );
 
 @gfx 760 630
@@ -4003,7 +4045,20 @@ ui_en = 1; ui_btn(330, 576, 60, 14, #lat_lbl, lat_own >= 0, 0.95, 0.55, 0.2) ? (
     lat_own = lat_v; slider70 = lat_v;
   );
 );
+// V3.27 : CAL = mesure de la latence (clics joues puis ecoutes a l'entree)
+ui_en = 1; ui_btn(330, 592, 60, 14, cal_on ? ((time_precise() * 3 % 2 >= 1) ? "CAL ..." : "") : "CAL", cal_on, 0.3, 0.7, 0.95) ? (
+  cal_on ? ( cal_on = 0; cal_msg = 4; cal_msg_t = time_precise(); ) : cal_start();
+);
+(cal_on || time_precise() - cal_msg_t < 8) ? (
+  cal_on ? ( sprintf(#cal_s, "CALIBRATION : clic %d / 8 ... (sortie du looper reliee a son entree, ou micro pres des haut-parleurs)", cal_k + 1); gfx_set(0.5, 0.8, 1); ) :
+  cal_msg == 1 ? ( sprintf(#cal_s, "CALIBRATION OK : latence aller-retour mesuree %.1f ms -> LAT %d ms", cal_res, lat_own); gfx_set(0.5, 1, 0.6); ) :
+  cal_msg == 2 ? ( strcpy(#cal_s, "CALIBRATION : retours incoherents (bruit ? echo ?) -> LAT inchange. Reessaie au calme."); gfx_set(1, 0.5, 0.4); ) :
+  cal_msg == 3 ? ( strcpy(#cal_s, "CALIBRATION : clics non entendus a l'entree -> LAT inchange. Monte le volume / rapproche le micro."); gfx_set(1, 0.5, 0.4); ) :
+  ( strcpy(#cal_s, "CALIBRATION annulee."); gfx_set(0.8, 0.8, 0.8); );
+  gfx_setfont(1); gfx_x = 10; gfx_y = 618; gfx_drawstr(#cal_s);
+) : (
 ui_en = 1; ui_text(10, 618, "Knobs: drag vertical   |   Shift = fine   |   Ctrl/Cmd+click = reset   |   Clear long-press = Clear All", 0.65, 0.55, 0.58, 1, 0);
+);
 last_mouse_x = mouse_x; last_mouse_y = mouse_y; last_mouse_cap = mouse_cap;
 
 
