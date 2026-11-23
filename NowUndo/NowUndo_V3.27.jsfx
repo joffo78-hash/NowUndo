@@ -3417,7 +3417,8 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
             spawn_target_pos -= eff_start; spawn_target_pos -= floor(spawn_target_pos / eff_len) * eff_len; spawn_target_pos += eff_start;
             g_base[0] = spawn_target_pos; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = (rand(2.0) - 1.0) * stereo_width;   // V3.20 : largeur stereo du Cloud = Stereo (section Output)
             g_base[5] = cloud_density; g_base[6] = spawn_target_pos; g_base[7] = calc_cloud_pitch(cloud_pitch_spread);
-          ) : ( rd_dl = 0; rd_Sn = floor(read_align_ms * 0.001 * srate + 0.5);   // V3.27 : au-dela de x2,5 pas de recherche (les grains sautent loin, elle coutait cher : craquements a x10 sur 4 loopers) rd_Wn = min(512, floor(0.4 * grain_dur));
+          ) : ( rd_dl = 0; rd_Sn = floor(read_align_ms * 0.001 * srate + 0.5); rd_Wn = min(512, floor(0.4 * grain_dur));
+          // V3.27 : au-dela de x2,5 pas de recherche (les grains sautent loin, elle coutait cher : craquements a x10 sur 4 loopers)
           (rd_Sn > 0 && rd_Wn >= 64 && rd_prev_ok && abs(pos_step) < 2.5) ? ( rd_ph = ih_n - rd_prev_n; (rd_ph > 0 && rd_ph + rd_Wn < rd_prev_dur) ? rd_dl = rd_pick(pos, rd_prev_start, rd_ph, rd_Sn, rd_Wn, effective_pitch_ratio, effective_rev ? -1 : 1); );
           g_base[0] = pos + rd_dl; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = 0; g_base[5] = 0; g_base[6] = pos; g_base[7] = 0; rd_prev_start = g_base[0]; rd_prev_n = ih_n; rd_prev_dur = grain_dur; rd_prev_ok = 1; ); gi = max_grains; ); gi += 1; ); );
     granular_l = 0; granular_r = 0; total_w = 0; gi = 0; g_dir = effective_rev ? -1 : 1;
@@ -3425,7 +3426,8 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
         g_phase = g_base[1]; g_dur = g_base[3]; g_pan = g_base[4]; g_dens = g_base[5]; g_pitch_off = g_base[7]; g_phase >= g_dur ? (g_base[2] = 0);
         grain_pitch_mult = 1.0; rd_f = g_base[0] + (g_phase * effective_pitch_ratio * grain_pitch_mult * g_dir); rd_f -= eff_start; rd_f -= floor(rd_f / eff_len) * eff_len; rd_f += eff_start; rd_f = max(eff_start, min(eff_end - 1.0001, rd_f));
         rd_i = floor(rd_f); rd_frac = rd_f - rd_i; rp1 = rd_i; rp0 = max(eff_start, rp1 - 1); rp2 = min(eff_end - 1, rp1 + 1); rp3 = min(eff_end - 1, rp2 + 1);
-        p_norm = g_phase / g_dur; min_fade_samps = srate * 0.0015; f_samps = max(min_fade_samps, g_dur * (0.02 + g_dens * 0.48)); env = 1.0; curr_samp = g_phase; curr_samp < f_samps ? env = curr_samp / f_samps : ((g_dur - curr_samp) < f_samps ? env = (g_dur - curr_samp) / f_samps);
+        // V3.27 : Grn Fade agit enfin sur la lecture (avant : 2 % fixes, le reglage ne servait qu'a l'overdub)
+        p_norm = g_phase / g_dur; min_fade_samps = srate * 0.0015; f_samps = max(min_fade_samps, g_dur * max(0.02, min(0.5, grain_fade * 0.01))); env = 1.0; curr_samp = g_phase; curr_samp < f_samps ? env = curr_samp / f_samps : ((g_dur - curr_samp) < f_samps ? env = (g_dur - curr_samp) / f_samps);
         env = max(0, min(1, env)); env = 0.5 - 0.5 * cos(env * $pi);
         g_l = hermite(rd_frac, left_buf[rp0], left_buf[rp1], left_buf[rp2], left_buf[rp3]) * env; g_r = hermite(rd_frac, right_buf[rp0], right_buf[rp1], right_buf[rp2], right_buf[rp3]) * env;
         0 ? ( p_ang = (g_pan + 1.0) * 0.25 * $pi; gl_gain = cos(p_ang) * 1.414; gr_gain = sin(p_ang) * 1.414; g_mono = (g_l + g_r) * 0.5; g_l = g_mono * gl_gain; g_r = g_mono * gr_gain; );
