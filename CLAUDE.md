@@ -356,6 +356,11 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   produits + affinage (~19 000). Banc : même sortie (`tools/tstretch_q.py`), blocs > 4× la médiane 15 → 0
   (`tools/tcpu.py . v327.jsfx gran`). **Non confirmé dans REAPER** : si ça craque encore, regarder le « RT CPU / longest
   block » du Performance Meter et essayer un buffer de 256.
+- Suite (vidéo de l'utilisateur : L1-L4 à ×10, pitch +0,5, 128 samples → trous de bloc + craquements) : **pas de recherche
+  WSOLA au-delà de ×2,5** (`abs(pos_step) < 2.5`, ~83 recherches/s/looper à ×10 pour un gain nul) ; **clic au passage
+  ×1 → ×10** (3 sauts dans le signal, `tools/tstretch2.py`) : moteur au repos = aucun grain, ~12 ms de trou pendant le fondu
+  puis 1er grain normalisé par `total_w` ≈ 0 = plein volume d'un coup → `spawn_timer` forcé quand `grain_mix` = 0 (1er grain
+  dès le démarrage) + `total_w = max(total_w, 0.35)`. Banc : 0 clic sur 1→10, 10→1, 1→0,25.
 
 ## 23 nov. : Clear du maître = la synchro reste verrouillée (JSFX V3.27)
 

@@ -3292,6 +3292,9 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
     grain_target = gran_now ? 1 : 0;
   );
   grain_target != grain_mix ? ( grain_mix += (grain_target > grain_mix ? 1 : -1) * xfade_coeff; grain_mix < 0 ? grain_mix = 0 : grain_mix > 1 ? grain_mix = 1; );
+  // V3.27 (23 nov.) : moteur au repos -> le 1er grain part des le 1er sample du demarrage (avant : ~12 ms sans grain pendant
+  // que la lecture directe s'effacait = trou puis grain plein d'un coup = clic au passage x1 -> x10)
+  grain_mix <= 0.001 ? spawn_timer = 1000000000;
   grain_mix > 0.001 && play_mode != 1 && (!is_one_shot_mode || one_shot_playing) ? (   // V3.21 : moteur de time-stretch seul (le Cloud a son moteur)
     0 ? (
       d_norm = cloud_density; c_factor = cloud_chaos; target_grain_ms = 2.0 + (d_norm ^ 2.0) * 798.0; grain_dur = srate * target_grain_ms * 0.001;
@@ -3307,8 +3310,8 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
             spawn_target_pos -= eff_start; spawn_target_pos -= floor(spawn_target_pos / eff_len) * eff_len; spawn_target_pos += eff_start;
             g_base[0] = spawn_target_pos; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = (rand(2.0) - 1.0) * stereo_width;   // V3.20 : largeur stereo du Cloud = Stereo (section Output)
             g_base[5] = cloud_density; g_base[6] = spawn_target_pos; g_base[7] = calc_cloud_pitch(cloud_pitch_spread);
-          ) : ( rd_dl = 0; rd_Sn = floor(read_align_ms * 0.001 * srate + 0.5); rd_Wn = min(512, floor(0.4 * grain_dur));
-          (rd_Sn > 0 && rd_Wn >= 64 && rd_prev_ok) ? ( rd_ph = ih_n - rd_prev_n; (rd_ph > 0 && rd_ph + rd_Wn < rd_prev_dur) ? rd_dl = rd_pick(pos, rd_prev_start, rd_ph, rd_Sn, rd_Wn, effective_pitch_ratio, effective_rev ? -1 : 1); );
+          ) : ( rd_dl = 0; rd_Sn = floor(read_align_ms * 0.001 * srate + 0.5);   // V3.27 : au-dela de x2,5 pas de recherche (les grains sautent loin, elle coutait cher : craquements a x10 sur 4 loopers) rd_Wn = min(512, floor(0.4 * grain_dur));
+          (rd_Sn > 0 && rd_Wn >= 64 && rd_prev_ok && abs(pos_step) < 2.5) ? ( rd_ph = ih_n - rd_prev_n; (rd_ph > 0 && rd_ph + rd_Wn < rd_prev_dur) ? rd_dl = rd_pick(pos, rd_prev_start, rd_ph, rd_Sn, rd_Wn, effective_pitch_ratio, effective_rev ? -1 : 1); );
           g_base[0] = pos + rd_dl; g_base[1] = 0; g_base[2] = 1; g_base[3] = grain_dur; g_base[4] = 0; g_base[5] = 0; g_base[6] = pos; g_base[7] = 0; rd_prev_start = g_base[0]; rd_prev_n = ih_n; rd_prev_dur = grain_dur; rd_prev_ok = 1; ); gi = max_grains; ); gi += 1; ); );
     granular_l = 0; granular_r = 0; total_w = 0; gi = 0; g_dir = effective_rev ? -1 : 1;
     loop(max_grains, g_base = grain_mem + (gi * grain_data_size); g_base[2] == 1 ? (
@@ -3322,6 +3325,7 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
         granular_l += g_l; granular_r += g_r; total_w += env; g_base[1] = g_phase + 1; ); gi += 1; );
     total_w < 0.001 ? total_w = 0.001; loop_env_pos = 1.0; fade_samps > 0 && (pos - eff_start) < fade_samps ? loop_env_pos = min(loop_env_pos, (pos - eff_start) / fade_samps); fade_samps > 0 && (eff_end - pos) < fade_samps && !ml_fwd_free ? loop_env_pos = min(loop_env_pos, (eff_end - pos) / fade_samps);
     slice_g = play_mode == 1 ? slice_env * slice_att * sl_gate * slice_mute_gate : 1.0; base_mix_factor = grain_mix;
+    total_w = max(total_w, 0.35);   // V3.27 : un grain seul qui commence monte en volume (avant : divise par ~0 -> plein volume d'un coup)
     s0 = s0 * (1.0 - base_mix_factor) + (granular_l / total_w) * loop_env_pos * slice_g * base_mix_factor; s1 = s1 * (1.0 - base_mix_factor) + (granular_r / total_w) * loop_env_pos * slice_g * base_mix_factor;
   );
   // ===================== V3.21 : CLOUD v2 =====================
