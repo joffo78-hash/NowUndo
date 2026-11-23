@@ -595,7 +595,7 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 
 ## Outils de test (`tools/`)
 
-- `python3 tools/lualoc.py f.lua` (locales au niveau principal) · `python3 tools/luabal.py f.lua` (équilibre des blocs ;
+- **`python3 tools/eelorder.py f.jsfx`** (EEL2 : fonction appelée avant sa définition = « undefined » dans REAPER, invisible au banc Python ; à lancer après chaque modif du JSFX) · `python3 tools/lualoc.py f.lua` (locales au niveau principal) · `python3 tools/luabal.py f.lua` (équilibre des blocs ;
   l'écart de parenthèses peut être un faux positif dû à `"%("` dans un motif).
 - `eel2py.py` + `bench.py` : traduisent le JSFX en Python pour mesurer clics / calage. Copier le JSFX en `v322.jsfx` /
   `v323.jsfx` / `v325.jsfx` (+ `cap.jsfx` pour `tdrop.py`) dans `tools/`, puis `cd tools && python3 tlat.py .` (REC calé), `tlat2.py .` (latence overdub),

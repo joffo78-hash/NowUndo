@@ -710,6 +710,32 @@ function x_arm(mode) (
   ( xarm = 0; );
   xarm != 0 ? x_select_mode();     // source du moment commun fixee des l'armement (sinon 1er bloc = depart immediat)
 );
+// V3.27 (23 nov.) : HORLOGE GARDEE. Clear du looper qui a verrouille la synchro : la synchro reste verrouillee (demande de
+// l'utilisateur). Ce looper garde l'horloge de la part (meme longueur, meme phase, elle continue de tourner et d'etre
+// publiee en gmem[o+2..4]) tant qu'un autre looper a une boucle. Fin : Unlock / unsync manuel, ou plus aucune boucle.
+// S'il reenregistre sur cette part, il se cale sur cette horloge comme un esclave (rec_ref_capture / try_finish_rec).
+function ck_others() local(i, b, ap, n) (
+  n = 0; i = 0;
+  loop(8,
+    i != inst_idx && time_precise() - gmem[130 + i] < 1.5 ? (
+      b = 1000 + i * 600; ap = max(1, min(3, floor(gmem[b + 42] + 0.5)));
+      gmem[b + (ap - 1) * 200 + 46] > 0 ? n += 1;
+    );
+    i += 1;
+  );
+  n;
+);
+function ck_keep(p) local(o) (
+  o = p * 10;
+  (gmem[o] == 1 && (gmem[o + 1] == instance_id || gmem[o + 1] == instance_alias)) ? (
+    (gmem[o + 2] > 0 && ck_others() > 0) ? (
+      p == 0 ? ( ck_on1 = 1; ck_len1 = gmem[o + 2]; ck_pos1 = gmem[o + 3]; ck_cyc1 = gmem[o + 4]; ) :
+      p == 1 ? ( ck_on2 = 1; ck_len2 = gmem[o + 2]; ck_pos2 = gmem[o + 3]; ck_cyc2 = gmem[o + 4]; ) :
+               ( ck_on3 = 1; ck_len3 = gmem[o + 2]; ck_pos3 = gmem[o + 3]; ck_cyc3 = gmem[o + 4]; );
+    ) : ( gmem[o] = 0; );
+  );
+);
+function ck_active(p) ( p == 0 ? ck_on1 : (p == 1 ? ck_on2 : ck_on3); );
 // Capture de la reference au 1er sample du REC. kind : 0 aucune | 1 looper maitre | 2 Host (id 9)
 function rec_ref_capture() local(ms_off, locked, mid, is_self, mb, ms_s) (
   rec_ref_kind = 0; rec_ref_id = 0; rec_ref_len = 0; rec_ref_ph = 0;
@@ -1370,32 +1396,6 @@ function reset_all_params() (
       ((det_thresh != 0.01) || (det_hold_ms != 120)) ? ( det_thresh = 0.01; slider50 = det_thresh; det_hold_ms = 120; slider51 = det_hold_ms; last_det_t = det_thresh; last_det_h = det_hold_ms; start_analysis(); );
       (length > 0) ? ( loop_start = 0; loop_width = length; sync_hard_resync = 1; );
 );
-// V3.27 (23 nov.) : HORLOGE GARDEE. Clear du looper qui a verrouille la synchro : la synchro reste verrouillee (demande de
-// l'utilisateur). Ce looper garde l'horloge de la part (meme longueur, meme phase, elle continue de tourner et d'etre
-// publiee en gmem[o+2..4]) tant qu'un autre looper a une boucle. Fin : Unlock / unsync manuel, ou plus aucune boucle.
-// S'il reenregistre sur cette part, il se cale sur cette horloge comme un esclave (rec_ref_capture / try_finish_rec).
-function ck_others() local(i, b, ap, n) (
-  n = 0; i = 0;
-  loop(8,
-    i != inst_idx && time_precise() - gmem[130 + i] < 1.5 ? (
-      b = 1000 + i * 600; ap = max(1, min(3, floor(gmem[b + 42] + 0.5)));
-      gmem[b + (ap - 1) * 200 + 46] > 0 ? n += 1;
-    );
-    i += 1;
-  );
-  n;
-);
-function ck_keep(p) local(o) (
-  o = p * 10;
-  (gmem[o] == 1 && (gmem[o + 1] == instance_id || gmem[o + 1] == instance_alias)) ? (
-    (gmem[o + 2] > 0 && ck_others() > 0) ? (
-      p == 0 ? ( ck_on1 = 1; ck_len1 = gmem[o + 2]; ck_pos1 = gmem[o + 3]; ck_cyc1 = gmem[o + 4]; ) :
-      p == 1 ? ( ck_on2 = 1; ck_len2 = gmem[o + 2]; ck_pos2 = gmem[o + 3]; ck_cyc2 = gmem[o + 4]; ) :
-               ( ck_on3 = 1; ck_len3 = gmem[o + 2]; ck_pos3 = gmem[o + 3]; ck_cyc3 = gmem[o + 4]; );
-    ) : ( gmem[o] = 0; );
-  );
-);
-function ck_active(p) ( p == 0 ? ck_on1 : (p == 1 ? ck_on2 : ck_on3); );
 function do_clear(clear_type) local(ms_off, wipe_n, wipe1, wipe2, wipe3, hi) (
   // Sauver tailles a zero AVANT de reset length/dirty_len
   wipe_n = max(dirty_len, length);
