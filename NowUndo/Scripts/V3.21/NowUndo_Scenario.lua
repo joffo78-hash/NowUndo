@@ -254,7 +254,11 @@ local function param_h(id, default, lo, hi, conv, key)
 end
 H.vol   = param_h(22, 1, 0, 2,    function(n, k) return k == "db" and 10 ^ (n / 20) or n end, "vol")
 H.speed = param_h(3,  1, 0.01, 100, function(n, k) return n end, "speed")
-H.pitch = param_h(4,  0, -48, 48,   function(n, k) return n end, "pitch")
+H.pitch = param_h(69, 0, -48, 48,   function(n, k) return n end, "pitch")   -- V3.27 : 69 = pitch ABSOLU (ignore la gamme du Scaler)
+-- V3.27 : Scaler (gamme du Pitch / clavier / Pitch Spread) : scale 0..9 ou free demi ton penta maj mharm mmel dim aug oct
+H._scnames = { free = 0, demi = 1, ton = 2, penta = 3, maj = 4, mharm = 5, mmel = 6, dim = 7, aug = 8, oct = 9 }
+H._scale_p = param_h(70, 0, 0, 9, function(n, k) return math.floor(n + 0.5) end, "scale")
+H.scale = function(v) if v and H._scnames[v] then v = tostring(H._scnames[v]) end return H._scale_p(v) end
 
 local function inout_h(which)
   return function(v)
@@ -341,7 +345,7 @@ local ALIAS = { feedback = "fb", reverse = "rev", pingpong = "pp", ping = "pp", 
 local VALKEYS = { ["in"] = 1, out = 1, brf = 1, brmix = 1, smix = 1, vol = 1, speed = 1, pitch = 1, fb = 1, cdens = 1, cchaos = 1, cspread = 1,
   cpitch = 1, cpos = 1, clfo = 1, clfodepth = 1, clfoshape = 1,
   sattack = 1, sdecay = 1, ssteps = 1, srate = 1, smode = 1, sgrid = 1, spreset = 1, smax = 1, sdetect = 1, sdhold = 1,
-  sroot = 1, srelease = 1, spitch = 1 }
+  sroot = 1, srelease = 1, spitch = 1, scale = 1 }
 
 -- "recoff" -> rec + off
 local function split_key(piece)
@@ -523,7 +527,7 @@ local function compile(text, forced, toggle, gate_off)
             for _, k in ipairs(keys) do if VALKEYS[k] then acceptsreset = true end end
             local isbrf = false
             for _, k in ipairs(keys) do if k == "brf" then isbrf = true end end
-            if onoff(tn) ~= nil or num(tn) or (tn == "reset" and acceptsreset)
+            if onoff(tn) ~= nil or num(tn) or (tn == "reset" and acceptsreset) or (keys[1] == "scale" and H._scnames[tn])
                or (isbrf and (tn:match("^1/%d+$") or tn == "free" or tn == "libre")) then val = tn; idx = idx + 1 end
           end
           for n, k in ipairs(keys) do
@@ -1030,6 +1034,7 @@ local HELP = {
   { "srate smode sgrid spreset", "slicer : rate (0..5), mode (0 1 5), grid (0..9), preset (1..4)" },
   { "smax sdetect sdhold", "slicer : max slices (0..32), detect, detect hold" },
   { "sroot srelease spitch", "slicer : root (0..127), release (0..3000), pitch (0..100)" },
+  { "scale", "gamme du Pitch : free demi ton penta maj mharm mmel dim aug oct (ou 0..9) ; pitch d'un rush = valeur exacte" },
   { "" },
   { "TIMELINE REAPER  (touche T)" },
   { "principe", "un item nomme S<n> sur la piste choisie lance le pas n quand la lecture l'atteint" },
@@ -1125,7 +1130,7 @@ local RANGE = { pitch = { -48, 48 }, speed = { 0.01, 100 }, vol = { 0, 2 }, fb =
   clfo = { 0.1, 4 }, clfodepth = { 0, 100 }, clfoshape = { 0, 3 },
   sattack = { 0, 100 }, sdecay = { 4, 2000 }, ssteps = { 1, 32 }, srate = { 0, 5 }, smode = { 0, 5 }, sgrid = { 0, 9 },
   spreset = { 1, 4 }, smax = { 0, 32 }, sdetect = { 0.001, 0.8 }, sdhold = { 30, 1000 }, sroot = { 0, 127 },
-  srelease = { 0, 3000 }, spitch = { 0, 100 } }
+  srelease = { 0, 3000 }, spitch = { 0, 100 }, scale = { 0, 9 } }
 local SNAP = { pitch = 1, speed = 0.01, vol = 0.05, fb = 0.05, ["in"] = 0.01, out = 0.01, cdens = 0.01, cchaos = 0.01,
   cspread = 0.01, cpitch = 1, cpos = 1, clfo = 0.05, clfodepth = 1, clfoshape = 1,
   sattack = 1, sdecay = 1, ssteps = 1, srate = 1, smode = 1, sgrid = 1, spreset = 1, smax = 1, sdetect = 0.001, sdhold = 10,
@@ -1943,7 +1948,7 @@ ED.CATS = {
   { "Lecture",        { "play", "stop", "restart", "rev", "pp", "oneshot", "fullloop", "part..." } },
   { "Modes",          { "slicer", "cloud", "br", "brf...", "link", "mute", "a", "d" } },
   { "Effets",         { "e1", "e2", "e3", "e4" } },
-  { "Niveaux",        { "vol...", "speed...", "pitch...", "fb...", "smix...", "brmix..." } },
+  { "Niveaux",        { "vol...", "speed...", "pitch...", "scale...", "fb...", "smix...", "brmix..." } },
   { "Boucle",         { "in...", "out...", "quant", "undo", "redo", "clear", "clearfull", "reset" } },
   { "Cloud",          { "cdens...", "cchaos...", "cspread...", "cpitch...", "cpos...", "clfo...", "clfodepth..." } },
   { "Slicer",         { "ssteps...", "srate...", "sgrid...", "sdecay...", "sattack...", "spitch...", "smax..." } },
@@ -1961,6 +1966,7 @@ ED.VALS = {
   cpos = { "0", "25", "50", "75", "reset" }, clfo = { "0.25", "0.5", "1", "2", "4", "reset" },
   clfodepth = { "0", "25", "50", "100", "reset" }, ssteps = { "4", "8", "16", "32", "reset" }, srate = { "0", "1", "2", "3", "4", "5", "reset" },
   sgrid = { "0", "1", "2", "3", "5", "7", "reset" }, sdecay = { "20", "50", "150", "500", "2000", "reset" },
+  scale = { "free", "demi", "ton", "penta", "maj", "mharm", "mmel", "dim", "aug", "oct" },
   sattack = { "0", "10", "50", "100", "reset" }, spitch = { "0", "25", "50", "100", "reset" }, smax = { "4", "8", "16", "32", "reset" },
   ["to"] = { "g1", "g2", "g3", "g4", "g0" },
   ["go"] = { "lp 1", "lp 2", "lp 3", "4a", "4b", "4c", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8" },

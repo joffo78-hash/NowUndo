@@ -43,7 +43,7 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
 `955/956/957` latence auto (samples) / décalage ms / 2 = coupée (V3.23), `LD_BASE=1000000` import de fichiers
 (sert aussi d'enregistrement au drop), **drop de groupe (V3.25)** : `300 + k*10` accusé du looper k (+0 jeton, +1 horloge
 du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 abandon), `381` cible, `393` départ capture,
-`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Tableau de bord (Launchpad)** : `6000+i` groupe, `6010+i` / `6020+i` masques des sources, `6030+i` masque des slots FX actifs du looper i (V3.26), `6040+n` masque des slots FX actifs de l'entrée n (V3.27). `6050+n` = 1 si l'entrée n est sortie du parent (« in mute », V3.27). **Nouveau REC (V3.25)** : `398` heure, `399` id.
+`394` fin capture, `395` gain (1/volume piste cible), `396` latence PDC. **Tableau de bord (Launchpad)** : `6000+i` groupe, `6010+i` / `6020+i` masques des sources, `6030+i` masque des slots FX actifs du looper i (V3.26), `6040+n` masque des slots FX actifs de l'entrée n (V3.27). `6050+n` = 1 si l'entrée n est sortie du parent (« in mute », V3.27). `6060` masque de la sélection, `6061` heure (clavier MIDI, V3.27). **Nouveau REC (V3.25)** : `398` heure, `399` id.
 
 **Commandes JSFX (+48)** : 1 rec/dub, 2 clear, 3 stop/play, 4 reverse, 5 ping-pong, 6 slicer, 7 cloud, 8 link,
 9 replace, 10 auto-replace, 11 clear full, 12 part, 13 multiply, 14 undo, 15 redo, 16 restart, 17 re-rec, 18 one-shot,
@@ -51,7 +51,7 @@ du passage, +5 durée entendue), `380` signal final (jeton+0.5 bascule / +0.75 a
 34/35/36 drop (horloge du passage sur la cible / source en attente d'effacement / copie de l'enregistrement ; arg = jeton),
 37 mute (arg 0 bascule / 1 on / 2 off ; état publié en `+199`), 38 warp, **39 dub A / D** (V3.27 : arg 0 bascule / 1 = D / 2 = A).
 **Paramètres (+180)** : 3 speed, 4 pitch, 5 mix, 7 fade, 19 fdbk, 20 dégradation, 21 stéréo, 22 out vol, 26-28/35/36/38-41 cloud,
-29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2, 65/66 warp grille / force, **67 dub A (0) / D (1)** (V3.27), **68 lissage du LFO Random** (V3.27, slider69 ; 39 forme du LFO = 0..3, 3 = Random).
+29/30 rec density, 59 loop quant, 60 BR mix, 61 slicer mix, 62-64 cloud v2, 65/66 warp grille / force, **67 dub A (0) / D (1)** (V3.27), **68 lissage du LFO Random** (V3.27, slider69 ; **69 pitch absolu**, **70 gamme du Scaler** ; 39 forme du LFO = 0..3, 3 = Random).
 
 **ExtState** : `nowundo_vl` (état partagé du Launchpad : `state` + `rev`, `web_cmd`/`web_ack`, `web_frame/labels/meta`,
 `fx_source`, `fx_slot`, `sel_looper`, `fighter_page`, `active_page`) · `NowUndo_VLcmd/q` (file de commandes externes vers le
@@ -347,6 +347,27 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
   **seul depuis 2 s** avec une boucle devient maître (`gh_want` : seulement au chargement ou après un fantôme ; un Unlock
   fait à la main n'est pas repris). Drop en autonome : pas possible (orchestré par le Launchpad), proposé : bouton
   « Resample » dans le JSFX.
+
+## 23 nov. : clavier MIDI = sélection + transposition en lecture + SCALER (JSFX V3.27, Launchpad, Scenario)
+
+- **Sélection** : le Launchpad publie `gmem 6060` = masque des loopers visés (bit i-1 = looper i sélectionné ou dans le
+  groupe du sélectionné) et `6061` = heure (`VL.sel_publish`, pas en miroir). Le JSFX n'accepte les notes (sampler à
+  l'arrêt **et** transposition en lecture) que si son bit est là ; rien publié depuis 3 s (pas de Launchpad) = tout accepté.
+  Les note-off passent toujours.
+- **Transposition en lecture** (états 2..6) : notes tenues dans `kb_held[128]` ; la plus grave règle **directement le
+  bouton Pitch** (`pitch = sc_snap(note - sampler_root)`, C3 = root 48 = 0) ; au relâchement la hauteur **reste**
+  (choix de l'utilisateur). Mono pour l'instant (voix d'harmonie : étape 2, gratuites tant qu'une seule note).
+- **SCALER** (slider73 `pitch_scale`, bouton-menu sous Speed dans PLAYBACK, 16,328) : 0 Free, 1 demi-ton, 2 par ton,
+  3 penta, 4 majeure, 5 min harm, 6 min mel, 7 diminuée, 8 augmentée (0 3 4 7 8 11), 9 octave. Masques 12 bits
+  (`sc_mask`), tonique = hauteur d'origine de la boucle (Pitch 0). `sc_snap` (degré le plus proche), `sc_step` (cmd 21 :
+  cible calée, sinon degré suivant). Bouton Pitch du JSFX : tourne librement (`pitch_ui_raw`), affiche la valeur calée.
+  Param **4** (Twister, MIDI Learn, web) = calé ; param **69** = pitch **absolu** (rushes) ; param **70** = gamme.
+  Changer de gamme par param 70 ne recale pas le Pitch (un rush garde sa valeur) ; le menu du JSFX, si.
+  **Pitch Spread** Slicer / Cloud en gamme (`sc_spread`, sauf Free / Octave = sauts d'octave d'origine) : proportion
+  min(1, 2×%) des slices / grains, hauteur au hasard dans ±24×% demi-tons calée sur la gamme ; regénéré au changement.
+  Publié en `112000 + (i*3+part)*20 + 3`. Pas encore dans le Twister / MIDI Learn (CU_KNOBS).
+- Rushes : `pitch` → param 69 (absolu, `pitch 3.5` = 3,5) ; mot **`scale`** 0..9 ou `free demi ton penta maj mharm mmel
+  dim aug oct` (`H._scnames`, palette « Niveaux »). Test `tools/tscale.py . v327.jsfx` (midirecv simulé par une file).
 
 ## 23 nov. : craquements en STRETCH (vitesse / pitch granulaire sans Link), temps réel seulement
 

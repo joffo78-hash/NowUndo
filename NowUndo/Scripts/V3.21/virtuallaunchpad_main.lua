@@ -4070,6 +4070,20 @@ function VL.dash_publish(force, t)
   end
   for k = 1, NIN do reaper.gmem_write(DASH.base + 40 + k, xm[k] % 1000); reaper.gmem_write(DASH.base + 50 + k, xm[k] >= 1000 and 1 or 0) end
 end
+-- V3.27 : selection pour le clavier MIDI des loopers : gmem 6060 = masque (bit i-1 = looper i selectionne ou dans le
+-- groupe du looper selectionne), 6061 = heure (le JSFX accepte tout si le Launchpad ne publie plus depuis 3 s).
+function VL.sel_publish(t)
+  if VL.mirror_mode or not (reaper and reaper.gmem_attach and reaper.gmem_write) then return end
+  local sl = S.sel_looper or 1
+  local g = S.group_of[sl] or 0
+  local m = 0
+  for i = 1, NLOOP do
+    if i == sl or (g > 0 and (S.group_of[i] or 0) == g) then m = m | (1 << (i - 1)) end
+  end
+  reaper.gmem_attach("nowundo_sync")
+  reaper.gmem_write(DASH.base + 60, m)
+  reaper.gmem_write(DASH.base + 61, t or now())
+end
 
 -- Pedal Board : commandes de selection de looper (ExtState "NowUndo_Pedal/lp_cmd" = ts \t nom \t arg)
 local pedal_cmd_ts = nil
@@ -4482,6 +4496,7 @@ function VL.render(t)
   VL.web_publish(t)
   -- Toujours publier groupes/routing pour Twister & dashboard (meme en hardware_test)
   VL.dash_publish(false, t)
+  VL.sel_publish(t)
   if reaper and reaper.SetExtState then
     reaper.SetExtState("nowundo_vl", "fighter_page", tostring(S.fighter_page or 1), false)
     reaper.SetExtState("nowundo_vl", "sel_looper", tostring(S.sel_looper or 1), false)

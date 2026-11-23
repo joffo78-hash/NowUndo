@@ -72,6 +72,7 @@ slider69:cloud_lfo_smooth=0<0,1,0.01>-Cloud LFO Smooth (Random)
 slider70:lat_own=-1<-1,150,1>-Latence (ms, -1 = Auto : calibration CAL, sinon Launchpad)
 slider71:cal_sv_ms=0<0,500,0.01>-Calibration partagee : latence mesuree (ms, 0 = aucune)
 slider72:cal_sv_d=0<0,4000000000,1>-Calibration partagee : date
+slider73:pitch_scale=0<0,9,1{Free,Demi-ton,Par ton,Pentatonique,Majeure,Mineure harmonique,Mineure melodique,Diminuee,Augmentee,Octave}>-Scaler : gamme du Pitch / clavier / Pitch Spread
 
 @init
 // Decay : position 0..100 <-> ms, interpolation exponentielle entre points :
@@ -240,6 +241,8 @@ sm_l = cl_lk + 512 + 16; sm_r = sm_l + 512; sm_ok = 0; sm_N = 0; rp_D = 0;   // 
 // V3.27 (23 nov.) : CALIBRATION DE LA LATENCE (bouton CAL du panneau OUTPUT). Le looper joue 8 petits clics (2 kHz, 1,5 ms)
 // a la place de sa sortie et les ecoute revenir a son entree (cable sortie -> entree, ou haut-parleurs -> micro d'un
 // portable). Delai = pic du retour - milieu du clic emis ; mediane des retours coherents -> LAT (lat_own, slider70).
+// V3.27 : clavier MIDI pendant la lecture = transposition (notes tenues, la plus grave regle le Pitch)
+kb_held = sm_r + 512 + 16 + 32; memset(kb_held, 0, 128); kb_ok = 1; kb_last_scale = -1; pitch_ui_raw = 0;
 cal_d = sm_r + 512 + 16; cal_on = 0; cal_k = 0; cal_n = 0; cal_t = 0; cal_nf = 0; cal_pk = 0; cal_pt = 0; cal_msg = 0; cal_msg_t = 0; cal_res = 0;
 function cal_start() (
   cal_emit = floor(0.12 * srate); cal_win = floor(0.30 * srate); cal_per = cal_emit + cal_win + floor(0.05 * srate);
@@ -1073,9 +1076,46 @@ function redo_state() (
   ); 
 );
 function get_slicer_len() ( slicer_mode == 5 ? max(1, trans_count) : (slicer_mode == 0 ? 16 : max(1, min(32, floor(slicer_steps + 0.5)))); );
-function update_slicer_pitches(step_len) local(i, ratio_p, impact_pct, ext_pct, idx_norm, active_double) ( i = 0; loop(step_len, ratio_p = slicer_pitch_spread * 0.01; ratio_p <= 0.0001 ? ( slice_pitch_mem[i] = 0.0; ) : ratio_p <= 0.5 ? ( impact_pct = ratio_p * 2.0; (i / step_len) < impact_pct ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ) : ( slice_pitch_mem[i] = 0.0; ); ) : ( ext_pct = (ratio_p - 0.5) * 2.0; idx_norm = i / step_len; idx_norm < 0.5 ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ) : ( active_double = 0.5 + ext_pct * 0.5; idx_norm < active_double ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -24.0 : 24.0); ) : ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ); ); ); i += 1; ); );
+// V3.27 : SCALER. Gammes = masques de 12 bits (bit k = k demi-tons au-dessus de la hauteur d'origine de la boucle,
+// qui est la tonique). 0 Free (progressif), 1 demi-ton, 2 par ton, 3 penta, 4 majeure, 5 min harm, 6 min mel,
+// 7 diminuee (ton / demi-ton), 8 augmentee (3-1), 9 octave.
+function sc_mask(s) ( s == 1 ? 4095 : (s == 2 ? 1365 : (s == 3 ? 661 : (s == 4 ? 2741 : (s == 5 ? 2477 : (s == 6 ? 2733 : (s == 7 ? 2925 : (s == 8 ? 2457 : (s == 9 ? 1 : 4095)))))))); );
+function sc_in(n) local(k) ( k = n - 12 * floor(n / 12); (sc_mask(floor(pitch_scale + 0.5)) & (2 ^ k)) != 0; );
+// degre de la gamme le plus proche (Free = valeur telle quelle)
+function sc_snap(p) local(r, i, best, bd, c, d) (
+  pitch_scale < 0.5 ? max(-48, min(48, p)) : (
+    r = floor(p + 0.5); best = r; bd = 1000; i = 0;
+    loop(13,
+      c = r - i; sc_in(c) ? ( d = abs(c - p); d < bd ? ( bd = d; best = c; ); );
+      c = r + i; sc_in(c) ? ( d = abs(c - p); d < bd ? ( bd = d; best = c; ); );
+      i += 1;
+    );
+    max(-48, min(48, best));
+  );
+);
+// pas relatif (commande 21) : cible p + st calee ; si elle ne bouge pas, degre suivant dans le sens du pas
+function sc_step(p, st) local(c, c0, d) (
+  c = sc_snap(p + st);
+  pitch_scale >= 0.5 && st != 0 ? ( c0 = sc_snap(p); c == c0 ? ( d = st > 0 ? 1 : -1; c = c0 + d; loop(12, !sc_in(c) ? c += d; ); ); );
+  max(-48, min(48, c));
+);
+// Pitch Spread en gamme : proportion min(1, 2 x %) des slices / grains, hauteur au hasard dans +-(24 x %) demi-tons
+function sc_spread(spread_val) local(rp, v, j, rr) (
+  rp = spread_val * 0.01; v = 0;
+  rp > 0.0001 && rand(1.0) < min(1, rp * 2) ? (
+    rr = max(3, rp * 24); j = 0;
+    while (v == 0 && j < 6) ( v = sc_snap((rand(2.0) - 1.0) * rr); j += 1; );
+  );
+  v;
+);
+function sc_oct() ( pitch_scale < 0.5 || pitch_scale >= 8.5; );   // Free / Octave : Pitch Spread d'origine (sauts d'octave)
+function update_slicer_pitches_oct(step_len) local(i, ratio_p, impact_pct, ext_pct, idx_norm, active_double) ( i = 0; loop(step_len, ratio_p = slicer_pitch_spread * 0.01; ratio_p <= 0.0001 ? ( slice_pitch_mem[i] = 0.0; ) : ratio_p <= 0.5 ? ( impact_pct = ratio_p * 2.0; (i / step_len) < impact_pct ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ) : ( slice_pitch_mem[i] = 0.0; ); ) : ( ext_pct = (ratio_p - 0.5) * 2.0; idx_norm = i / step_len; idx_norm < 0.5 ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ) : ( active_double = 0.5 + ext_pct * 0.5; idx_norm < active_double ? ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -24.0 : 24.0); ) : ( slice_pitch_mem[i] = (rand(1.0) < 0.5 ? -12.0 : 12.0); ); ); ); i += 1; ); );
+function update_slicer_pitches(step_len) local(i) (
+  sc_oct() ? update_slicer_pitches_oct(step_len) : ( i = 0; loop(step_len, slice_pitch_mem[i] = sc_spread(slicer_pitch_spread); i += 1; ); );
+);
 function generate_slicer_sequence(step_len) local(i, rnd_idx, temp, p) ( trans_count > 0 ? ( slicer_mode == 5 ? ( i = 0; loop(step_len, seq_mem[i] = trans_mem[i % trans_count]; i += 1; ); i = 0; loop(step_len, p = floor(rand(step_len)); temp = seq_mem[i]; seq_mem[i] = seq_mem[p]; seq_mem[p] = temp; i += 1; ); ) : ( i = 0; loop(step_len, rnd_idx = floor(rand(trans_count)); seq_mem[i] = trans_mem[rnd_idx]; i += 1; ); ); update_slicer_pitches(step_len); ); );
-function calc_cloud_pitch(spread_val) local(ratio_p, impact_pct, ext_pct, r) ( ratio_p = spread_val * 0.01; ratio_p <= 0.0001 ? 0.0 : ( ratio_p <= 0.5 ? ( impact_pct = ratio_p * 2.0; rand(1.0) < impact_pct ? (rand(1.0) < 0.5 ? -12.0 : 12.0) : 0.0; ) : ( ext_pct = (ratio_p - 0.5) * 2.0; r = rand(1.0); r < 0.5 ? ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) : ( r < (0.5 + ext_pct * 0.5) ? ( rand(1.0) < 0.5 ? -24.0 : 24.0 ) : ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) ); ); ); );
+function calc_cloud_pitch_oct(spread_val) local(ratio_p, impact_pct, ext_pct, r) ( ratio_p = spread_val * 0.01; ratio_p <= 0.0001 ? 0.0 : ( ratio_p <= 0.5 ? ( impact_pct = ratio_p * 2.0; rand(1.0) < impact_pct ? (rand(1.0) < 0.5 ? -12.0 : 12.0) : 0.0; ) : ( ext_pct = (ratio_p - 0.5) * 2.0; r = rand(1.0); r < 0.5 ? ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) : ( r < (0.5 + ext_pct * 0.5) ? ( rand(1.0) < 0.5 ? -24.0 : 24.0 ) : ( rand(1.0) < 0.5 ? -12.0 : 12.0 ) ); ); ); );
+function calc_cloud_pitch(spread_val) ( sc_oct() ? calc_cloud_pitch_oct(spread_val) : sc_spread(spread_val); );
 function tape_write_span(w_from, w_to, w_mode) local(k, k_end, seg_a, seg_b, wgt, tn, vL, vR, w2, oldL, oldR, steps, total_span, fb, targetL, targetR, dev, cutoff, lpf_alpha, deg, deg_amt, p_angle, gL, gR, mono_src, clippedL, clippedR, drive, souffle) (
   deg = degradation; w_to > w_from ? ( k = floor(w_from); k_end = floor(w_to); k_end < k ? k_end = k; steps = min(k_end - k + 1, 24); total_span = max(w_to - w_from, 0.0001);
     loop(steps, k < buf_len ? ( seg_a = max(w_from, k); seg_b = min(w_to, k + 1); wgt = (seg_b - seg_a) * dens_g * sl_gate * (w_mode == 1 ? dub_g : 1); wgt > 0 ? (
@@ -2247,16 +2287,35 @@ mclk_trk ? (
     mclk_pos = mclk_np;
   );
 ) : ( mclk_valid = 0; );
+// V3.27 : le clavier ne joue que les loopers de la SELECTION du Launchpad (le looper selectionne ou son groupe :
+// masque gmem 6060, heure 6061). Launchpad absent (rien publie depuis 3 s) = looper seul : tout est accepte.
+kb_ok = (time_precise() - gmem[6061] > 3) ? 1 : ((floor(gmem[6060] + 0.5) & (2 ^ inst_idx)) != 0);
+kb_play = (state >= 2 && state <= 6 && length > 0); kb_chg = 0;
+// changement de gamme : les Pitch Spread se calent dessus (le Pitch actuel n'est recale que par le menu du looper :
+// un rush peut poser un pitch absolu puis changer de gamme sans que sa valeur bouge)
+pitch_scale != kb_last_scale ? (
+  kb_last_scale >= 0 ? ( length > 0 ? update_slicer_pitches(get_slicer_len()); );
+  kb_last_scale = pitch_scale;
+);
 while (midirecv(mo_off, mo_m1, mo_m2, mo_m3)) (
   midisend(mo_off, mo_m1, mo_m2, mo_m3);
   mo_t = mo_m1 & 240;
   (mo_t == 144 && mo_m3 > 0) ? (
-    smp_ev_n < smp_evmax ? ( smp_ev_off[smp_ev_n] = mo_off; smp_ev_note[smp_ev_n] = mo_m2; smp_ev_vel[smp_ev_n] = mo_m3; smp_ev_n += 1; );
+    // V3.27 : en lecture, une note = transposition (C3 = 0, D3 = +2 ...) ; a l'arret = sampler (slices / touches)
+    kb_play ? ( kb_ok ? ( kb_held[mo_m2] = 1; kb_chg = 1; ); ) : (
+      (kb_ok && smp_ev_n < smp_evmax) ? ( smp_ev_off[smp_ev_n] = mo_off; smp_ev_note[smp_ev_n] = mo_m2; smp_ev_vel[smp_ev_n] = mo_m3; smp_ev_n += 1; );
+    );
   ) : ((mo_t == 128 || mo_t == 144) ? (
+    kb_held[mo_m2] = 0;
     smp_ev_n < smp_evmax ? ( smp_ev_off[smp_ev_n] = mo_off; smp_ev_note[smp_ev_n] = mo_m2; smp_ev_vel[smp_ev_n] = 0; smp_ev_n += 1; );
   ) : (
-    (mo_t == 176 && (mo_m2 == 123 || mo_m2 == 120)) ? smp_alloff = 1;
+    (mo_t == 176 && (mo_m2 == 123 || mo_m2 == 120)) ? ( smp_alloff = 1; memset(kb_held, 0, 128); );
   ));
+);
+// la note tenue la plus grave regle directement le bouton Pitch (calee sur la gamme) ; au relachement la hauteur reste
+kb_chg ? (
+  kb_n = 0; kb_lo = -1; while (kb_lo < 0 && kb_n < 128) ( kb_held[kb_n] ? kb_lo = kb_n; kb_n += 1; );
+  kb_lo >= 0 ? ( pitch = sc_snap(kb_lo - sampler_root); slider2 = pitch; );
 );
 
 (slicer_src != last_slicer_src || grid_sub != last_grid_sub) ? ( last_slicer_src = slicer_src; last_grid_sub = grid_sub; grid_sig = -1; length > 0 ? start_analysis_ex(1); );
@@ -2525,7 +2584,7 @@ loop(3,
     cmd == 21 ? ( // relative pitch step in semitones
       st = cmd_arg;
       abs(st) < 0.0001 ? st = 12;
-      pitch = max(-48, min(48, pitch + st)); slider2 = pitch;
+      pitch = sc_step(pitch, st); slider2 = pitch;   // V3.27 : suit la gamme du Scaler
     ) :
     cmd == 22 ? ( // Full Loop
       length > 0 ? ( loop_start = 0; loop_width = length; sync_hard_resync = 1; );
@@ -2630,7 +2689,9 @@ loop(3,
     p != (active_part - 1) ? switch_part(p + 1);
     wr_v = gmem[gmem_base + wr_mo + 1];
     wr_id == 3  ? ( speed = max(0.01, min(100, wr_v)); slider1 = speed; ) :
-    wr_id == 4  ? ( pitch = max(-48, min(48, wr_v)); slider2 = pitch; ) :
+    wr_id == 4  ? ( pitch = sc_snap(wr_v); slider2 = pitch; ) :   // V3.27 : cale sur la gamme du Scaler (Free = tel quel)
+    wr_id == 69 ? ( pitch = max(-48, min(48, wr_v)); slider2 = pitch; ) :   // V3.27 : pitch ABSOLU (rushes), ignore la gamme
+    wr_id == 70 ? ( pitch_scale = max(0, min(9, floor(wr_v + 0.5))); slider73 = pitch_scale; ) :   // V3.27 : gamme du Scaler
     wr_id == 5  ? ( mix = max(0, min(1, wr_v)); slider3 = mix; ) :
     wr_id == 6  ? ( grain_ms = max(20, min(200, wr_v)); slider4 = grain_ms; ) :
     wr_id == 7  ? ( fade_ms = max(0, min(500, wr_v)); slider5 = fade_ms; ) :
@@ -2795,6 +2856,7 @@ loop(3,
     // V3.27 : zone de publication supplementaire (le bloc de 200 et les 60 parametres sont pleins) : 112000 + (looper*3 + part)*20
     //   +0 = lissage du LFO Random du Cloud (lu par le Twister)
     gmem[112000 + ((inst_idx * 3) + p) * 20 + 0] = cloud_lfo_smooth;
+    gmem[112000 + ((inst_idx * 3) + p) * 20 + 3] = pitch_scale;   // V3.27 : gamme du Scaler (+1 / +2 de la part 1 = mesure CPU)
     gmem[param_gmem_base + 0] = speed;
     gmem[param_gmem_base + 1] = pitch;
     gmem[param_gmem_base + 2] = mix;
@@ -3854,8 +3916,15 @@ ui_btn(bx, by, 56, 24, "Link P/S", link_on, 0.8, 0.3, 0.25) ? ( link_on = !link_
 ky = 288;
 ui_btn(20, ky - 10, 22, 18, "/2", 0, 0.92, 0.38, 0.72) ? speed = max(0.01, speed * 0.5); ui_btn(70, ky - 10, 22, 18, "x2", 0, 0.92, 0.38, 0.72) ? speed = min(100.0, speed * 2.0);
 v = ui_log_knob(12, 56, ky, 16, speed, 0.01, 100.0, "Speed", "%.2fx", 1.0); ui_chg ? ( speed = v; slider1 = speed; );
-ui_btn(106, ky - 10, 22, 18, "/2", 0, 0.92, 0.38, 0.72) ? pitch = max(-48, pitch - 12); ui_btn(156, ky - 10, 22, 18, "x2", 0, 0.92, 0.38, 0.72) ? pitch = min(48, pitch + 12);
-v = ui_knob(13, 142, ky, 16, pitch, -48, 48, "Pitch", "%.1f st", 0.0); ui_chg ? ( pitch = v; slider2 = pitch; );
+ui_btn(106, ky - 10, 22, 18, "/2", 0, 0.92, 0.38, 0.72) ? ( pitch = sc_snap(pitch - 12); slider2 = pitch; ); ui_btn(156, ky - 10, 22, 18, "x2", 0, 0.92, 0.38, 0.72) ? ( pitch = sc_snap(pitch + 12); slider2 = pitch; );
+// V3.27 : en gamme, le bouton tourne librement (pitch_ui_raw) et le Pitch prend le degre le plus proche
+active_control != 13 ? pitch_ui_raw = pitch;
+pitch_scale >= 0.5 ? ( ui_dv = pitch; ui_dv_on = 1; );
+v = ui_knob(13, 142, ky, 16, pitch_ui_raw, -48, 48, "Pitch", "%.1f st", 0.0); ui_chg ? ( pitch_ui_raw = v; pitch = sc_snap(v); slider2 = pitch; );
+// V3.27 : SCALER = gamme du Pitch, du clavier MIDI et des Pitch Spread (Slicer, Cloud) ; les rushes restent absolus
+sc_g = floor(pitch_scale + 0.5);
+strcpy(#sc_lbl, sc_g == 0 ? "Free" : (sc_g == 1 ? "1/2 ton" : (sc_g == 2 ? "Par ton" : (sc_g == 3 ? "Penta" : (sc_g == 4 ? "Majeure" : (sc_g == 5 ? "Min harm" : (sc_g == 6 ? "Min mel" : (sc_g == 7 ? "Dimin." : (sc_g == 8 ? "Augm." : "Octave")))))))));
+ui_btn(16, 328, 56, 18, #sc_lbl, sc_g > 0, 0.92, 0.38, 0.72) ? ( gfx_x = 16; gfx_y = 346; sc_pick = gfx_showmenu("#Scaler (gamme du Pitch)||Free (progressif)|Demi-ton|Par ton|Pentatonique|Majeure|Mineure harmonique|Mineure melodique|Diminuee|Augmentee|Octave"); sc_pick >= 2 ? ( pitch_scale = sc_pick - 2; slider73 = pitch_scale; pitch = sc_snap(pitch); slider2 = pitch; ); );
 v = ui_knob(16, 228, ky, 16, dens_occ, 0, 100, "Density", "%.0f%%", 100.0); ui_chg ? ( dens_occ = v; slider28 = dens_occ; );
 ui_en_old = ui_en; ui_en = (play_mode == 1 && length > 0 && trans_count > 0) ? 0 : ui_en_old; floor(dens_len_f + 0.5) != dens_len ? dens_len_f = dens_len; ui_dv = 2 ^ floor(dens_len_f + 0.5); ui_dv_on = 1; v = ui_knob(20, 314, ky, 16, dens_len_f, 0, 6, "Rec Len", "1/%.0f", 2.0); ui_chg ? ( dens_len_f = v; dens_len = floor(v + 0.5); slider29 = dens_len; ); ui_en = ui_en_old;
 loop_beats < 1 ? sprintf(#lb_lbl, "Auto") : sprintf(#lb_lbl, "%d bt", loop_beats); ui_btn(338, ky - 10, 46, 18, #lb_lbl, loop_beats >= 1, 0.25, 0.85, 0.4) ? ( loop_beats = loop_beats < 1 ? 2 : (loop_beats < 4 ? 4 : (loop_beats < 8 ? 8 : (loop_beats < 16 ? 16 : (loop_beats < 32 ? 32 : 0)))); slider30 = loop_beats; );
