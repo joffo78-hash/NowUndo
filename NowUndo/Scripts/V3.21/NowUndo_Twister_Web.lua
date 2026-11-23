@@ -78,26 +78,11 @@ local function set_io(i, in_n, out_n)
   local new_in = in_n * len
   local new_out = out_n * len
   local new_w = math.max(0, new_out - new_in)
-  -- REGLE ABSOLUE : In seul bouge (Out envoye = Out actuel) -> la fenetre se DECALE, l'ecart ne bouge pas (cmd 5)
-  local cur_in = reaper.gmem_read(gbase + 44) or 0
-  local cur_w = reaper.gmem_read(gbase + 45) or 0
-  if math.abs(new_out - (cur_in + cur_w)) <= len * 0.0005 and math.abs(new_in - cur_in) > len * 0.0005 then
-    reaper.gmem_write(gbase + 161, math.max(0, math.min(len - cur_w, new_in)))
-    reaper.gmem_write(gbase + 160, 5)
-    pending_width[i] = nil
-    return
-  end
-  -- In ET Out choisis ensemble (fenetre posee) : In passe par la commande 5 (ecart garde), donc dans le bon ordre
-  -- pour que In ne soit jamais borne par l'ancien ecart : fenetre qui retrecit vers la fin = Width d'abord, In ensuite.
-  if new_in > len - cur_w then
-    reaper.gmem_write(gbase + 162, new_w)
-    reaper.gmem_write(gbase + 160, 3)
-    pending_width[i] = { gbase = gbase, inn = new_in }
-  else
-    reaper.gmem_write(gbase + 161, new_in)
-    reaper.gmem_write(gbase + 160, 5)
-    pending_width[i] = { gbase = gbase, w = new_w }
-  end
+  -- Frame 1 : set In
+  reaper.gmem_write(gbase + 161, new_in)
+  reaper.gmem_write(gbase + 160, 1)
+  -- Width au cycle suivant (comme le script gfx)
+  pending_width[i] = { gbase = gbase, w = new_w }
 end
 
 local function reset_all()
@@ -253,7 +238,7 @@ local function tick_pending()
   for i, pr in pairs(pending_reset) do
     if pr.step == 1 then
       reaper.gmem_write(pr.gbase + 161, 0)
-      reaper.gmem_write(pr.gbase + 160, 5)                   -- reset : In a 0 (ecart garde), puis Out a la fin
+      reaper.gmem_write(pr.gbase + 160, 1)
       pr.step = 2
     elseif pr.step == 2 then
       reaper.gmem_write(pr.gbase + 162, pr.len)
@@ -262,13 +247,8 @@ local function tick_pending()
     end
   end
   for i, pw in pairs(pending_width) do
-    if pw.inn then
-      reaper.gmem_write(pw.gbase + 161, pw.inn)
-      reaper.gmem_write(pw.gbase + 160, 5)
-    else
-      reaper.gmem_write(pw.gbase + 162, pw.w)
-      reaper.gmem_write(pw.gbase + 160, 3)
-    end
+    reaper.gmem_write(pw.gbase + 162, pw.w)
+    reaper.gmem_write(pw.gbase + 160, 3)
     pending_width[i] = nil
   end
 end

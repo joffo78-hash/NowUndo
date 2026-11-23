@@ -267,7 +267,7 @@ local function inout_h(which)
     if v == "reset" then
       return { { ch = "edit", f = function(i)
         local F = fb(i); if F.len <= 0 then return nil end
-        if which == "in" then return F.b, 5, 0, nil end            -- In decale la fenetre (ecart garde)
+        if which == "in" then return F.b, 1, 0, nil end
         return F.b, 2, nil, F.len
       end } }
     end
@@ -280,7 +280,7 @@ local function inout_h(which)
       local cur = (which == "in") and (F.lstart / F.len) or ((F.lstart + F.lwidth) / F.len)
       local val = n
       if tg and math.abs(cur - n) <= 0.004 then val = (which == "in") and 0 or 1 end   -- TOGGLE : valeur <-> defaut
-      if which == "in" then return F.b, 5, val * F.len, nil end   -- REGLE : In decale la fenetre, l'ecart ne bouge pas
+      if which == "in" then return F.b, 1, val * F.len, nil end
       return F.b, 2, nil, val * F.len
     end } }
   end

@@ -224,10 +224,11 @@ local function apply_peers_io(peers, kind, d_norm)
     if len > 0 then
       local b = gbase(peer, snap.part or active_part(peer))
       if kind == "in" then
-        -- REGLE ABSOLUE : In decale la fenetre, l'ecart (Width) du pair ne bouge pas (cmd 5)
-        local new_in = math.max(0, math.min(math.max(0, len - snap.w0), snap.in0 + d))
+        local out_pos = math.min(len, snap.out0)
+        local new_in = math.max(0, math.min(out_pos, snap.in0 + d))
         reaper.gmem_write(b + 161, new_in)
-        reaper.gmem_write(b + 160, 5)
+        reaper.gmem_write(b + 160, 1)
+        -- JSFX cmd1 garde Out ; pas de cmd3 qui ecraserait
       elseif kind == "shift" then
         -- Mode In/Width : la reference du groupe est la position du OUT du looper source (= In + Width constant).
         -- Les pairs decalent donc In ET Out du meme delta, en gardant leur propre largeur (cmd 5 : Width fixe).
@@ -832,9 +833,11 @@ function CU.set_n(k, s, n)
     local len = read_fb(s, 46)
     if len <= 0 then return end
     local i0, w0 = read_fb(s, 44), read_fb(s, 45)
-    -- In DECALE la fenetre : l'ecart (Width) ne bouge jamais quand In bouge (commande 5, comme la page 1 en mode Width).
-    -- Width regle l'ecart entre In et Out. (Corrige le 24 nov. : avant, commande 1 = Out fixe -> l'ecart changeait.)
-    if k[11] == "in" then write_edit(s, 5, math.max(0, math.min(math.max(0, len - w0), n * len)), nil)
+    -- REGLE (utilisateur) : mode Width actif = In et Out AIMANTES (In decale la fenetre, l'ecart ne bouge pas : cmd 5) ;
+    -- mode Out = In et Out AUTONOMES (In bouge seul, Out reste : cmd 1). Meme mode que la page 1 (tw_mode_io du looper).
+    if k[11] == "in" then
+      if tw_mode_io[s] == 1 then write_edit(s, 5, math.max(0, math.min(math.max(0, len - w0), n * len)), nil)
+      else write_edit(s, 1, math.max(0, math.min(i0 + w0, n * len)), nil) end
     elseif k[11] == "out" then write_edit(s, 2, nil, math.max(i0, math.min(len, n * len)))   -- Out
     else write_edit(s, 3, nil, math.max(0, math.min(len - i0, n * len))) end                  -- Width
     return
@@ -1000,11 +1003,12 @@ function CU.p9_build()
   end
   -- Out : le push bascule le knob entre Out et Width (comme la page In/Out)
   local o = P["2,1"]
-  CU.p9w = false
-  o.get = function() return CU.get_n(CU.K[CU.p9w and "width" or "out"], sel_looper()) end
-  o.set = function(_, n) CU.set_group(CU.K[CU.p9w and "width" or "out"], 910, n) end
-  o.disp = function() return (CU.p9w and "W " or "") .. CU.disp(CU.K[CU.p9w and "width" or "out"], sel_looper()) end
-  o.push = function() CU.p9w = not CU.p9w; o.label = CU.p9w and "Width" or "Out" end
+  -- Out <-> Width = le MEME mode que la page 1 (tw_mode_io du looper selectionne) : In le suit aussi
+  local function w_on() return tw_mode_io[sel_looper()] == 1 end
+  o.get = function() return CU.get_n(CU.K[w_on() and "width" or "out"], sel_looper()) end
+  o.set = function(_, n) CU.set_group(CU.K[w_on() and "width" or "out"], 910, n) end
+  o.disp = function() o.label = w_on() and "Width" or "Out"; return (w_on() and "W " or "") .. CU.disp(CU.K[w_on() and "width" or "out"], sel_looper()) end
+  o.push = function() local l = sel_looper(); tw_mode_io[l] = 1 - (tw_mode_io[l] or 0); o.label = w_on() and "Width" or "Out" end
   -- Play / Clear : le knob ne fait rien, seul le push agit ; l'anneau montre l'etat
   local function st() return read_fb(sel_looper(), 2) end
   P["3,1"] = { label = "Play", col = { R[1], R[2], R[3] }, twc = R[4],
@@ -1896,10 +1900,11 @@ local function midi_apply_knob(idx, norm, page)
         reaper.gmem_write(b + 160, 5)
         kind = "shift"      -- les pairs suivent la position du Out reel (decalage de fenetre), pas celle du bouton
       else
-        -- REGLE ABSOLUE (aussi en mode Out) : In decale la fenetre, l'ecart ne bouge pas (cmd 5)
-        new_in = math.min(new_in, math.max(0, len - w_s))
+        -- garder Out : cmd 1 (JSFX recalcule width)
+        local out_pos = math.min(len, in_s + w_s)
+        new_in = math.max(0, math.min(out_pos, new_in))
         reaper.gmem_write(b + 161, new_in)
-        reaper.gmem_write(b + 160, 5)
+        reaper.gmem_write(b + 160, 1)
       end
       d_norm = (new_in - g.in0) / g.len0
     end
@@ -2373,7 +2378,7 @@ function main()
   for i, pr in pairs(pending_reset) do
     if pr.step == 1 then
       reaper.gmem_write(pr.gbase + 161, 0)
-      reaper.gmem_write(pr.gbase + 160, 5)   -- reset : In a 0 (ecart garde), puis Out a la fin
+      reaper.gmem_write(pr.gbase + 160, 1)
       pr.step = 2
     elseif pr.step == 2 then
       reaper.gmem_write(pr.gbase + 162, pr.len)
@@ -2572,11 +2577,12 @@ function main()
                   reaper.gmem_write(b + 160, 5)
                   kind, d_norm = "shift", (drag.len0 > 0) and ((new_in - drag.in0) / drag.len0) or 0
                 else
-                  -- REGLE ABSOLUE (aussi en mode Out) : In decale la fenetre, l'ecart ne bouge pas (cmd 5)
-                  new_in = math.max(0, math.min(math.max(0, len - (out_s - in_s)), val * len))
+                  local out_pos = lock_out[tw_id] or math.min(len, out_s)
+                  new_in = math.max(0, math.min(out_pos, val * len))
                   val = new_in / len
                   reaper.gmem_write(b + 161, new_in)
-                  reaper.gmem_write(b + 160, 5)
+                  reaper.gmem_write(b + 160, 1)
+                  -- pas de pending_width : JSFX garde Out
                   kind, d_norm = "in", (drag.len0 > 0) and ((new_in - drag.in0) / drag.len0) or 0
                 end
               end

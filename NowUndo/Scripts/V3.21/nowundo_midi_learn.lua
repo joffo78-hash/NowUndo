@@ -969,10 +969,10 @@ local function tw_apply_knob(idx, norm)
       reaper.gmem_write(b + 162, out)
       reaper.gmem_write(b + 160, 2)
     else
-      -- REGLE ABSOLUE : In decale la fenetre, l'ecart (Width) ne bouge pas (cmd 5)
-      local new_in = math.max(0, math.min(math.max(0, len - w_s), norm * len))
+      local out = in_s + w_s
+      local new_in = math.max(0, math.min(out, norm * len))
       reaper.gmem_write(b + 161, new_in)
-      reaper.gmem_write(b + 160, 5)
+      reaper.gmem_write(b + 160, 1)
     end
   elseif page == 2 then
     local looper = (idx % 8) + 1
@@ -1017,7 +1017,7 @@ local function tw_apply_btn(idx, down)
     local b = gbase(looper, active_part(looper))
     local len = reaper.gmem_read(b + 46) or 0
     if len > 0 then
-      reaper.gmem_write(b + 161, 0); reaper.gmem_write(b + 160, 5)   -- reset : In a 0 (ecart garde), puis Out
+      reaper.gmem_write(b + 161, 0); reaper.gmem_write(b + 160, 1)
       reaper.gmem_write(b + 162, len); reaper.gmem_write(b + 160, 2)
     end
   elseif page == 2 then

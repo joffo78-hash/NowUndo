@@ -388,8 +388,7 @@ function UI.tick(ch)
       local s = smp_at(R, mx)
       local ds = (mx - D.x0) / R.ww * D.len
       if D.kind == "in" then
-        -- REGLE ABSOLUE : la poignee In decale la fenetre, l'ecart ne bouge pas (cmd 5)
-        reaper.gmem_write(D.gb + 161, math.max(0, math.min(D.len - D.lw, s))); reaper.gmem_write(D.gb + 160, 5)
+        reaper.gmem_write(D.gb + 161, math.min(s, D.ls + D.lw - 1)); reaper.gmem_write(D.gb + 160, 1)
       elseif D.kind == "out" then
         reaper.gmem_write(D.gb + 162, math.max(s, D.ls + 1)); reaper.gmem_write(D.gb + 160, 2)
       elseif D.kind == "win" then
