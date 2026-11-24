@@ -243,6 +243,18 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (`P.load_log()` : lignes `C` segments, `E start`, `S` morceaux). Réglage fin : ExtState `NowUndo_Perf/cut_ms` (ms, négatif = plus tôt ; la latence « output » peut décaler
   de quelques ms : à régler à l'oreille). Tests `tools/tperf2.lua` (hook `DRIPSODY_PERF_TEST` → `DRIPSODY_PERF`). Non testé dans REAPER. **Reste** : grille de tempo alignée sur
   ces segments (barres de mesure = cycles, mesures de raccord entre segments) ; boutons Launchpad / MIDI Learn pour démarrer / arrêter.
+- **GRILLE ALIGNÉE (24 nov., à posteriori et réversible, demandé : « dommage que les boucles ne soient pas calées sur un premier temps »)** : boutons **ALIGNER LA GRILLE** /
+  **ANCIENNE GRILLE** de la fenêtre « Dripsody Performance » (hors enregistrement). Pas possible en direct (essai du 24 nov. : une signature posée en milieu de mesure est
+  repoussée à la barre suivante ; changer un tempo posé fait sauter la tête de lecture), donc après coup à partir des segments d'horloge du journal (`P.grid_plan` / `grid_build`) :
+  par segment tempo exact `60·N/L` (N = temps par cycle = round(bpm estimé × L / 60), le bpm estimé vient des lignes `E sync` du journal), mesure de q temps (q = 1er diviseur de N dans
+  4, 3, 6, 8, 2, 5, 7, sinon N) → **chaque départ de cycle tombe sur un 1er temps** ; **mesures de raccord** (`plan_fill` : nombre entier de temps, tempo ajusté entre ½× et 2× la
+  référence, dernière mesure raccourcie par une signature) avant le 1er segment (depuis une barre de l'ancienne grille ≥ 2 mesures avant) et entre deux segments (re-phase comprise).
+  Marqueurs posés **par numéro de mesure** (`timepos = -1`, `measurepos`, `beatpos = 0` : pas d'arrondi) ; repli automatique **par instant, 1 µs avant la barre** si la vérification
+  (départs de cycle sur un 1er temps, tolérance 2 ms) échoue. Sécurité : ancienne carte de tempo sauvée dans l'ExtState du projet `Dripsody_Perf/grid_backup`
+  (réaligner repart toujours de l'ancienne), items / régions / marqueurs remis en place s'ils ont bougé (`put_back`), blocs d'annulation. **À confirmer dans REAPER** :
+  pose par mesure acceptée, indices de mesure 0-based (`TimeMap2_timeToBeats` / `TimeMap_GetMeasureInfo`), tolérance de 1 µs, aspect du tempo de raccord. Test `tools/tperf3.lua`
+  (simulateur de carte de tempo : barres, signature repoussée à la barre suivante) : 15 départs de cycle examinés, tous sur un 1er temps ; restauration exacte ; mode repli.
+  **Reste** : boutons Launchpad / MIDI Learn pour démarrer / arrêter le concert.
 - **Essai jetable** `tools/Dripsody_PerfSpike.lua` (à lancer dans un projet vide, ~12 s) : arme / désarme / réarme des pistes en cours d'enregistrement, pose un
   marqueur 5/4, teste `SetCurrentBPM` avec un marqueur, crée et agrandit une région ; rapport `Dripsody_Spike_Report.txt`. Attendre ses résultats avant de coder.
 

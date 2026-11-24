@@ -26,6 +26,9 @@
     position de lecture du projet ; la phase (mediane de centaines de mesures) + la longueur exacte du cycle donnent T0 + k * L.
     Un decalage de phase (re-phase) ouvre un nouveau segment. Les segments sont gardes dans le projet (ExtState « Dripsody_Perf/log »).
     Reglage fin : ExtState « NowUndo_Perf/cut_ms » (ms, negatif = coupe plus tot ; 0 par defaut).
+  - GRILLE ALIGNEE (a posteriori, reversible) : bouton « ALIGNER LA GRILLE » = tempo exact par synchro (60 * N / L), mesure d'un nombre
+    entier de temps, mesures de raccord entre les synchros : CHAQUE DEPART DE CYCLE TOMBE SUR UN PREMIER TEMPS. « ANCIENNE GRILLE » revient
+    a la carte de tempo d'avant. Items, regions et marqueurs ne bougent pas. Ctrl+Z annule aussi.
   - Au demarrage : repetition coupee. A l'arret : etats d'armement / modes d'enregistrement des pistes geree restaures,
     items regles en base de temps « temps ». Les evenements sont gardes dans l'ExtState du projet (« Dripsody_Perf »).
 
@@ -176,6 +179,9 @@ function P.load_log()
     for x in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = x end
     if f[1] == "C" and #f >= 6 then P.saved.segs[#P.saved.segs + 1] = { key = f[2], T0 = tonumber(f[3]), L = tonumber(f[4]), t0 = tonumber(f[5]), t1 = tonumber(f[6]) }
     elseif f[1] == "E" and f[3] == "start" then P.saved.pos0 = tonumber(f[2])
+    elseif f[1] == "E" and f[3] == "sync" and f[4] then
+      local key, bpm = f[4]:match("^(%S+)"), tonumber(f[4]:match("bpm=([%d%.]+)"))
+      if key and bpm then P.saved.bpm = P.saved.bpm or {}; P.saved.bpm[key] = bpm end
     elseif f[1] == "S" then P.saved.songs = P.saved.songs + 1 end
   end
 end
@@ -261,6 +267,180 @@ function P.join_items()
   R.PreventUIRefresh(-1); R.Undo_EndBlock("Dripsody : recollage des items", -1)
   R.UpdateArrange()
   return n_join, n_skip
+end
+
+-- ============================ grille de tempo alignee sur les cycles (a posteriori, reversible) ============================
+-- Chaque segment d'horloge = un maitre de synchro : tempo exact 60 * N / L (N temps par cycle, estime par le looper), mesure de q temps
+-- (q divise N : 4, 3, 6, 8, 2, 5, 7 sinon N) -> un cycle = un nombre entier de mesures, et CHAQUE DEPART DE CYCLE TOMBE SUR UN PREMIER TEMPS.
+-- Entre deux segments (et avant le 1er) : « mesures de raccord » (tempo legerement ajuste, derniere mesure raccourcie) pour que la mesure suivante
+-- commence exactement au depart du cycle. REAPER repousse une signature posee en milieu de mesure jusqu'a la barre suivante : tous les marqueurs sont
+-- donc poses sur une barre, 1 microseconde avant, pour que l'arrondi ne les envoie jamais a la barre d'apres.
+-- Securite : l'ancienne carte de tempo est sauvee dans le projet (« grid_backup ») ; position des items, regions et marqueurs remise telle quelle apres coup.
+local function bar_num(N)
+  for _, q in ipairs({ 4, 3, 6, 8, 2, 5, 7 }) do if N % q == 0 then return q end end
+  return N
+end
+function P.grid_dump()
+  local lines = {}
+  for i = 0, R.CountTempoTimeSigMarkers(0) - 1 do
+    local _, tp, _, _, bpm, num, den, lin = R.GetTempoTimeSigMarker(0, i)
+    lines[#lines + 1] = string.format("%.9f\t%.9f\t%d\t%d", tp, bpm, num or 0, den or 0)
+  end
+  return table.concat(lines, "\n")
+end
+local function snap_project()                                   -- positions des items, regions et marqueurs
+  local S = { items = {}, marks = {} }
+  for t = 0, R.CountTracks(0) - 1 do
+    local tr = R.GetTrack(0, t)
+    for i = 0, R.CountTrackMediaItems(tr) - 1 do
+      local it = R.GetTrackMediaItem(tr, i)
+      S.items[#S.items + 1] = { it = it, pos = R.GetMediaItemInfo_Value(it, "D_POSITION"), len = R.GetMediaItemInfo_Value(it, "D_LENGTH") }
+    end
+  end
+  local i = 0
+  while true do
+    local rv, isrgn, pos, rgnend, name, idx, col = R.EnumProjectMarkers3(0, i)
+    if not rv or rv == 0 then break end
+    S.marks[#S.marks + 1] = { isrgn = isrgn, pos = pos, rgnend = rgnend, name = name, idx = idx, col = col }
+    i = i + 1
+  end
+  return S
+end
+local function put_back(S)                                      -- ce qui a bouge pendant la reconstruction de la grille est remis en place
+  local moved = 0
+  for _, x in ipairs(S.items) do
+    if math.abs(R.GetMediaItemInfo_Value(x.it, "D_POSITION") - x.pos) > 1e-7 then R.SetMediaItemInfo_Value(x.it, "D_POSITION", x.pos); moved = moved + 1 end
+    if math.abs(R.GetMediaItemInfo_Value(x.it, "D_LENGTH") - x.len) > 1e-7 then R.SetMediaItemInfo_Value(x.it, "D_LENGTH", x.len) end
+  end
+  local i = 0
+  for _, mk in ipairs(S.marks) do
+    local rv, isrgn, pos, rgnend = R.EnumProjectMarkers3(0, i)
+    if rv and rv ~= 0 and (math.abs(pos - mk.pos) > 1e-7 or math.abs((rgnend or 0) - (mk.rgnend or 0)) > 1e-7) then
+      R.SetProjectMarker3(0, mk.idx, mk.isrgn, mk.pos, mk.rgnend, mk.name, mk.col); moved = moved + 1
+    end
+    i = i + 1
+  end
+  return moved
+end
+local function plan_fill(plan, a, b, bpm_ref, num)            -- [a, b) : bar line -> bar line, un nombre entier de temps, derniere mesure raccourcie
+  local D = b - a
+  if D < 0.02 then return end
+  local K = math.floor(D * bpm_ref / 60 + 0.5)
+  local kmin = math.max(1, math.ceil(D * bpm_ref * 0.5 / 60)); local kmax = math.max(kmin, math.floor(D * bpm_ref * 2 / 60))
+  K = math.max(1, math.max(kmin, math.min(kmax, K)))
+  local bpm = 60 * K / D
+  local nb, r = K // num, K % num
+  if nb > 0 then plan[#plan + 1] = { t = a, bpm = bpm, num = num } end
+  if r > 0 then plan[#plan + 1] = { t = (nb > 0) and (a + nb * num * 60 / bpm) or a, bpm = bpm, num = r } end
+end
+function P.grid_plan(sv)
+  local segs = {}
+  for _, s in ipairs(sv.segs) do segs[#segs + 1] = s end
+  table.sort(segs, function(a, b) return a.t0 < b.t0 end)
+  for _, s in ipairs(segs) do
+    s.N = math.max(1, math.floor(s.L * ((sv.bpm and sv.bpm[s.key]) or 120) / 60 + 0.5))
+    s.q = bar_num(s.N); s.bpm = 60 * s.N / s.L
+    s.c0 = s.T0 + math.ceil((s.t0 - 0.05 - s.T0) / s.L) * s.L           -- 1er depart de cycle du segment
+  end
+  return segs
+end
+function P.grid_restore()
+  local rv, str = R.GetProjExtState(0, "Dripsody_Perf", "grid_backup")
+  if not rv or rv == 0 or not str or str == "" then return false end
+  local T = {}
+  for line in str:gmatch("[^\n]+") do
+    local a, b, c, d = line:match("^(%S+)\t(%S+)\t(%S+)\t(%S+)")
+    if a then T[#T + 1] = { t = tonumber(a), bpm = tonumber(b), num = tonumber(c), den = tonumber(d) } end
+  end
+  if #T == 0 then return false end
+  R.Undo_BeginBlock(); R.PreventUIRefresh(1)
+  for i = R.CountTempoTimeSigMarkers(0) - 1, 1, -1 do R.DeleteTempoTimeSigMarker(0, i) end
+  R.SetTempoTimeSigMarker(0, 0, T[1].t, -1, -1, T[1].bpm, T[1].num > 0 and T[1].num or 4, T[1].den > 0 and T[1].den or 4, false)
+  for i = 2, #T do
+    local x = T[i]
+    if x.num > 0 then R.SetTempoTimeSigMarker(0, -1, x.t - 1e-6, -1, -1, x.bpm, x.num, x.den > 0 and x.den or 4, false)
+    else R.SetTempoTimeSigMarker(0, -1, x.t, -1, -1, x.bpm, 0, 0, false) end
+  end
+  R.SetProjExtState(0, "Dripsody_Perf", "grid_backup", "")
+  R.UpdateTimeline(); R.PreventUIRefresh(-1); R.Undo_EndBlock("Dripsody : retour a l'ancienne grille de tempo", -1)
+  return true
+end
+function P.grid_build(mode)                                     -- mode : "measure" (marqueurs poses par mesure / temps) ou "time" (par instant, 1 microseconde avant la barre)
+  P.load_log()
+  local sv = P.saved
+  if #sv.segs == 0 then return nil, "Pas de segment d'horloge dans ce projet." end
+  local rv0, bk = R.GetProjExtState(0, "Dripsody_Perf", "grid_backup")
+  if rv0 and rv0 ~= 0 and bk ~= "" then P.grid_restore() end              -- on repart toujours de la grille d'origine
+  local segs = P.grid_plan(sv)
+  local pos0 = sv.pos0 or segs[1].t0
+  local bpm0 = R.TimeMap_GetDividedBpmAtTime(pos0) or 120
+  local bar0 = 4 * 60 / bpm0
+  -- depart de la zone reconstruite : une barre de l'ancienne grille, au moins 2 mesures avant le 1er cycle
+  local target = math.max(0, math.min(pos0, segs[1].c0 - 2 * bar0))
+  local _, meas = R.TimeMap2_timeToBeats(0, target)
+  local _, qn_start, _, num0, den0 = R.TimeMap_GetMeasureInfo(0, meas)
+  local b_a = R.TimeMap2_QNToTime(0, qn_start)
+  num0 = (den0 == 4 and num0 and num0 > 0) and num0 or 4
+  local plan = {}
+  plan_fill(plan, b_a, segs[1].c0, bpm0, num0)
+  for i, sg in ipairs(segs) do
+    local nxt = segs[i + 1]
+    local n_full = nxt and math.floor((nxt.c0 - sg.c0) / sg.L + 1e-6) or 1
+    if n_full >= 1 then plan[#plan + 1] = { t = sg.c0, bpm = sg.bpm, num = sg.q } end
+    if nxt then plan_fill(plan, sg.c0 + math.max(0, n_full) * sg.L, nxt.c0, sg.bpm, 4) end
+  end
+  table.sort(plan, function(a, b) return a.t < b.t end)
+  local clean = {}
+  for _, x in ipairs(plan) do if #clean == 0 or x.t - clean[#clean].t > 1e-6 then clean[#clean + 1] = x end end
+  plan = clean
+  -- sauvegarde de l'ancienne carte, puis remplacement de tout ce qui est a partir de b_a
+  R.Undo_BeginBlock(); R.PreventUIRefresh(1)
+  local snap = snap_project()
+  R.SetProjExtState(0, "Dripsody_Perf", "grid_backup", P.grid_dump())
+  local first_is_0 = false
+  for i = R.CountTempoTimeSigMarkers(0) - 1, 0, -1 do
+    local _, tp = R.GetTempoTimeSigMarker(0, i)
+    if tp >= b_a - 1e-6 then
+      if i == 0 then first_is_0 = true else R.DeleteTempoTimeSigMarker(0, i) end
+    end
+  end
+  for j, x in ipairs(plan) do
+    if j == 1 and first_is_0 then R.SetTempoTimeSigMarker(0, 0, 0, -1, -1, x.bpm, x.num, 4, false)
+    elseif mode == "measure" then
+      -- la barre cible est a x.t (fin de la region precedente) : on la designe par son numero de mesure, sans passer par un instant arrondi
+      local _, meas = R.TimeMap2_timeToBeats(0, x.t + 1e-4)
+      R.SetTempoTimeSigMarker(0, -1, -1, meas, 0, x.bpm, x.num, 4, false)
+    else R.SetTempoTimeSigMarker(0, -1, x.t - 1e-6, -1, -1, x.bpm, x.num, 4, false) end
+  end
+  R.UpdateTimeline()
+  local moved = put_back(snap)
+  R.PreventUIRefresh(-1); R.Undo_EndBlock("Dripsody : grille de tempo alignee sur les cycles", -1)
+  -- verification : le depart de plusieurs cycles de chaque segment tombe-t-il sur un premier temps ?
+  local worst, nchk = 0, 0
+  for i, sg in ipairs(segs) do
+    local nxt = segs[i + 1]
+    local last = nxt and (nxt.c0 - 1e-3) or sg.t1
+    local K = math.max(1, math.floor((last - sg.c0) / sg.L))
+    for _, k in ipairs({ 0, 1, K // 2, K - 1, K }) do
+      if k >= 0 and sg.c0 + k * sg.L <= last + 1e-3 then
+        local c = sg.c0 + k * sg.L
+        local b, _, cml = R.TimeMap2_timeToBeats(0, c)
+        local e = math.min(b, (cml or sg.q) - b) * 60 / sg.bpm
+        worst = math.max(worst, e); nchk = nchk + 1
+      end
+    end
+  end
+  return #plan, worst * 1000, moved, #segs
+end
+-- bouton : essaie la pose par mesure ; si les departs de cycle ne tombent pas sur un 1er temps (> 2 ms), refait avec la pose par instant
+function P.grid_apply()
+  local np, worst, moved, nsg = P.grid_build("measure")
+  local mode = "mesure"
+  if np and worst > 2 then
+    np, worst, moved, nsg = P.grid_build("time"); mode = "instant"
+  end
+  if np then return np, worst, moved, nsg, mode end
+  return np, worst
 end
 
 -- ============================ regles (appelees ~20 fois par seconde) ============================
@@ -448,16 +628,26 @@ local function draw()
     line("Les autres pistes restent a ta charge.", .6, .62, .7)
   end
   if P.msg ~= "" then line(P.msg, 1, .8, .4) end
-  -- saucissonnage a posteriori : boutons (hors enregistrement)
+  -- apres le concert : grille de tempo alignee et saucissonnage (a posteriori, reversibles), hors enregistrement
   if not running then
     if not P.saved then P.load_log() end
     local ns = #P.saved.segs
-    gfx.set(.6, .62, .7, 1); gfx.setfont(2, "Arial", 13); gfx.x, gfx.y = 14, gfx.h - 78
+    gfx.set(.6, .62, .7, 1); gfx.setfont(2, "Arial", 13); gfx.x, gfx.y = 14, gfx.h - 132
     gfx.drawstr(ns > 0 and string.format("Dernier concert : %d morceau(x), %d segment(s) d'horloge.", P.saved.songs, ns) or "Pas de concert enregistre dans ce projet.")
     local bw = (gfx.w - 38) / 2
-    local h1 = button(12, gfx.h - 54, bw, 38, "DECOUPER PAR CYCLE", false)
-    local h2 = button(26 + bw, gfx.h - 54, bw, 38, "RECOLLER", false)
-    if click and h1 and ns > 0 then
+    local g1 = button(12, gfx.h - 108, bw, 38, "ALIGNER LA GRILLE", false)
+    local g2 = button(26 + bw, gfx.h - 108, bw, 38, "ANCIENNE GRILLE", false)
+    local h1 = button(12, gfx.h - 58, bw, 38, "DECOUPER PAR CYCLE", false)
+    local h2 = button(26 + bw, gfx.h - 58, bw, 38, "RECOLLER", false)
+    if click and g1 and ns > 0 then
+      local ok, np, worst, moved, nsg, gmode = pcall(P.grid_apply)
+      if not ok then P.msg = "Erreur de grille : " .. tostring(np)
+      elseif not np then P.msg = tostring(worst)
+      else P.msg = string.format("Grille : %d marqueur(s), %d segment(s) ; depart des cycles sur un 1er temps a %.2f ms pres%s.%s Ctrl+Z annule.", np, nsg, worst, worst > 2 and " (ATTENTION : mal aligne, essaie ANCIENNE GRILLE)" or "", moved > 0 and (" " .. moved .. " element(s) remis en place.") or "") end
+    elseif click and g2 then
+      local ok, done = pcall(P.grid_restore)
+      P.msg = ok and (done and "Ancienne grille de tempo restauree." or "Pas de grille sauvegardee a restaurer.") or ("Erreur : " .. tostring(done))
+    elseif click and h1 and ns > 0 then
       local ok, ni, nc = pcall(P.split_items)
       P.msg = ok and string.format("Decoupe : %d item(s) parcourus, %d coupe(s). Ctrl+Z annule.", ni, nc) or ("Erreur de decoupe : " .. tostring(ni))
     elseif click and h2 then
@@ -502,6 +692,6 @@ do
   if R.time_precise() - hb < 1.0 then R.SetExtState(EXT, "cmd", "toggle", false); return end
 end
 R.atexit(function() if P.active or P.starting then P.restore(); R.SetExtState(EXT, "running", "0", false) end end)
-gfx.init("Dripsody Performance", 440, 290, 0, 140, 140)
+gfx.init("Dripsody Performance", 440, 350, 0, 140, 140)
 R.defer(main)
 if rawget(_G, "DRIPSODY_PERF_TEST") then DRIPSODY_PERF = P end
