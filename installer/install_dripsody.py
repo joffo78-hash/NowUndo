@@ -71,32 +71,110 @@ def is_resource(path):
 
 REATEAM_URL = "https://raw.githubusercontent.com/ReaTeam/Extensions/master/index.xml"
 REAPACK_URL = "https://reapack.com/"
-SWS_URL = "https://www.sws-extension.org/"
+EXT_WANTED = {"js_ReaScriptAPI.ext": ("js_ReaScriptAPI", "reaper_js_ReaScriptAPI"),
+              "reaper_imgui.ext": ("ReaImGui", "reaper_imgui"),
+              "reaper-oss_SWS.ext": ("SWS", "reaper_sws")}
+
+
+def extensions_missing(res):
+    """Extensions a installer : (nom affiche, prefixe du fichier dans UserPlugins, id ReaPack)."""
+    plug = os.path.join(res, "UserPlugins")
+    out = []
+    for rid, (name, pre) in EXT_WANTED.items():
+        if not glob.glob(os.path.join(plug, pre + "*")):
+            out.append((name, pre, rid))
+    return out
 
 
 def missing_deps(res):
-    """Extensions indispensables, dans l'ordre d'installation : (nom, prefixe du fichier dans UserPlugins)."""
-    plug = os.path.join(res, "UserPlugins")
-    wanted = [("ReaPack", "reaper_reapack"), ("SWS", "reaper_sws"),
-              ("js_ReaScriptAPI", "reaper_js_ReaScriptAPI"), ("ReaImGui", "reaper_imgui")]
-    return [n for n, pre in wanted if not glob.glob(os.path.join(plug, pre + "*"))]
+    return [n for n, _, _ in extensions_missing(res)]
+
+
+def platform_key():
+    """Cle de plateforme de l'index ReaPack : win64, darwin64 (Intel), darwin-arm64 (Apple Silicon)."""
+    if sys.platform.startswith("win"):
+        return "win64" if platform.machine().lower() in ("amd64", "x86_64") else "win32"
+    if sys.platform == "darwin":
+        return "darwin-arm64" if platform.machine().lower() == "arm64" else "darwin64"
+    return None
+
+
+def fetch(url, timeout=60):
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "Dripsody-Installer"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def plan_downloads(res, log=print):
+    """Pour chaque extension manquante : (nom, url, chemin de destination), d'apres l'index officiel ReaTeam."""
+    import xml.etree.ElementTree as ET
+    miss = extensions_missing(res)
+    if not miss:
+        return []
+    key = platform_key()
+    if key is None:
+        raise RuntimeError("systeme non pris en charge pour le telechargement automatique")
+    root = ET.fromstring(fetch(REATEAM_URL))
+    plan = []
+    for name, pre, rid in miss:
+        rp = next((x for x in root.iter("reapack") if x.get("name") == rid), None)
+        if rp is None:
+            raise RuntimeError("extension absente de l'index : " + rid)
+        version = list(rp.iter("version"))[-1]
+        srcs = [x for x in version.iter("source") if x.get("platform") == key and not x.get("type")]
+        if not srcs:
+            raise RuntimeError("pas de version pour ce systeme : " + name)
+        src = srcs[0]
+        url = (src.text or "").strip()
+        plan.append((name, url, os.path.join(res, "UserPlugins", src.get("file"))))
+        # l'API Lua de ReaImGui (utilisee par les interfaces) : a cote des scripts REAPER
+        if rid == "reaper_imgui.ext":
+            api = next((x for x in version.iter("source") if x.get("file") == "imgui.lua" and not x.get("platform")), None)
+            if api is not None:
+                plan.append((name + " (API Lua)", (api.text or "").strip(),
+                             os.path.join(res, "Scripts", "ReaTeam Extensions", "API", "imgui.lua")))
+    return plan
+
+
+def check_file(data, dest):
+    """Refuse un fichier qui n'est pas une bibliotheque (page d'erreur, coupure...)."""
+    head = data[:4]
+    if dest.endswith(".dll"):
+        ok = head[:2] == b"MZ"
+    elif dest.endswith(".dylib"):
+        ok = head in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe")
+    else:
+        ok = len(data) > 1000
+    if not ok:
+        raise RuntimeError("fichier telecharge invalide : " + os.path.basename(dest))
+
+
+def download_extensions(res, log=print):
+    """Telecharge et copie les extensions manquantes. Renvoie la liste des noms installes."""
+    plan = plan_downloads(res, log)
+    done = []
+    for name, url, dest in plan:
+        log("Telechargement : " + name + " ...")
+        data = fetch(url)
+        check_file(data, dest)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        tmp = dest + ".part"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dest)
+        log("  -> " + os.path.relpath(dest, res))
+        done.append(name)
+    return done
 
 
 def dep_steps(miss):
-    """Texte simple pour un musicien : ce qu'il reste a faire (une seule fois)."""
+    """Ce qu'il reste a faire si le telechargement n'a pas abouti."""
     if not miss:
         return []
-    lines = ["Dernieres etapes, une seule fois (extensions de REAPER) :"]
-    if "ReaPack" in miss:
-        lines += ["1. Installe ReaPack : " + REAPACK_URL + "  (telecharge le fichier pour ton systeme, mets-le dans le dossier UserPlugins de REAPER, puis redemarre REAPER).",
-                  "2. Dans REAPER : Extensions > ReaPack > Import repositories, colle cette adresse :",
-                  "   " + REATEAM_URL,
-                  "3. Dans REAPER : Extensions > ReaPack > Browse packages, cherche et installe :",
-                  "   js_ReaScriptAPI, reaper_imgui (ReaImGui), et SWS (reaper-oss_SWS) si elle manque.",
-                  "4. Clique sur Apply, puis redemarre REAPER."]
-    else:
-        lines += ["Dans REAPER : Extensions > ReaPack > Browse packages, installe : " + ", ".join(miss) + ". Puis Apply et redemarre."]
-    return lines
+    return ["Il reste a installer dans REAPER (Extensions > ReaPack > Browse packages) : " + ", ".join(miss) + ".",
+            "Si ReaPack n'est pas installe : " + REAPACK_URL,
+            "Puis redemarre REAPER."]
 
 
 def lua_str(s):
@@ -145,10 +223,15 @@ def write_startup(res, scripts_dir, files, log):
     log("Demarrage automatique ecrit : %d script(s)." % len(files))
 
 
-def install(res, auto_files, log=print):
+def install(res, auto_files, log=print, extensions=True):
     """Installe tout. auto_files = noms de scripts lances au demarrage. Renvoie le nombre de fichiers copies."""
     if not is_resource(res):
         raise SystemExit("Dossier REAPER introuvable (pas de reaper.ini) : " + res)
+    if extensions and extensions_missing(res):
+        try:
+            download_extensions(res, log)
+        except Exception as e:                                 # pas de reseau : on guide au lieu de bloquer
+            log("Telechargement des extensions impossible : " + str(e))
     base = base_dir()
     root = os.path.join(base, "NowUndo")
     scripts_dir = os.path.join(res, "Scripts", APP_SUB, "Scripts", "V3.21")
@@ -241,6 +324,20 @@ def run_gui():
     tk.Button(bar, text="Ouvrir ReaPack (site)", command=lambda: webbrowser.open(REAPACK_URL)).pack(side="left")
     tk.Button(bar, text="Copier l'adresse du depot", command=copy_url).pack(side="left", padx=6)
     tk.Button(bar, text="Verifier les extensions", command=check).pack(side="left")
+    def get_ext():
+        r = res_var.get().strip()
+        if not is_resource(r):
+            messagebox.showerror("Dripsody", "Choisis d'abord le dossier REAPER.")
+            return
+        log_box.delete("1.0", "end")
+        try:
+            done = download_extensions(r, log)
+            log("Extensions installees : " + (", ".join(done) if done else "aucune a installer") + ". Redemarre REAPER.")
+        except Exception as e:
+            log("Telechargement impossible : " + str(e))
+            for line in dep_steps(missing_deps(r)):
+                log(line)
+    tk.Button(bar, text="Installer les extensions", command=get_ext).pack(side="left", padx=6)
     root.mainloop()
 
 
