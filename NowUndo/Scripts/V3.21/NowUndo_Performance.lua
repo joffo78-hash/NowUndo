@@ -6,7 +6,7 @@
   les autres pistes (instruments, effets...) restent a ta charge : si tu les armes, elles sont enregistrees avec le reste.
 
   - ENTREE k : armee en « Record : output » des qu'elle est affectee a au moins un looper (masques publies par le
-    Launchpad, gmem 6010 + i), desarmee quand elle ne l'est plus.
+    Launchpad, gmem 6010 + i) ET que sa sortie vers la piste parent est active ; desarmee sinon.
   - LOOPER i : arme des que son enregistrement est abouti (boucle > 0, plus en REC / attente), desarme au Clear.
     Une periode armee = un item.
   - MORCEAUX : un morceau commence au 1er REC alors que TOUS les loopers sont vides (3 parts comprises) ; sa region
@@ -121,7 +121,8 @@ function P.rules()
   end
   for _, m in ipairs(P.tr) do
     if m.kind == "in" then
-      local want = P.input_used(m.idx)
+      -- entree armee = affectee a un looper ET sortie vers la piste parent active (B_MAINSEND ; coupee = « in mute » du Launchpad)
+      local want = P.input_used(m.idx) and R.GetMediaTrackInfo_Value(m.tr, "B_MAINSEND") >= 0.5
       P.arm(m, want); if m.armed then nb_arm_in = nb_arm_in + 1 end
     else
       local l = L[m.idx - 1]

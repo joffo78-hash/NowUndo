@@ -1,7 +1,7 @@
 -- Test de NowUndo_Performance.lua avec un faux REAPER (gmem, pistes, marqueurs, regions).
 -- cd NowUndo/Scripts/V3.21 && python3 -c "import lupa.lua54 as L; l=L.LuaRuntime(); l.globals().arg_path='NowUndo_Performance.lua'; l.execute(open('../../../tools/tperf.lua').read())"
 GM = {}; EXT = {}; CLOCK = 1000; POS = 0; STATE = 1; DEFER = nil; PROJ = {}
-TR = {}; for n = 1, 30 do TR[n] = { n = n, v = { I_RECARM = 0, I_RECMODE = 2 }, items = {} } end
+TR = {}; for n = 1, 30 do TR[n] = { n = n, v = { I_RECARM = 0, I_RECMODE = 2, B_MAINSEND = 1 }, items = {} } end
 REGS = {}; MK = { { t = 0, bpm = 120 } }; LOGARM = {}; REP = 1; CMDS = {}
 reaper = {
   gmem_attach = function() end, gmem_read = function(a) return GM[a] or 0 end, gmem_write = function(a, v) GM[a] = v end,
@@ -37,6 +37,8 @@ print("1 demarrage : commandes", table.concat(CMDS, ","), "| repetition", REP, "
 -- 2) entree 1 affectee au looper 1 (masque bit0) : piste 2 armee
 GM[6000 + 10 + 1] = 1; run(0.2)
 print("2 entree 1 affectee : piste 2 armee =", TR[2].v.I_RECARM, "| piste 3 =", TR[3].v.I_RECARM)
+TR[2].v.B_MAINSEND = 0; run(0.2); print("2b sortie parent coupee : piste 2 armee =", TR[2].v.I_RECARM, "(attendu 0)")
+TR[2].v.B_MAINSEND = 1; run(0.2); print("2c sortie parent reactivee : piste 2 armee =", TR[2].v.I_RECARM, "(attendu 1)")
 -- 3) 1er REC du looper 1 (tous vides) : morceau 1
 GM[950] = CLOCK; setl(0, true, 1, 0, 1); run(0.3)
 print("3 REC : regions", #REGS, REGS[1] and REGS[1].name, string.format("debut %.2f", REGS[1] and REGS[1].s or -1), "| piste 11 armee =", TR[11].v.I_RECARM, "(attendu 0 : en REC)")

@@ -219,7 +219,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Étape 1 livrée : `NowUndo_Performance.lua`** (fenêtre « Dripsody Performance », bouton REC PERFORMANCE ; relancer le script pendant un concert = bascule ;
   test `tools/tperf.lua`, faux REAPER). Gère seulement les entrées 2-9 et les loopers 11-18 (constantes `IN_FIRST`, `LP_FIRST`) ; les instruments / aux sont routés
   vers les entrées (confirmé par l'utilisateur) donc enregistrés par elles, les autres pistes restent à sa charge. Entrée armée si affectée à un looper
-  (gmem `6010+i`), looper armé si boucle > 0 et plus en REC / attente (états 1, 7, 8), régions « Morceau n » (1er REC alors que tous les loopers sont vides ; fin =
+  (gmem `6010+i`) **et** sortie vers la piste parent active (`B_MAINSEND` = 1, demandé le 24 nov. ; coupée = « in mute »), looper armé si boucle > 0 et plus en REC / attente (états 1, 7, 8), régions « Morceau n » (1er REC alors que tous les loopers sont vides ; fin =
   début du suivant), marqueur de tempo à chaque nouveau maître looper (tempo estimé `+155`), journal dans l'ExtState du projet `Dripsody_Perf/log` (lignes `S` morceaux,
   `E` évènements) pour l'étape 2. Non testé dans REAPER. Question ouverte : armer aussi les entrées non affectées pendant le concert ?
   Reste : étape 2 (grille alignée après l'arrêt, découpe optionnelle des items par cycle avec les heures exactes du JSFX) ; boutons Launchpad / MIDI Learn pour
