@@ -232,14 +232,17 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (l'essai du 24 nov. n'a testé que l'armement). Garde-fou : à l'arrêt, le script vérifie qu'un item existe pour chaque période demandée > 1 s et affiche
   « ATTENTION : rien d'enregistré pour : piste N (…) » (aussi `MANQUANT` dans le journal). Si ça échoue : essai n°2 (`I_RECMODE` en cours d'enregistrement), plan B =
   enregistrer en continu puis couper les items après coup.
-- **Saucissonnage (24 nov., option cochable dans la fenêtre, ExtState `NowUndo_Perf/split`)** : après l'arrêt, les items des **loopers** (pistes 11-18, pas les
-  entrées) sont coupés à chaque départ de cycle de l'horloge interne (maître de la synchro). **Pas de modification du JSFX** : le looper maître publie
-  `gmem[o+3]` = position de l'horloge en échantillons **à chaque échantillon** et `[o+2]` = longueur ; à chaque image le script apparie cette position avec
-  `GetPlayPosition` → début de cycle `r = (pos − mpos/sr) mod L` ; **médiane circulaire** des 400 dernières mesures = phase T0 (erreur < 0,3 ms avec ±3 ms de
-  gigue au banc) ; coupes = `T0 + k·L`. Un écart durable (> 15 ms, 10 mesures) = re-phase → nouveau segment (qui démarre à la 1re mesure écartée). Pas de coupe à
-  moins de 30 ms du bord d'un item. Segments `C` et coupes dans le journal `Dripsody_Perf/log`. Réglage fin : ExtState `NowUndo_Perf/cut_ms` (ms, négatif =
-  plus tôt ; la latence « output » peut décaler de quelques ms : à régler à l'oreille). Tests `tools/tperf2.lua`. Non testé dans REAPER. **Reste** : grille de tempo
-  alignée sur ces segments (barres de mesure = cycles, mesures de raccord entre segments), utilisable avec les mêmes T0 / L.
+- **Saucissonnage = À POSTERIORI et RÉVERSIBLE (24 nov., demandé : « je suis obligé de choisir avant ? »)** : plus de case à cocher avant le concert. Après l'arrêt
+  (et même en rouvrant le projet plus tard, le journal est dans le projet), la fenêtre « Dripsody Performance » a deux boutons : **DÉCOUPER PAR CYCLE** (items des **loopers**
+  seulement, pas les entrées) et **RECOLLER**. Recollage sûr : les morceaux créés sont marqués `P_EXT:dripsody_cut` ; un morceau n'est recollé au précédent que s'il est
+  contigu (< 2 ms), de la même source, même vitesse et même décalage dans le fichier (un morceau déplacé / modifié à la main n'est pas touché, compté « non recollable »).
+  Découper deux fois ne coupe rien de plus. Ctrl+Z annule aussi (blocs d'annulation). **Pas de modification du JSFX** : le looper maître publie `gmem[o+3]` = position de
+  l'horloge en échantillons **à chaque échantillon** et `[o+2]` = longueur ; à chaque image le script apparie cette position avec `GetPlayPosition` → début de cycle
+  `r = (pos − mpos/sr) mod L` ; **médiane circulaire** des 400 dernières mesures = phase T0 (erreur < 0,3 ms avec ±3 ms de gigue au banc) ; coupes = `T0 + k·L`. Écart durable
+  (> 15 ms, 10 mesures) = re-phase → nouveau segment (qui démarre à la 1re mesure écartée). Pas de coupe à moins de 30 ms du bord d'un item. Journal `Dripsody_Perf/log`
+  (`P.load_log()` : lignes `C` segments, `E start`, `S` morceaux). Réglage fin : ExtState `NowUndo_Perf/cut_ms` (ms, négatif = plus tôt ; la latence « output » peut décaler
+  de quelques ms : à régler à l'oreille). Tests `tools/tperf2.lua` (hook `DRIPSODY_PERF_TEST` → `DRIPSODY_PERF`). Non testé dans REAPER. **Reste** : grille de tempo alignée sur
+  ces segments (barres de mesure = cycles, mesures de raccord entre segments) ; boutons Launchpad / MIDI Learn pour démarrer / arrêter.
 - **Essai jetable** `tools/Dripsody_PerfSpike.lua` (à lancer dans un projet vide, ~12 s) : arme / désarme / réarme des pistes en cours d'enregistrement, pose un
   marqueur 5/4, teste `SetCurrentBPM` avec un marqueur, crée et agrandit une région ; rapport `Dripsody_Spike_Report.txt`. Attendre ses résultats avant de coder.
 

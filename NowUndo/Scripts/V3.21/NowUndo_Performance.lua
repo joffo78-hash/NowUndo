@@ -18,10 +18,13 @@
   - TEMPO : a chaque nouvelle synchro (nouveau maitre looper) un marqueur de tempo est AJOUTE a la position de lecture.
     Jamais de SetCurrentBPM ni de modification d'un tempo deja pose pendant la lecture (la tete de lecture sauterait,
     essai du 24 nov.). L'alignement des mesures sur les boucles se fera apres l'arret (etape 2).
-  - SAUCISSONNAGE (option, desactivee par defaut) : apres l'arret, les items des LOOPERS sont coupes a chaque depart de cycle de
-    l'horloge interne (le maitre de la synchro). Les departs de cycle sont retrouves en direct : a chaque image on lit la position
-    de l'horloge (gmem [o+3], publiee a chaque echantillon) et la position de lecture du projet ; la phase (mediane de centaines
-    de mesures) + la longueur exacte du cycle donnent T0 + k * L. Un decalage de phase (re-phase) ouvre un nouveau segment.
+  - SAUCISSONNAGE (a posteriori, reversible) : APRES le concert, meme apres avoir rouvert le projet, deux boutons de la fenetre :
+    « DECOUPER PAR CYCLE » coupe les items des LOOPERS a chaque depart de cycle de l'horloge interne (le maitre de la synchro) ;
+    « RECOLLER » remet les items comme avant (les morceaux coupes sont marques « dripsody_cut » et recolles seulement s'ils sont
+    toujours contigus, de la meme source, a la meme place dans le fichier). Ctrl+Z annule aussi. Les departs de cycle sont retrouves
+    EN DIRECT pendant le concert : a chaque image on lit la position de l'horloge (gmem [o+3], publiee a chaque echantillon) et la
+    position de lecture du projet ; la phase (mediane de centaines de mesures) + la longueur exacte du cycle donnent T0 + k * L.
+    Un decalage de phase (re-phase) ouvre un nouveau segment. Les segments sont gardes dans le projet (ExtState « Dripsody_Perf/log »).
     Reglage fin : ExtState « NowUndo_Perf/cut_ms » (ms, negatif = coupe plus tot ; 0 par defaut).
   - Au demarrage : repetition coupee. A l'arret : etats d'armement / modes d'enregistrement des pistes geree restaures,
     items regles en base de temps « temps ». Les evenements sont gardes dans l'ExtState du projet (« Dripsody_Perf »).
@@ -150,10 +153,10 @@ function P.clock_sample(pos, key, len, id, part)
   if c.n < 8 then c.med = median(c.ds) elseif c.n % 10 == 0 then c.med = median(c.ds) end
   c.t1 = pos
 end
-function P.cut_times()
+function P.cut_times(segs)
   local cuts = {}
   local off = (tonumber(R.GetExtState(EXT, "cut_ms")) or 0) / 1000
-  for _, sg in ipairs(P.segs) do
+  for _, sg in ipairs(segs) do
     local m0 = math.ceil((sg.t0 - 0.05 - sg.T0) / sg.L)
     local m1 = math.floor((sg.t1 + 0.05 - sg.T0) / sg.L)
     for m = m0, m1 do cuts[#cuts + 1] = sg.T0 + m * sg.L + off end
@@ -163,19 +166,38 @@ function P.cut_times()
   for _, t in ipairs(cuts) do if #out == 0 or t - out[#out] > TOL then out[#out + 1] = t end end
   return out
 end
+-- journal du projet (ecrit a l'arret) : segments d'horloge « C » et debut « E start »
+function P.load_log()
+  P.saved = { segs = {}, pos0 = nil, songs = 0 }
+  local rv, str = R.GetProjExtState(0, "Dripsody_Perf", "log")
+  if not rv or rv == 0 or not str or str == "" then return end
+  for line in str:gmatch("[^\n]+") do
+    local f = {}
+    for x in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = x end
+    if f[1] == "C" and #f >= 6 then P.saved.segs[#P.saved.segs + 1] = { key = f[2], T0 = tonumber(f[3]), L = tonumber(f[4]), t0 = tonumber(f[5]), t1 = tonumber(f[6]) }
+    elseif f[1] == "E" and f[3] == "start" then P.saved.pos0 = tonumber(f[2])
+    elseif f[1] == "S" then P.saved.songs = P.saved.songs + 1 end
+  end
+end
+local function lp_items(m, pos0)
+  local list = {}
+  for i = 0, R.CountTrackMediaItems(m.tr) - 1 do
+    local it = R.GetTrackMediaItem(m.tr, i)
+    if R.GetMediaItemInfo_Value(it, "D_POSITION") >= (pos0 or 0) - 0.5 then list[#list + 1] = it end
+  end
+  return list
+end
 function P.split_items()
-  local cuts = P.cut_times()
+  P.load_log()
+  local sv = P.saved
+  local cuts = P.cut_times(sv.segs)
   local n_items, n_cuts = 0, 0
   if #cuts == 0 then return 0, 0 end
   R.Undo_BeginBlock(); R.PreventUIRefresh(1)
   for _, m in ipairs(P.tr) do
-    if m.kind == "lp" and m.tr then
-      local list = {}
-      for i = 0, R.CountTrackMediaItems(m.tr) - 1 do
-        local it = R.GetTrackMediaItem(m.tr, i)
-        if R.GetMediaItemInfo_Value(it, "D_POSITION") >= (P.pos0 or 0) - 0.5 then list[#list + 1] = it end
-      end
-      for _, it in ipairs(list) do
+    if m.kind == "lp" then
+      m.tr = m.tr or R.GetTrack(0, m.n - 1)
+      for _, it in ipairs(m.tr and lp_items(m, sv.pos0) or {}) do
         local cur = it
         local lo, hi = 1, #cuts + 1                                  -- 1re coupe apres le debut de l'item (recherche dichotomique)
         local ip = R.GetMediaItemInfo_Value(cur, "D_POSITION")
@@ -187,7 +209,10 @@ function P.split_items()
           if t >= ce - TOL then break end
           if t > cp + TOL then
             local right = R.SplitMediaItem(cur, t)
-            if right then cur = right; n_cuts = n_cuts + 1 end
+            if right then
+              R.GetSetMediaItemInfo_String(right, "P_EXT:dripsody_cut", "1", true)   -- marque : morceau cree par la decoupe
+              cur = right; n_cuts = n_cuts + 1
+            end
           end
           k = k + 1
         end
@@ -197,6 +222,45 @@ function P.split_items()
   end
   R.PreventUIRefresh(-1); R.Undo_EndBlock("Dripsody : decoupe des items par cycle", -1)
   return n_items, n_cuts
+end
+-- remet les items comme avant : un morceau marque est recolle au precedent s'il est contigu, de la meme source et a la meme place du fichier
+function P.join_items()
+  P.load_log()
+  local n_join, n_skip = 0, 0
+  R.Undo_BeginBlock(); R.PreventUIRefresh(1)
+  for _, m in ipairs(P.tr) do
+    if m.kind == "lp" then
+      m.tr = m.tr or R.GetTrack(0, m.n - 1)
+      local list = m.tr and lp_items(m, P.saved.pos0) or {}
+      table.sort(list, function(a, b) return R.GetMediaItemInfo_Value(a, "D_POSITION") < R.GetMediaItemInfo_Value(b, "D_POSITION") end)
+      local prev
+      for _, it in ipairs(list) do
+        local _, mark = R.GetSetMediaItemInfo_String(it, "P_EXT:dripsody_cut", "", false)
+        local merged = false
+        if mark == "1" and prev then
+          local pp, pl = R.GetMediaItemInfo_Value(prev, "D_POSITION"), R.GetMediaItemInfo_Value(prev, "D_LENGTH")
+          local ip, il = R.GetMediaItemInfo_Value(it, "D_POSITION"), R.GetMediaItemInfo_Value(it, "D_LENGTH")
+          local ta, tb = R.GetActiveTake(prev), R.GetActiveTake(it)
+          if ta and tb and math.abs(ip - (pp + pl)) < 0.002 then
+            local fa = R.GetMediaSourceFileName(R.GetMediaItemTake_Source(ta), "")
+            local fb = R.GetMediaSourceFileName(R.GetMediaItemTake_Source(tb), "")
+            local ra, rb = R.GetMediaItemTakeInfo_Value(ta, "D_PLAYRATE"), R.GetMediaItemTakeInfo_Value(tb, "D_PLAYRATE")
+            local oa, ob = R.GetMediaItemTakeInfo_Value(ta, "D_STARTOFFS"), R.GetMediaItemTakeInfo_Value(tb, "D_STARTOFFS")
+            if fa == fb and math.abs(ra - rb) < 1e-6 and math.abs(ob - (oa + pl * ra)) < 0.002 then
+              R.SetMediaItemInfo_Value(prev, "D_LENGTH", ip + il - pp)
+              R.DeleteTrackMediaItem(m.tr, it)
+              n_join = n_join + 1; merged = true
+            end
+          end
+          if not merged then n_skip = n_skip + 1 end
+        end
+        if not merged then prev = it end
+      end
+    end
+  end
+  R.PreventUIRefresh(-1); R.Undo_EndBlock("Dripsody : recollage des items", -1)
+  R.UpdateArrange()
+  return n_join, n_skip
 end
 
 -- ============================ regles (appelees ~20 fois par seconde) ============================
@@ -348,10 +412,7 @@ function P.post()
   R.UpdateArrange()
   P.msg = string.format("Termine : %d morceau(x), %d item(s) regle(s) en base de temps.", #P.songs, n)
   if #manquants > 0 then P.msg = "ATTENTION : rien d'enregistre pour : " .. table.concat(manquants, ", ") end
-  if R.GetExtState(EXT, "split") == "1" then
-    local ok, ni, nc = pcall(P.split_items)
-    P.msg = P.msg .. (ok and string.format("  Decoupe : %d item(s), %d coupe(s).", ni, nc) or ("  Erreur de decoupe : " .. tostring(ni)))
-  end
+  P.load_log()
 end
 
 -- ============================ fenetre ============================
@@ -387,16 +448,22 @@ local function draw()
     line("Les autres pistes restent a ta charge.", .6, .62, .7)
   end
   if P.msg ~= "" then line(P.msg, 1, .8, .4) end
-  -- option : saucissonnage des items de loopers a chaque cycle (apres l'arret)
-  local on = R.GetExtState(EXT, "split") == "1"
-  local bx, by = 14, gfx.h - 30
-  gfx.set(on and .35 or .22, on and .75 or .24, on and .45 or .30, 1); gfx.rect(bx, by, 18, 18, 1)
-  gfx.set(1, 1, 1, 1); gfx.rect(bx, by, 18, 18, 0)
-  if on then gfx.x, gfx.y = bx + 3, by; gfx.drawstr("x") end
-  gfx.set(.85, .86, .9, 1); gfx.setfont(2, "Arial", 13); gfx.x, gfx.y = bx + 28, by + 1
-  gfx.drawstr("Decouper les items des loopers a chaque cycle (apres l'arret)")
-  if click and gfx.mouse_x >= bx and gfx.mouse_x <= bx + 400 and gfx.mouse_y >= by and gfx.mouse_y <= by + 18 then
-    R.SetExtState(EXT, "split", on and "0" or "1", true)
+  -- saucissonnage a posteriori : boutons (hors enregistrement)
+  if not running then
+    if not P.saved then P.load_log() end
+    local ns = #P.saved.segs
+    gfx.set(.6, .62, .7, 1); gfx.setfont(2, "Arial", 13); gfx.x, gfx.y = 14, gfx.h - 78
+    gfx.drawstr(ns > 0 and string.format("Dernier concert : %d morceau(x), %d segment(s) d'horloge.", P.saved.songs, ns) or "Pas de concert enregistre dans ce projet.")
+    local bw = (gfx.w - 38) / 2
+    local h1 = button(12, gfx.h - 54, bw, 38, "DECOUPER PAR CYCLE", false)
+    local h2 = button(26 + bw, gfx.h - 54, bw, 38, "RECOLLER", false)
+    if click and h1 and ns > 0 then
+      local ok, ni, nc = pcall(P.split_items)
+      P.msg = ok and string.format("Decoupe : %d item(s) parcourus, %d coupe(s). Ctrl+Z annule.", ni, nc) or ("Erreur de decoupe : " .. tostring(ni))
+    elseif click and h2 then
+      local ok, nj, nk = pcall(P.join_items)
+      P.msg = ok and string.format("Recolle : %d morceau(x)%s.", nj, nk > 0 and (", " .. nk .. " non recollable(s) (deplaces ou modifies)") or "") or ("Erreur de recollage : " .. tostring(nj))
+    end
   end
 end
 
@@ -435,5 +502,6 @@ do
   if R.time_precise() - hb < 1.0 then R.SetExtState(EXT, "cmd", "toggle", false); return end
 end
 R.atexit(function() if P.active or P.starting then P.restore(); R.SetExtState(EXT, "running", "0", false) end end)
-gfx.init("Dripsody Performance", 440, 250, 0, 140, 140)
+gfx.init("Dripsody Performance", 440, 290, 0, 140, 140)
 R.defer(main)
+if rawget(_G, "DRIPSODY_PERF_TEST") then DRIPSODY_PERF = P end
