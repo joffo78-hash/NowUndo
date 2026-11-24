@@ -29,7 +29,7 @@ if on == "" then on = "1" end
 local off = reaper.GetExtState(SEC, "offset_ms")
 if off == "" then off = "0" end
 
-local title = string.format("NowUndo latence (auto REAPER : %.1f ms = %d + %d samples)", auto_ms, li or 0, lo or 0)
+local title = string.format("Dripsody latence (auto REAPER : %.1f ms = %d + %d samples)", auto_ms, li or 0, lo or 0)
 local ok, csv = reaper.GetUserInputs(title, 2, "Compensation (1 = on / 0 = off),Decalage manuel (ms),extrawidth=80", on .. "," .. off)
 if not ok then return end
 
@@ -41,4 +41,4 @@ reaper.SetExtState(SEC, "on", new_on, true)
 reaper.SetExtState(SEC, "offset_ms", tostring(new_off), true)
 
 reaper.MB(string.format("Compensation : %s\nLatence auto : %.1f ms\nDecalage manuel : %+.1f ms\nTotal applique : %.1f ms\n\n(Pris en compte en 1 s par le script Launchpad, qui doit tourner.)",
-  new_on == "1" and "ACTIVE" or "COUPEE", auto_ms, new_off, new_on == "1" and math.max(0, auto_ms + new_off) or 0), "NowUndo latence", 0)
+  new_on == "1" and "ACTIVE" or "COUPEE", auto_ms, new_off, new_on == "1" and math.max(0, auto_ms + new_off) or 0), "Dripsody latence", 0)

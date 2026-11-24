@@ -1,12 +1,12 @@
--- @description NowUndo : installation et demarrage automatique (a lancer une fois, puis quand tu veux changer)
+-- @description Dripsody : installation et demarrage automatique (a lancer une fois, puis quand tu veux changer)
 -- @version 3.27
 -- @author joffo78
 -- @about
---   # NowUndo
+--   # Dripsody
 --   Looper a 8 instances synchronisees pour REAPER : le looper (JSFX), le Launchpad, le Twister, le MIDI Learn, les
 --   Rushes / Scenario, les 8 Waves (avec import de fichiers audio), le FX Router, le pedalier virtuel et la page web.
 --
---   Apres l'installation par ReaPack, lance l'action **NowUndo : installation et demarrage automatique** :
+--   Apres l'installation par ReaPack, lance l'action **Dripsody : installation et demarrage automatique** :
 --   elle verifie les extensions necessaires (SWS, js_ReaScriptAPI, ReaImGui), te laisse choisir les scripts a lancer
 --   automatiquement a l'ouverture de REAPER et ecrit le demarrage pour toi.
 --
@@ -136,10 +136,10 @@ local function main()
   -- 2) fichiers presents
   local absent = {}
   for _, s in ipairs(SCRIPTS) do if not file_exists(DIR .. s[1]) then absent[#absent + 1] = s[1] end end
-  if #absent > 0 then msg[#msg + 1] = "Fichiers absents : " .. table.concat(absent, ", ") .. " (reinstalle NowUndo par ReaPack).\n" end
+  if #absent > 0 then msg[#msg + 1] = "Fichiers absents : " .. table.concat(absent, ", ") .. " (reinstalle Dripsody par ReaPack).\n" end
 
   -- 3) menu des scripts a lancer au demarrage (cocher / decocher, puis Appliquer)
-  gfx.init("NowUndo", 1, 1, 0, 0, 0)
+  gfx.init("Dripsody", 1, 1, 0, 0, 0)
   while true do
     local items = {}
     for i, s in ipairs(SCRIPTS) do items[#items + 1] = (get_on(i) and "!" or "") .. s[2] end
@@ -157,7 +157,7 @@ local function main()
       local ok, p = write_startup(list)
       gfx.quit()
       if ok then
-        msg[#msg + 1] = (#list > 0 and (#list .. " script(s) se lanceront au demarrage de REAPER.") or "Plus aucun script NowUndo au demarrage.") .. "\nFichier : " .. p
+        msg[#msg + 1] = (#list > 0 and (#list .. " script(s) se lanceront au demarrage de REAPER.") or "Plus aucun script Dripsody au demarrage.") .. "\nFichier : " .. p
       else
         msg[#msg + 1] = "Impossible d'ecrire " .. tostring(p)
       end
@@ -166,8 +166,8 @@ local function main()
       gfx.quit(); break
     end
   end
-  msg[#msg + 1] = "\nPour lancer un script maintenant : liste des actions > chercher \"NowUndo\".\nPage web : active l'interface web de REAPER (Preferences > Control/OSC/web) puis ouvre http://localhost:<port>/NowUndo.html"
-  reaper.ShowMessageBox(table.concat(msg, "\n"), "NowUndo : installation", 0)
+  msg[#msg + 1] = "\nPour lancer un script maintenant : liste des actions > chercher \"NowUndo_\" (les noms de fichiers gardent cet ancien nom).\nPage web : active l'interface web de REAPER (Preferences > Control/OSC/web) puis ouvre http://localhost:<port>/NowUndo.html"
+  reaper.ShowMessageBox(table.concat(msg, "\n"), "Dripsody : installation", 0)
 end
 
 main()

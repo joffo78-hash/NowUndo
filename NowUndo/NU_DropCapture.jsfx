@@ -1,4 +1,4 @@
-desc:NU Drop Capture (NowUndo V3.27 : enregistre tout depuis DROP ON, sur la piste de la cible)
+desc:NU Drop Capture (Dripsody V3.27 : enregistre tout depuis DROP ON, sur la piste de la cible)
 // Pose TEMPORAIREMENT par le script Launchpad en BOUT de chaine de la piste du looper cible, puis retire.
 // Entrees 1/2 = la cible apres ses effets (avant son fader) ; entrees 3/4 = les autres loopers du groupe, arrives par
 // des sends post-fader sur 2 canaux libres de la piste (le script regle le routage des broches 3/4). Drop solo : rien en 3/4.

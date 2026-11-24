@@ -2,7 +2,7 @@ desc:NU Manipulator Pitch + Formant Shifter
 author: joffo78
 version: 1.0
 changelog:
-  Premiere version dans le pack NowUndo.
+  Premiere version dans le pack Dripsody.
 
 
 // Les 16 sliders sont masqués (préfixe "-") : tout se règle dans l'interface graphique.

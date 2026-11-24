@@ -926,7 +926,7 @@ do
   end
 end
 -- V3.27 : scenario + rushes cote a cote : 1000 px de large au minimum a l'ouverture (la fenetre reste redimensionnable)
-H._open = function() gfx.init("NowUndo Scenario", math.max(1000, ld("w", 1100)), math.max(560, ld("h", 640)), ld("dock", 0), ld("x", 120), ld("y", 120)); H._bg = false end
+H._open = function() gfx.init("Dripsody Scenario", math.max(1000, ld("w", 1100)), math.max(560, ld("h", 640)), ld("dock", 0), ld("x", 120), ld("y", 120)); H._bg = false end
 H._open()
 
 local was_down, last_click_t, last_click_row = false, 0, 0
@@ -1604,7 +1604,7 @@ local function make_item(stepn, pos, track)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH", len)
   reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "S" .. stepn, true)
   reaper.SetMediaItemInfo_Value(it, "I_CUSTOMCOLOR", reaper.ColorToNative(230, 190, 40) | 0x1000000)
-  reaper.Undo_EndBlock("NowUndo : item S" .. stepn, -1)
+  reaper.Undo_EndBlock("Dripsody : item S" .. stepn, -1)
   reaper.UpdateArrange()
   tl_scan()
   msg = string.format("Item S%d cree a %.2f s.", stepn, pos); msg_err = false
@@ -1930,7 +1930,7 @@ end
 -- rend le focus clavier a la fenetre du Scenario (apres un menu ou une boite REAPER, les touches partaient vers REAPER)
 function ED.refocus()
   if reaper.JS_Window_Find and reaper.JS_Window_SetFocus then
-    local h = reaper.JS_Window_Find("NowUndo Scenario", true)
+    local h = reaper.JS_Window_Find("Dripsody Scenario", true)
     if h then reaper.JS_Window_SetFocus(h) end
   end
 end
@@ -2248,7 +2248,7 @@ local function mac_delete()
   local ms = sel_ids()
   if #ms == 0 then return end
   if H._ro(ms) then return end
-  if #ms > 1 and reaper.MB("Supprimer " .. #ms .. " rushes ?", "NowUndo - rushes", 4) ~= 6 then return end
+  if #ms > 1 and reaper.MB("Supprimer " .. #ms .. " rushes ?", "Dripsody - rushes", 4) ~= 6 then return end
   local rm = {}
   for _, m in ipairs(ms) do rm[m.id] = true end
   local keep = {}
@@ -2653,7 +2653,7 @@ local function mac_import()
   local txt = f:read("*a"); f:close()
   local list, lay, pages = mac_deserialize(txt)
   if #list == 0 then msg = "Aucun rush dans ce fichier."; msg_err = true; return end
-  if #macros > 0 and reaper.MB("Remplacer les " .. #macros .. " macros actuelles (et leur disposition) par les " .. #list .. " du fichier ?", "NowUndo - rushes", 4) ~= 6 then return end
+  if #macros > 0 and reaper.MB("Remplacer les " .. #macros .. " macros actuelles (et leur disposition) par les " .. #list .. " du fichier ?", "Dripsody - rushes", 4) ~= 6 then return end
   mac_apply(list, lay, pages); mac_save()
   last_export = file:match("([^/\\]+)$") or last_export
   msg = "Importe : " .. last_export .. "  (" .. #list .. " rushes)"; msg_err = false
@@ -2724,7 +2724,7 @@ H._model_menu = function(x, y)
   elseif k == 3 then
     local txt = H._read(cur)
     if not txt then msg = "Modele introuvable : " .. cur; msg_err = true; return end
-    if reaper.MB("Remplacer les rushes actuels par le modele " .. cur .. " ?", "NowUndo - rushes", 4) ~= 6 then return end
+    if reaper.MB("Remplacer les rushes actuels par le modele " .. cur .. " ?", "Dripsody - rushes", 4) ~= 6 then return end
     local list, lay, pages = mac_deserialize(txt)
     mac_apply(list, lay, pages); mac_save(); msg = "Modele recharge : " .. cur; msg_err = false
   elseif k == 4 then
@@ -3174,7 +3174,7 @@ local function mac_draw(W, Hh, down)
             mcur = m.id
             run_macro(m, sel_targets())
           elseif mx >= dx and mx < dx + 16 then                          -- × : supprimer cette macro
-            if not H._ro({ m }) and reaper.MB("Supprimer le rush '" .. mac_label(m) .. "' ?", "NowUndo - rushes", 4) == 6 then
+            if not H._ro({ m }) and reaper.MB("Supprimer le rush '" .. mac_label(m) .. "' ?", "Dripsody - rushes", 4) == 6 then
               msel = { [m.id] = true }; mcur = m.id; mac_delete()
             end
           elseif lph then                                                -- LP c1.3 : affiche la sous-page sur le Launchpad
@@ -3290,7 +3290,7 @@ local function mac_draw(W, Hh, down)
     if btn(px(3), y2, wb, 22, "SUPPRIMER", 0.45, 0.15, 0.15) then H._pg_del() end
     if btn(px(4), y2, wb, 22, "VIDER", 0.45, 0.15, 0.15) then
       local n = H._pg_count(H._pg)
-      if n > 0 and reaper.MB("Retirer les " .. n .. " rushes de la page " .. H._pg_label(H._pg) .. " ? (ils restent dans la liste)", "NowUndo - rushes", 4) == 6 then
+      if n > 0 and reaper.MB("Retirer les " .. n .. " rushes de la page " .. H._pg_label(H._pg) .. " ? (ils restent dans la liste)", "Dripsody - rushes", 4) == 6 then
         for c in pairs(layout) do if math.ceil(c / 64) == H._pg then layout[c] = nil end end
         mac_save(); msg = "Page videe."; msg_err = false
       end
@@ -3434,7 +3434,7 @@ H._scn_draw = function(SW, Hh, down)
   if btn(x6(4), y1, w6, 22, "▼", 0.20, 0.25, 0.35) then move_step(1) end
   if btn(x6(5), y1, w6, 22, "→ ITEM", 0.20, 0.25, 0.35) then stamp_step() end
   if btn(x6(6), y1, w6, 22, "VIDER", 0.45, 0.15, 0.15) then
-    if #steps == 0 or reaper.MB("Vider le scenario (" .. #steps .. " pas) ? Les rushes restent.", "NowUndo - scenario", 4) == 6 then new_scn() end
+    if #steps == 0 or reaper.MB("Vider le scenario (" .. #steps .. " pas) ? Les rushes restent.", "Dripsody - scenario", 4) == 6 then new_scn() end
   end
   -- capture / timeline
   local y2 = Hh - 72
@@ -3539,7 +3539,7 @@ local function main()
 
   gfx.set(0.14, 0.05, 0.06, 1); gfx.rect(0, 0, W, Hh)
   gfx.setfont(2, "Arial", 12, 'b')
-  gfx.setfont(2, "Arial", 14, 'b'); gfx.set(1, 1, 1, 0.9); gfx.x, gfx.y = 14, 9; gfx.drawstr("NowUndo  SCENARIO + RUSHES")
+  gfx.setfont(2, "Arial", 14, 'b'); gfx.set(1, 1, 1, 0.9); gfx.x, gfx.y = 14, 9; gfx.drawstr("Dripsody  SCENARIO + RUSHES")
   gfx.setfont(2, "Arial", 12)
   if capturing then gfx.set(1, 0.35, 0.35, 1) else gfx.set(1, 1, 1, 0.5) end
   gfx.x = gfx.x + 18; gfx.y = 11

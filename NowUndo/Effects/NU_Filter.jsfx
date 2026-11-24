@@ -2,9 +2,9 @@ desc:NU Filter (passe-haut / passe-bas, resonance, drive)
 author: joffo78
 version: 1.0
 changelog:
-  Premiere version dans le pack NowUndo.
+  Premiere version dans le pack Dripsody.
 //tags: filter
-// Ecrit pour NowUndo (24 nov. 2026), code original : filtres RBJ (formules classiques de l'Audio EQ Cookbook).
+// Ecrit pour Dripsody (24 nov. 2026), code original : filtres RBJ (formules classiques de l'Audio EQ Cookbook).
 // Les 4 premiers reglages = ceux du Twister : HP, LP, Resonance, Drive. Pas de Dry/Wet (ouvert = son inchange).
 
 slider1:20<20,5000,0.1:log>HP - passe-haut (Hz) (20 = off)

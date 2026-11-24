@@ -263,5 +263,5 @@ end
 
 reaper.SetExtState(SECTION, "web_cmd", "", false)
 publish(true)
-reaper.ShowConsoleMsg("[NowUndo Twister Web] bridge gmem demarre\n")
+reaper.ShowConsoleMsg("[Dripsody Twister Web] bridge gmem demarre\n")
 reaper.defer(loop)

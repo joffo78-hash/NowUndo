@@ -31,7 +31,7 @@ jobs:
           reapack-index
           --rebuild
           --no-commit
-          --name "NowUndo"
+          --name "Dripsody"
           --link "https://github.com/joffo78-hash/NowUndo"
 
       - name: Commit updated index

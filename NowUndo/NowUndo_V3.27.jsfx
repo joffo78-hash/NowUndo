@@ -1,4 +1,5 @@
-adesc:aNowUndo V3.27 (dub brut, warp, slices a l'oreille) [V3.26 WARP : attaques calees sur une grille (1/4..1/32, force), original garde, ON/OFF instantane] [V3.26 detection des slices perceptive : 3 bandes, contraste avec ce qui precede, masquage, repartition sur la boucle] [Drop de groupe enregistre apres les effets ; nouveau REC = fin du REC en cours] [V3.23 compensation de latence aller-retour] [V3.22 REC cale sur l'appui : pre-roll + fin compensee] [Cloud v2 : Size / Density (overlap) / Agitation, Freeze, Diffuse] [V3.20 slicer precis + crossfade, Cloud width = Stereo, Rec Density aleatoire, Auto-Replace par comparaison de niveau] [In/Out fix r12 brf+BRmix+SLmix] Looper (beat repeat) (sync point + reference master, slicer: auto-refresh each buffer change, Rate Link grid, auto-detect leger (enveloppe+seuil+hold), gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
+desc:Dripsody Looper V3.27 (dub brut, warp, slices a l'oreille)
+// Historique : [V3.26 WARP : attaques calees sur une grille (1/4..1/32, force), original garde, ON/OFF instantane] [V3.26 detection des slices perceptive : 3 bandes, contraste avec ce qui precede, masquage, repartition sur la boucle] [Drop de groupe enregistre apres les effets ; nouveau REC = fin du REC en cours] [V3.23 compensation de latence aller-retour] [V3.22 REC cale sur l'appui : pre-roll + fin compensee] [Cloud v2 : Size / Density (overlap) / Agitation, Freeze, Diffuse] [V3.20 slicer precis + crossfade, Cloud width = Stereo, Rec Density aleatoire, Auto-Replace par comparaison de niveau] [In/Out fix r12 brf+BRmix+SLmix] Looper (beat repeat) (sync point + reference master, slicer: auto-refresh each buffer change, Rate Link grid, auto-detect leger (enveloppe+seuil+hold), gate fix, master clock, steps, presets, max slices) (full hard-resync: reverse + exit slicer + leave stop + In/Out/speed rational)
 options:gmem=nowundo_sync
 options:maxmem=128000000
 slider1:speed=1.0<0.01,100.0,0.01>-Speed
@@ -3720,7 +3721,7 @@ mouse_down = mouse_cap & 1; mouse_click = mouse_down && !(last_mouse_cap & 1); m
 
 ui_en = 1; max_len_to_draw = (length > 0) ? length : (state == 1 || state == 8 ? pos : 0); ml_s = max_len_to_draw / srate;
 gfx_set(0.12, 0.04, 0.05); gfx_rect(0, 0, 760, 27); gfx_set(0.85, 0.35, 0.40); gfx_rect(0, 26, 760, 1);
-gfx_setfont(3); gfx_set(1, 1, 1); gfx_x = 12; gfx_y = 4; gfx_drawstr("NOWUNDO"); gfx_measurestr("NOWUNDO", tw, th);
+gfx_setfont(3); gfx_set(1, 1, 1); gfx_x = 12; gfx_y = 4; gfx_drawstr("DRIPSODY"); gfx_measurestr("DRIPSODY", tw, th);
 gfx_set(0.85, 0.35, 0.40); gfx_x = 12 + tw + 6; gfx_y = 4; gfx_drawstr("V3.27"); gfx_setfont(1);
 // V3.27 : temps de calcul du pire bloc (clic = remise a zero)
 pf_ms = pf_max * 1000; pf_lim = srate > 0 ? samplesblock / srate * 1000 : 2.9;

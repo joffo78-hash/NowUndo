@@ -1646,7 +1646,7 @@ local function draw()
   gfx.setfont(1, "Arial", font_title, "b")
   gfx.set(0.95, 0.45, 0.40)
   gfx.x, gfx.y = S(10), S(6)
-  gfx.drawstr("NowUndo MIDI Learn")
+  gfx.drawstr("Dripsody MIDI Learn")
 
   local nmap = 0
   for _ in pairs(maps) do nmap = nmap + 1 end
@@ -1730,7 +1730,7 @@ local function draw()
     local btns = {
       { "Sauver modele",   save_template, { 0.22, 0.45, 0.28 } },
       { "Recharger modele", function()
-          if reaper.MB("Remplacer TOUTES les assignations actuelles par le modele ?", "NowUndo MIDI Learn", 4) == 6 then load_template() end
+          if reaper.MB("Remplacer TOUTES les assignations actuelles par le modele ?", "Dripsody MIDI Learn", 4) == 6 then load_template() end
         end, { 0.25, 0.35, 0.55 } },
       { "Exporter...",     export_model, { 0.30, 0.30, 0.34 } },
       { "Importer...",     import_model, { 0.30, 0.30, 0.34 } },
@@ -1988,7 +1988,7 @@ local function pick_aux_excl()
 end
 
 local function open_ui()
-  gfx.init("NowUndo MIDI Learn", W, H, 0, 100, 100)
+  gfx.init("Dripsody MIDI Learn", W, H, 0, 100, 100)
   gfx.clear = 0x1A1A1E
   ui_open = true
 end
@@ -2035,7 +2035,7 @@ local function handle_ui()
   elseif char == string.byte("t") or char == string.byte("T") then
     save_template()
   elseif char == string.byte("l") or char == string.byte("L") then
-    local ok = reaper.MB("Remplacer TOUTES les assignations actuelles par le modele sauve ?", "NowUndo MIDI Learn", 4)
+    local ok = reaper.MB("Remplacer TOUTES les assignations actuelles par le modele sauve ?", "Dripsody MIDI Learn", 4)
     if ok == 6 then load_template() end
   elseif char == string.byte("m") or char == string.byte("M") then
     local on = reaper.GetExtState(EXT, "tpl_open") ~= "0"

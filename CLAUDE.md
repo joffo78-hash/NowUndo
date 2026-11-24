@@ -1,4 +1,10 @@
-# NowUndo — mémoire de projet pour Claude
+# Dripsody (ex-NowUndo) — mémoire de projet pour Claude
+
+**Renommage du 24 nov. 2026 : le logiciel s'appelle maintenant « Dripsody ».** Seuls les textes **affichés** changent (titres de fenêtres, boîtes
+de message, en-tête du looper, `desc:` des JSFX, titre de la page web, @description / @about ReaPack, nom du dépôt ReaPack). Les identifiants
+internes gardent « NowUndo » / « nowundo » (ExtState, gmem `nowundo_sync`, dossiers `Data/NowUndo_*`, **noms de fichiers**, préfixe `NU_`) : ne
+les renommer que sur demande (les noms de fichiers apparaissent dans la liste des actions de REAPER). Détection du looper par nom d'effet :
+`fx_patterns` contient maintenant `dripsody` en plus de `nowundo`.
 
 Looper 8 instances synchronisées pour **REAPER** : un JSFX (le moteur audio) + des scripts Lua (Launchpad,
 Twister, MIDI Learn, 8 Looper Panel, Scenario, ponts web) + une télécommande web (`NowUndo.html`).
@@ -180,9 +186,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Setup** (action « NowUndo : installation et démarrage automatique ») : vérifie SWS (`BR_`), js_ReaScriptAPI (`JS_`), ReaImGui ; menu à cocher
   des scripts à lancer au démarrage (ExtState `NowUndo_Setup/auto_<fichier>`) ; écrit **un bloc balisé** dans `Scripts/__startup.lua`
   (`-- >>> NOWUNDO … <<<`, le reste du fichier est conservé) qui lance les scripts par **chemin** (`AddRemoveReaScript`), plus d'ids `_RS…`.
-- Chemins après installation par ReaPack : scripts `Scripts/NowUndo/NowUndo/Scripts/V3.21/`, effets `Effects/NowUndo/NowUndo/` (looper, MSV3,
-  DropCapture) et `Effects/NowUndo/NowUndo/Effects/NU_*.jsfx`. FX Router et Twister scannent **aussi** `NowUndo/NowUndo/Effects` (en plus de
-  `MonRig`) ; le Launchpad cherche `NU_DropCapture` aussi sous `NowUndo/NowUndo/`.
+- Chemins après installation par ReaPack (nom du dépôt ReaPack = **Dripsody**, workflow `--name "Dripsody"`) : scripts
+  `Scripts/Dripsody/NowUndo/Scripts/V3.21/`, effets `Effects/Dripsody/NowUndo/` (looper, MSV3, DropCapture) et `Effects/Dripsody/NowUndo/Effects/NU_*.jsfx`.
+  FX Router et Twister scannent **aussi** `Dripsody/NowUndo/Effects` (en plus de `MonRig`) ; le Launchpad cherche `NU_DropCapture` aussi sous
+  `Dripsody/NowUndo/`.
 - Vérifié : `reapack-index --check` = 1 paquet, 0 erreur ; `--rebuild --no-commit` produit bien tous les `@provides`. **À confirmer à la 1re vraie
   installation** : ReaPack accepte les chemins `../../` des effets (l'index les contient, pas vérifié côté REAPER) ; le menu du Setup ; le bloc
   `__startup.lua`. Publication = fusion sur `main` (l'action GitHub régénère `index.xml`) : **ne pas fusionner sans l'accord de l'utilisateur**.

@@ -1,6 +1,6 @@
-# NowUndo
+# Dripsody (ex-NowUndo)
 
-Source repository for NowUndo, a REAPER looper project composed of a JSFX effect, Lua scripts, and web/remote-control files.
+Source repository for Dripsody (formerly NowUndo), a REAPER looper project composed of a JSFX effect, Lua scripts, and web/remote-control files.
 
 ## Contents
 
@@ -14,7 +14,7 @@ This repository preparation preserves the original directory layout and filename
 
 ## Installation and licensing
 
-NowUndo is released under the **MIT License** (see `LICENSE` at the repository root). Third-party effects (Tukan, Cockos, Stillwell, chmaha, etc.) are **not** included in this repository and keep their own licenses. Installation instructions are still to be written.
+Dripsody is released under the **MIT License** (see `LICENSE` at the repository root). Third-party effects (Tukan, Cockos, Stillwell, chmaha, etc.) are **not** included in this repository and keep their own licenses. Installation instructions are still to be written.
 
 
 ## ReaPack

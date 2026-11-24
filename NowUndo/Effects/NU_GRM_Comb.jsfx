@@ -2,7 +2,7 @@ desc:NU GRM Comb (peigne resonant, Mix / Sweep / Freq A / Resonance en tete)
 author: joffo78
 version: 1.0
 changelog:
-  Premiere version dans le pack NowUndo.
+  Premiere version dans le pack Dripsody.
 //tags: filter comb delay resonator
 // Meme son que grm_sweep_comb.jsfx, reglages reordonnes pour le Twister (4 premiers = Mix, Sweep, Freq A, Resonance).
 // Auteur : joffo78 (grm_sweep_comb v3). Peigne a feedback, toutes harmoniques, sans amortissement HF,

@@ -504,7 +504,7 @@ VL.config = {
   sync_fx_patterns = { "master sync", "master_synchro", "central timebase" },   -- nom du JSFX Master Sync (minuscules)
   sync_inbox = 96,                 -- gmem[96..98] : boite de commandes du JSFX Master Sync (Main / Chorus / Bridge)
   looper_window_fx = 0,            -- index (0 = premier) de l'effet looper dont on ouvre la fenetre
-  fx_patterns = { "nowundo", "noundo", "looper", "drop capture" },   -- (drop capture : jamais compte comme slot FX)   -- nom du JSFX a reconnaitre sur les pistes
+  fx_patterns = { "nowundo", "dripsody", "noundo", "looper", "drop capture" },   -- (drop capture : jamais compte comme slot FX)   -- nom du JSFX a reconnaitre sur les pistes
   -- Noms de secours si les index de piste ne collent pas
   in_name_patterns = { "^in%s*%d+", "^input%s*%d+", "^entree%s*%d+" },
   looper_name_patterns = { "^l%d+", "^looper%s*%d+" },
@@ -2135,7 +2135,7 @@ function VL.preset_erase_confirm(name)
   local what = (name == "routing") and "routing" or "groupe"
   local ok = true
   if reaper and reaper.MB then
-    ok = reaper.MB("Effacer tous les presets de " .. what .. " ?\n(le preset 1 est conserve avec l'etat actuel)", "NowUndo - presets de " .. what, 4) == 6
+    ok = reaper.MB("Effacer tous les presets de " .. what .. " ?\n(le preset 1 est conserve avec l'etat actuel)", "Dripsody - presets de " .. what, 4) == 6
   end
   if ok then VL.preset_erase(name) end
 end
@@ -2436,7 +2436,7 @@ function VL.drop_capture_on(tt)
   reaper.SetMediaTrackInfo_Value(tt, "I_NCHAN", n + 2)
   local before = reaper.TrackFX_GetCount(tt)
   local fx
-  for _, name in ipairs({ "JS:NU_DropCapture.jsfx", "JS:NU_DropCapture", "JS:NowUndo/NowUndo/NU_DropCapture.jsfx", "JS:NowUndo/NowUndo/NU_DropCapture", "NU Drop Capture", "NU_DropCapture" }) do
+  for _, name in ipairs({ "JS:NU_DropCapture.jsfx", "JS:NU_DropCapture", "JS:Dripsody/NowUndo/NU_DropCapture.jsfx", "JS:Dripsody/NowUndo/NU_DropCapture", "NU Drop Capture", "NU_DropCapture" }) do
     local r = reaper.TrackFX_AddByName(tt, name, false, 1)
     if r and r >= 0 then fx = r break end
   end

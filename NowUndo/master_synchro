@@ -1,4 +1,4 @@
-desc:Nowundo Master Sync (Central Timebase)
+desc:Dripsody Master Sync (Central Timebase)
 options:gmem=nowundo_sync
 
 slider1:host_sync_main=0<0,1,1>-Host Sync (Main)
@@ -282,7 +282,7 @@ mouse_click && zoom_hov ? (
 gfx_setfont(1, "Arial", f_title_sz, 'b');
 set_pos(12, 12); 
 gfx_set(1, 1, 1, 1);
-gfx_drawstr("NOWUNDO SYNC");
+gfx_drawstr("DRIPSODY SYNC");
 
 // --- SLOTS DE SYNC ---
 function draw_slot(part_name, offset, y) local(locked, mid, mlen, btn_x, hov, slot_bpm, s_idx, si, s_b, s_part, s_part_base, inst_btn_w, inst_btn_x, inst_id_val, inst_alias_val, inst_hov, btn_host_hov, s_base, mask) (

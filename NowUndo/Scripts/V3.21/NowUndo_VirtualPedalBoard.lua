@@ -359,7 +359,7 @@ local function do_export()
   local def = "pedal_" .. MODELS[S.model].id .. "_" .. os.date("%Y%m%d_%H%M")
   local path
   if r.JS_Dialog_BrowseForSaveFile then
-    local ok, p = r.JS_Dialog_BrowseForSaveFile("Exporter les reglages du pedalier", pb_dir(), def .. ".nupb", "NowUndo pedal (*.nupb)\0*.nupb\0\0")
+    local ok, p = r.JS_Dialog_BrowseForSaveFile("Exporter les reglages du pedalier", pb_dir(), def .. ".nupb", "Dripsody pedal (*.nupb)\0*.nupb\0\0")
     if ok == 1 and p and p ~= "" then path = p end
   else
     local ok, name = r.GetUserInputs("Exporter les reglages", 1, "Nom du fichier,extrawidth=200", def)
@@ -1005,7 +1005,7 @@ local function start()
     d, x, y, ww, hh = tonumber(p[1]) or 0, tonumber(p[2]) or 100, tonumber(p[3]) or 100, tonumber(p[4]) or W, tonumber(p[5]) or H
     if ww < 500 then ww = W end; if hh < 380 then hh = H end
   end
-  gfx.init("NowUndo Virtual Pedal Board", ww, hh, d, x, y)
+  gfx.init("Dripsody Virtual Pedal Board", ww, hh, d, x, y)
   r.atexit(function() save_all(); r.SetExtState(EXT, "armed_hb", "0", false) end)
   loop()
 end

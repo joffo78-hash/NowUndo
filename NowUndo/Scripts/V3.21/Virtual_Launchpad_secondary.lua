@@ -237,7 +237,7 @@ end
 
 --------------------------------------------------------------------------
 VL.sync_enable()
-ND.init("nowundo - VL Mirror (3 pages)", "NowUndo_VL_Mirror", REF_W, REF_H)
+ND.init("Dripsody - VL Mirror (3 pages)", "NowUndo_VL_Mirror", REF_W, REF_H)
 
 local OS = (reaper.GetOS and reaper.GetOS()) or ""
 local CTRL_MASK = 4 | (OS:find("OSX") and 32 or 0)

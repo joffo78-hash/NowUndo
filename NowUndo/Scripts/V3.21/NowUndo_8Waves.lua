@@ -75,7 +75,7 @@ local function win_init()
   local function ld(k, d) return tonumber(reaper.GetExtState(EXT, k)) or d end
   local w, h = ld("w", 1400), ld("h", 820)
   if w < 300 then w = 1400 end; if h < 200 then h = 820 end
-  gfx.init("NowUndo 8 Waves", w, h, ld("dock", 0), ld("x", 100), ld("y", 100))
+  gfx.init("Dripsody 8 Waves", w, h, ld("dock", 0), ld("x", 100), ld("y", 100))
 end
 local function win_save()
   local t = reaper.time_precise(); if t - DOCK.t < 1 then return end; DOCK.t = t
