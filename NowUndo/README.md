@@ -14,7 +14,7 @@ This repository preparation preserves the original directory layout and filename
 
 ## Installation and licensing
 
-Installation instructions and license are not included yet; they should be documented/confirmed by the project maintainer before public distribution.
+NowUndo is released under the **MIT License** (see `LICENSE` at the repository root). Third-party effects (Tukan, Cockos, Stillwell, chmaha, etc.) are **not** included in this repository and keep their own licenses. Installation instructions are still to be written.
 
 
 ## ReaPack

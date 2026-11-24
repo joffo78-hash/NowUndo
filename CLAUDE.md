@@ -154,7 +154,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   `NU_Filter.jsfx` (remplace Filters_LPHP, code original RBJ : HP, LP, Résonance, Drive, pente 12/24 dB ; ouvert = son inchangé).
   Vérifiés OK pour les autres : bbddelay, joffo_stutter, Manipulator_Formant. **L'utilisateur accepte de partager BBD delay** (à lui,
   confirmé 24 nov.) : `NU_BBD_Delay`, `NU_Stutter`, `NU_Manipulator_Formant` ajoutés dans `NowUndo/Effects/` (copies du fichier de
-  l'utilisateur + en-tête `author/version/changelog` pour ReaPack, DSP inchangé, même ordre de réglages). Licence : pas encore choisie. Restent : `16rec` (pas reçu), delay NU éventuel
+  l'utilisateur + en-tête `author/version/changelog` pour ReaPack, DSP inchangé, même ordre de réglages). **Licence : MIT** (choisie par l'utilisateur le 24 nov., fichier `LICENSE` à la racine, copyright « 2026 joffo78 » ; vaut pour tout le dépôt, les effets de tiers ne sont pas inclus et gardent leur licence). Restent : `16rec` (pas reçu), delay NU éventuel
   (origine de bbddelay inconnue → l'utilisateur dit qu'il est à lui, à confirmer).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
