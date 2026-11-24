@@ -1,0 +1,133 @@
+desc:NU GRM Comb (peigne resonant, Mix / Sweep / Freq A / Resonance en tete)
+//tags: filter comb delay resonator
+// Meme son que grm_sweep_comb.jsfx, reglages reordonnes pour le Twister (4 premiers = Mix, Sweep, Freq A, Resonance).
+// Auteur : joffo78 (grm_sweep_comb v3). Peigne a feedback, toutes harmoniques, sans amortissement HF,
+// decay quasi constant en secondes, sortie mono, hauteur qui glisse en courbe lissee.
+// Automatiser "Sweep" (ou Freq A) donne les glissandos de resonance.
+
+slider1:100<0,100,1>Mix (%)
+slider2:0<0,1,0.001>Sweep (A -> B)
+slider3:130.5<20,5000,0.1:log>Freq A (Hz)
+slider4:1<0.05,20,0.01:log>Resonance - decay RT60 (s)
+slider5:600<20,5000,0.1:log>Freq B (Hz)
+slider6:250<0,3000,1>Glide (ms)
+slider7:0<0,1,1{Positif (toutes harmoniques),Negatif (impaires)}>Polarite
+slider8:20000<500,20000,1:log>Amortissement (Hz) (20000 = off)
+slider9:0<0,1,1{Off,On}>Blocage DC
+slider10:0<0,5,1{Off,Sine,Triangle,Rampe montante,Rampe descendante,Aleatoire (S&H)}>LFO - forme
+slider11:0.15<0.01,20,0.01:log>LFO - vitesse (Hz)
+slider12:1<0,4,0.01>LFO - profondeur (octaves +/-)
+slider13:0<0,100,1>LFO - ecart stereo (%)
+slider14:7<-24,24,1>2e peigne - intervalle (demi-tons)
+slider15:0<0,100,1>2e peigne - niveau (%)
+slider16:0<-24,12,0.1>Sortie (dB)
+
+@init
+N = 65536;
+MASK = N - 1;
+b1L = 0;   b1R = N;
+b2L = 2*N; b2R = 3*N;
+st = 4*N;
+memset(0, 0, 4*N + 8);
+wp = 0; ph = 0; prevR = 0; shL = 0; shR = 0;
+LN2 = log(2);
+smL = smR = gL1 = gR1 = log(130.5)/LN2;
+
+function lfoshape(p, sh)
+(
+  s = slider10;
+  s == 1 ? sin(2*$pi*p) :
+  s == 2 ? (p < 0.5 ? 4*p - 1 : 3 - 4*p) :
+  s == 3 ? 2*p - 1 :
+  s == 4 ? 1 - 2*p :
+  s == 5 ? sh : 0;
+);
+
+function comb(bufo, stp, in, d)
+local(rp, i, f, ym, y0, y1, y2, c1, c2, c3, r, lp, z, y, a, fb)
+(
+  fb = exp(-6.907755 * d / (srate * slider4));   // RT60 constant en secondes
+  fb = min(fb, 0.9995);
+  slider7 > 0.5 ? fb = -fb;
+
+  rp = wp + N - d;
+  i = floor(rp);
+  f = rp - i;
+  ym = bufo[(i-1) & MASK];
+  y0 = bufo[i & MASK];
+  y1 = bufo[(i+1) & MASK];
+  y2 = bufo[(i+2) & MASK];
+  c1 = 0.5*(y1 - ym);
+  c2 = ym - 2.5*y0 + 2*y1 - 0.5*y2;
+  c3 = 0.5*(y2 - ym) + 1.5*(y0 - y1);
+  r = ((c3*f + c2)*f + c1)*f + y0;
+
+  use_damp ? (
+    lp = stp[0];
+    lp += dampa * (r - lp);
+    stp[0] = lp;
+    r = lp;
+  );
+  use_dc ? (
+    z = stp[1];
+    z += 0.0002 * (r - z);
+    stp[1] = z;
+    r -= z;
+  );
+
+  y = in + fb * r;
+  a = abs(y);
+  a > 16 ? y = sign(y) * (32 - 256/a);   // filet de securite seulement en cas d'emballement
+  bufo[wp] = y;
+  y;
+);
+
+@slider
+lA = log(slider3)/LN2;
+lB = log(slider5)/LN2;
+lbase = lA + (lB - lA) * slider2;
+depth = slider12;
+use_damp = slider8 < 19999;
+dampa = 1 - exp(-2*$pi*slider8/srate);
+use_dc = slider9 > 0.5;
+gc = slider6 < 0.5 ? 1 : 1 - exp(-1/(slider6*0.001*srate));
+rate = slider11 / srate;
+spread = slider13/100 * 0.5;
+ratio2 = exp(-slider14 * 0.05776226504666);
+lvl2 = slider15/100;
+mix = slider1 / 100;
+outg = exp(slider16 * 0.11512925464970229);
+
+@sample
+ph += rate;
+ph >= 1 ? (ph -= 1; shL = rand(2) - 1);
+phR = ph + spread;
+phR >= 1 ? phR -= 1;
+phR < prevR ? shR = rand(2) - 1;
+prevR = phR;
+
+// double lissage (2 poles) : demarrage doux + arrivee douce des glissandos
+tgtL = lbase + lfoshape(ph, shL) * depth;
+tgtR = lbase + lfoshape(phR, shR) * depth;
+gL1 += gc * (tgtL - gL1);
+gR1 += gc * (tgtR - gR1);
+smL += gc * (gL1 - smL);
+smR += gc * (gR1 - smR);
+
+dL = max(4, min(N - 8, srate / exp(smL*LN2)));
+dR = max(4, min(N - 8, srate / exp(smR*LN2)));
+
+inL = spl0; inR = spl1;
+
+wetL = comb(b1L, st,   inL, dL);
+wetR = comb(b1R, st+2, inR, dR);
+lvl2 > 0.001 ? (
+  n2 = 1/sqrt(1 + lvl2*lvl2);
+  wetL = (wetL + lvl2 * comb(b2L, st+4, inL, max(4, min(N-8, dL*ratio2)))) * n2;
+  wetR = (wetR + lvl2 * comb(b2R, st+6, inR, max(4, min(N-8, dR*ratio2)))) * n2;
+);
+
+wp = (wp + 1) & MASK;
+
+spl0 = (inL*(1 - mix) + wetL*mix) * outg;
+spl1 = (inR*(1 - mix) + wetR*mix) * outg;

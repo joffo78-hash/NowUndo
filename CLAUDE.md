@@ -149,6 +149,11 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   **Convention des effets du pack (demandée)** : le Twister (page FX) et le FX Router montrent les **4 premiers paramètres**
   de chaque effet → slider1 = **Dry/Wet** quand il a un sens, puis les paramètres principaux (4 au total en tête).
   Effets réordonnés = **nouveaux fichiers** (« NU … ») pour ne pas casser les projets / réglages mémorisés par index.
+  **Faits le 24 nov.** (`NowUndo/Effects/`, non testés dans REAPER, bancs Python) : `NU_GRM_Comb.jsfx` (= grm_sweep_comb de
+  l'utilisateur, sliders renumérotés : Mix, Sweep, Freq A, Résonance en tête ; sortie identique à l'ancien, écart 0) et
+  `NU_Filter.jsfx` (remplace Filters_LPHP, code original RBJ : HP, LP, Résonance, Drive, pente 12/24 dB ; ouvert = son inchangé).
+  Vérifiés OK pour les autres : bbddelay, joffo_stutter, Manipulator_Formant. Restent : `16rec` (pas reçu), delay NU éventuel
+  (origine de bbddelay inconnue → l'utilisateur dit qu'il est à lui, à confirmer).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 

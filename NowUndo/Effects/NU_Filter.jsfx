@@ -1,0 +1,74 @@
+desc:NU Filter (passe-haut / passe-bas, resonance, drive)
+//tags: filter
+// Ecrit pour NowUndo (24 nov. 2026), code original : filtres RBJ (formules classiques de l'Audio EQ Cookbook).
+// Les 4 premiers reglages = ceux du Twister : HP, LP, Resonance, Drive. Pas de Dry/Wet (ouvert = son inchange).
+
+slider1:20<20,5000,0.1:log>HP - passe-haut (Hz) (20 = off)
+slider2:20000<200,20000,1:log>LP - passe-bas (Hz) (20000 = off)
+slider3:0<0,1,0.001>Resonance
+slider4:0<0,1,0.001>Drive
+slider5:0<0,1,1{12 dB,24 dB}>Pente
+
+in_pin:L in
+in_pin:R in
+out_pin:L out
+out_pin:R out
+
+@init
+ext_noinit = 1;
+// coefficients : HP etage 1 en 0, HP etage 2 en 8, LP etage 1 en 16, LP etage 2 en 24 (b0 b1 b2 a1 a2)
+// etats (x1 x2 y1 y2) : 32 + 4 * (etage * 2 + canal)
+memset(0, 0, 80);
+
+function tanh(x) local(e) (
+  x > 8 ? 1 : x < -8 ? -1 : ( e = exp(2 * x); (e - 1) / (e + 1); );
+);
+
+function bq(cb, sb, x) local(y) (
+  y = cb[0] * x + cb[1] * sb[0] + cb[2] * sb[1] - cb[3] * sb[2] - cb[4] * sb[3];
+  sb[1] = sb[0]; sb[0] = x;
+  sb[3] = sb[2]; sb[2] = y;
+  y;
+);
+
+function coef(cb, f, q, hp) local(w, c, s, al, a0) (
+  f = min(f, srate * 0.45);
+  w = 2 * $pi * f / srate; c = cos(w); s = sin(w); al = s / (2 * q);
+  a0 = 1 + al;
+  hp ? (
+    cb[0] = (1 + c) * 0.5 / a0; cb[1] = -(1 + c) / a0; cb[2] = cb[0];
+  ) : (
+    cb[0] = (1 - c) * 0.5 / a0; cb[1] = (1 - c) / a0; cb[2] = cb[0];
+  );
+  cb[3] = -2 * c / a0; cb[4] = (1 - al) / a0;
+);
+
+@slider
+use_hp = slider1 > 20.5;
+use_lp = slider2 < 19999;
+q1 = 0.7071 * exp(slider3 * log(12));        // resonance : Q de 0,71 a 8,5
+q2 = 0.7071;
+two = slider5 > 0.5;
+coef(0, slider1, q1, 1);
+coef(8, slider1, q2, 1);
+coef(16, slider2, q1, 0);
+coef(24, slider2, q2, 0);
+drv = slider4;
+g = 1 + drv * 8;
+mk = sqrt(g);
+
+@sample
+l = spl0; r = spl1;
+drv > 0.001 ? (
+  l = tanh(g * l) / g * mk;
+  r = tanh(g * r) / g * mk;
+);
+use_hp ? (
+  l = bq(0, 32, l);  r = bq(0, 36, r);
+  two ? ( l = bq(8, 40, l);  r = bq(8, 44, r); );
+);
+use_lp ? (
+  l = bq(16, 48, l); r = bq(16, 52, r);
+  two ? ( l = bq(24, 56, l); r = bq(24, 60, r); );
+);
+spl0 = l; spl1 = r;
