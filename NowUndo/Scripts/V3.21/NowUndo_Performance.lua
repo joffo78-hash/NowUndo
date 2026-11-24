@@ -5,10 +5,14 @@
   Un seul enregistrement continu. Le script ne gere QUE les entrees (pistes 2 a 9) et les loopers (pistes 11 a 18) ;
   les autres pistes (instruments, effets...) restent a ta charge : si tu les armes, elles sont enregistrees avec le reste.
 
-  - ENTREE k : armee en « Record : output » des qu'elle est affectee a au moins un looper (masques publies par le
-    Launchpad, gmem 6010 + i) ET que sa sortie vers la piste parent est active ; desarmee sinon.
-  - LOOPER i : arme des que son enregistrement est abouti (boucle > 0, plus en REC / attente), desarme au Clear.
-    Une periode armee = un item.
+  ATTENTION (24 nov., constate par l'utilisateur) : dans son modele, les pistes sont ARMEES avec le mode « Record :
+  disable (input monitoring only) » : c'est l'armement qui fait entrer le signal (monitoring). Le script ne DESARME donc
+  JAMAIS une piste qui etait armee : il bascule seulement son MODE d'enregistrement (2 = monitoring seul, 3 = output).
+  Une piste qui n'etait pas armee est armee quand elle doit enregistrer, puis desarmee.
+  - ENTREE k : enregistre (mode output) des qu'elle est affectee a au moins un looper (masques publies par le
+    Launchpad, gmem 6010 + i) ET que sa sortie vers la piste parent est active ; monitoring seul sinon.
+  - LOOPER i : enregistre des que son enregistrement est abouti (boucle > 0, plus en REC / attente), jusqu'au Clear.
+    Une periode d'enregistrement = un item (a confirmer : changement de mode en cours d'enregistrement).
   - MORCEAUX : un morceau commence au 1er REC alors que TOUS les loopers sont vides (3 parts comprises) ; sa region
     va jusqu'au 1er REC du morceau suivant (la derniere jusqu'a l'arret). Region creee au debut puis agrandie en direct.
   - TEMPO : a chaque nouvelle synchro (nouveau maitre looper) un marqueur de tempo est AJOUTE a la position de lecture.
@@ -24,6 +28,7 @@ local EXT = "NowUndo_Perf"
 local GMEM = "nowundo_sync"
 local IN_FIRST, NB_IN, LP_FIRST, NB_LP = 2, 8, 11, 8     -- numeros de pistes (1 = premiere), comme le Launchpad / le Twister
 local REC_MODE = 3                                        -- 3 = sortie stereo avec compensation de latence
+local MON_MODE = 2                                        -- 2 = « disable (input monitoring only) » : la piste armee ecoute sans enregistrer
 local DASH = 6000                                          -- tableau de bord du Launchpad : [DASH+10+i] = entrees qui alimentent le looper i
 
 local P = { active = false, starting = false, tr = {}, songs = {}, events = {}, song = nil, in_song = false, had_loop = false,
@@ -102,10 +107,19 @@ function P.tempo_marker(pos, bpm)
 end
 
 -- ============================ regles (appelees ~20 fois par seconde) ============================
-function P.arm(m, want)
-  if not m.tr or m.armed == want then return end
-  R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", want and 1 or 0)
-  m.armed = want
+function P.set_rec(m, want)                                 -- want = cette piste doit ENREGISTRER (sortie) maintenant
+  if not m.tr or m.rec == want then return end
+  m.rec = want
+  local pos = R.GetPlayPosition()
+  if want then
+    R.SetMediaTrackInfo_Value(m.tr, "I_RECMODE", REC_MODE)
+    if m.save.arm < 0.5 then R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", 1) end
+    m.iv = { pos }                                          -- debut d'une periode demandee (verifie a l'arret)
+  else
+    if m.save.arm >= 0.5 then R.SetMediaTrackInfo_Value(m.tr, "I_RECMODE", MON_MODE)   -- reste armee : le monitoring continue
+    else R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", 0) end
+    if m.iv then m.iv[2] = pos; m.ivs[#m.ivs + 1] = m.iv; m.iv = nil end
+  end
 end
 function P.rules()
   local pos = R.GetPlayPosition()
@@ -123,11 +137,11 @@ function P.rules()
     if m.kind == "in" then
       -- entree armee = affectee a un looper ET sortie vers la piste parent active (B_MAINSEND ; coupee = « in mute » du Launchpad)
       local want = P.input_used(m.idx) and R.GetMediaTrackInfo_Value(m.tr, "B_MAINSEND") >= 0.5
-      P.arm(m, want); if m.armed then nb_arm_in = nb_arm_in + 1 end
+      P.set_rec(m, want); if m.rec then nb_arm_in = nb_arm_in + 1 end
     else
       local l = L[m.idx - 1]
       local want = l.alive and l.len > 0 and l.state ~= 1 and l.state ~= 7 and l.state ~= 8
-      P.arm(m, want and true or false); if m.armed then nb_arm_lp = nb_arm_lp + 1 end
+      P.set_rec(m, want and true or false); if m.rec then nb_arm_lp = nb_arm_lp + 1 end
     end
   end
   P.info.arm_in, P.info.arm_lp = nb_arm_in, nb_arm_lp
@@ -158,9 +172,9 @@ function P.start()
     m.tr = R.GetTrack(0, m.n - 1)
     if m.tr then
       m.save = { arm = R.GetMediaTrackInfo_Value(m.tr, "I_RECARM"), mode = R.GetMediaTrackInfo_Value(m.tr, "I_RECMODE") }
-      R.SetMediaTrackInfo_Value(m.tr, "I_RECMODE", REC_MODE)
-      R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", 0)
-      m.armed = false
+      m.rec, m.iv, m.ivs = false, nil, {}
+      -- piste armee : on la laisse armee (monitoring) et on s'assure qu'elle n'enregistre pas encore (mode 2) ; piste non armee : rien
+      if m.save.arm >= 0.5 and m.save.mode ~= MON_MODE then R.SetMediaTrackInfo_Value(m.tr, "I_RECMODE", MON_MODE) end
     end
   end
   P.rep = R.GetSetRepeat(-1); R.GetSetRepeat(0)
@@ -180,10 +194,10 @@ end
 function P.restore()
   for _, m in ipairs(P.tr) do
     if m.tr and m.save then
-      R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", 0)
       R.SetMediaTrackInfo_Value(m.tr, "I_RECMODE", m.save.mode)
-      R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", m.save.arm)
-      m.armed = nil
+      R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", m.save.arm)       -- etat d'origine : une piste armee reste armee (monitoring)
+      if m.iv then m.iv[2] = R.GetPlayPosition(); m.ivs[#m.ivs + 1] = m.iv; m.iv = nil end
+      m.rec = nil
     end
   end
   if P.rep then R.GetSetRepeat(P.rep) end
@@ -214,12 +228,30 @@ function P.post()
       end
     end
   end
+  local manquants = {}
+  for _, m in ipairs(P.tr) do
+    if m.tr then
+      for _, iv in ipairs(m.ivs or {}) do
+        if (iv[2] or 0) - iv[1] > 1.0 then
+          local found = false
+          for i = 0, R.CountTrackMediaItems(m.tr) - 1 do
+            local it = R.GetTrackMediaItem(m.tr, i)
+            local ip = R.GetMediaItemInfo_Value(it, "D_POSITION"); local il = R.GetMediaItemInfo_Value(it, "D_LENGTH")
+            if ip < iv[2] and ip + il > iv[1] then found = true break end
+          end
+          if not found then manquants[#manquants + 1] = string.format("piste %d (%.1f-%.1f s)", m.n, iv[1], iv[2]) end
+        end
+      end
+    end
+  end
   local lines = { "Dripsody_Perf v1" }
+  for _, t in ipairs(manquants) do lines[#lines + 1] = "MANQUANT\t" .. t end
   for _, s in ipairs(P.songs) do lines[#lines + 1] = string.format("S\t%d\t%.4f\t%.4f", s.n, s.start, s.stop or s.start) end
   for _, e in ipairs(P.events) do lines[#lines + 1] = "E\t" .. e end
   R.SetProjExtState(0, "Dripsody_Perf", "log", table.concat(lines, "\n"))
   R.UpdateArrange()
   P.msg = string.format("Termine : %d morceau(x), %d item(s) regle(s) en base de temps.", #P.songs, n)
+  if #manquants > 0 then P.msg = "ATTENTION : rien d'enregistre pour : " .. table.concat(manquants, ", ") end
 end
 
 -- ============================ fenetre ============================
@@ -246,7 +278,7 @@ local function draw()
     local el = R.GetPlayPosition() - (P.pos0 or 0)
     line("Duree : " .. fmt_t(el))
     line("Morceau : " .. (P.info.song or "(en attente du 1er REC)"), .95, .85, .35)
-    line(string.format("Entrees armees : %d / %d     Loopers armes : %d / %d", P.info.arm_in or 0, NB_IN, P.info.arm_lp or 0, NB_LP))
+    line(string.format("Entrees enregistrees : %d / %d     Loopers enregistres : %d / %d", P.info.arm_in or 0, NB_IN, P.info.arm_lp or 0, NB_LP))
     if P.info.tempo then line(string.format("Tempo de la synchro : %.2f BPM", P.info.tempo)) end
     local hb = tonumber(R.GetExtState("nowundo_vl", "lp_hb")) or 0
     if R.time_precise() - hb > 3 then line("Launchpad absent : les affectations d'entrees ne sont pas a jour.", 1, .5, .3) end

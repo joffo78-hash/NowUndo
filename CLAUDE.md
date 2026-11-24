@@ -218,12 +218,20 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   sur les boucles se fera APRÈS l'arrêt (reconstruction de la carte de tempo, items en base de temps : pas de déplacement d'audio) = étape 2.
 - **Étape 1 livrée : `NowUndo_Performance.lua`** (fenêtre « Dripsody Performance », bouton REC PERFORMANCE ; relancer le script pendant un concert = bascule ;
   test `tools/tperf.lua`, faux REAPER). Gère seulement les entrées 2-9 et les loopers 11-18 (constantes `IN_FIRST`, `LP_FIRST`) ; les instruments / aux sont routés
-  vers les entrées (confirmé par l'utilisateur) donc enregistrés par elles, les autres pistes restent à sa charge. Entrée armée si affectée à un looper
+  vers les entrées (confirmé par l'utilisateur) donc enregistrés par elles, les autres pistes restent à sa charge. Entrée **enregistrée** (mode output) si affectée à un looper
   (gmem `6010+i`) **et** sortie vers la piste parent active (`B_MAINSEND` = 1, demandé le 24 nov. ; coupée = « in mute »), looper armé si boucle > 0 et plus en REC / attente (états 1, 7, 8), régions « Morceau n » (1er REC alors que tous les loopers sont vides ; fin =
   début du suivant), marqueur de tempo à chaque nouveau maître looper (tempo estimé `+155`), journal dans l'ExtState du projet `Dripsody_Perf/log` (lignes `S` morceaux,
   `E` évènements) pour l'étape 2. Non testé dans REAPER. Question ouverte : armer aussi les entrées non affectées pendant le concert ?
   Reste : étape 2 (grille alignée après l'arrêt, découpe optionnelle des items par cycle avec les heures exactes du JSFX) ; boutons Launchpad / MIDI Learn pour
   la bascule (ExtState `NowUndo_Perf/cmd` = `toggle`).
+- **CORRECTION du 24 nov. (retour de l'utilisateur : « dès que je déclenche le script l'entrée n'entre plus dans le looper »)** : dans son modèle, les pistes
+  2-9 / 11-18 sont **ARMÉES avec le mode « Record : disable (input monitoring only) »** (`I_RECARM` 1, `I_RECMODE` 2) : c'est l'**armement** qui fait entrer le signal
+  (monitoring). La 1re version désarmait ces pistes au démarrage → plus de signal vers les loopers. **Règle : ne JAMAIS désarmer une piste qui était armée.**
+  Le script bascule seulement le **mode** : 2 (monitoring seul) ↔ 3 (output) ; une piste non armée à l'origine est armée pour enregistrer puis désarmée. L'envoi
+  vers les loopers n'est jamais touché. **Hypothèse NON vérifiée** : changer `I_RECMODE` d'une piste déjà armée EN COURS d'enregistrement démarre / arrête bien un item
+  (l'essai du 24 nov. n'a testé que l'armement). Garde-fou : à l'arrêt, le script vérifie qu'un item existe pour chaque période demandée > 1 s et affiche
+  « ATTENTION : rien d'enregistré pour : piste N (…) » (aussi `MANQUANT` dans le journal). Si ça échoue : essai n°2 (`I_RECMODE` en cours d'enregistrement), plan B =
+  enregistrer en continu puis couper les items après coup.
 - **Essai jetable** `tools/Dripsody_PerfSpike.lua` (à lancer dans un projet vide, ~12 s) : arme / désarme / réarme des pistes en cours d'enregistrement, pose un
   marqueur 5/4, teste `SetCurrentBPM` avec un marqueur, crée et agrandit une région ; rapport `Dripsody_Spike_Report.txt`. Attendre ses résultats avant de coder.
 
