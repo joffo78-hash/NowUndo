@@ -10,7 +10,7 @@ Usage :
   Ligne de commande   : python3 install_dripsody.py --cli [--resource CHEMIN] [--auto]
                         --auto = lance tous les scripts par defaut au demarrage.
 """
-import argparse, glob, os, platform, re, shutil, sys
+import argparse, glob, os, platform, re, shutil, sys, webbrowser
 
 APP_SUB = os.path.join("Dripsody", "NowUndo")                  # sous-dossier de REAPER (comme ReaPack)
 MARK_A = "-- >>> NOWUNDO (genere par NowUndo_Setup, ne pas modifier a la main) >>>"
@@ -69,19 +69,34 @@ def is_resource(path):
     return bool(path) and os.path.isfile(os.path.join(path, "reaper.ini"))
 
 
+REATEAM_URL = "https://raw.githubusercontent.com/ReaTeam/Extensions/master/index.xml"
+REAPACK_URL = "https://reapack.com/"
+SWS_URL = "https://www.sws-extension.org/"
+
+
 def missing_deps(res):
-    """Extensions indispensables : on ne peut pas les installer ici, on dit lesquelles manquent."""
+    """Extensions indispensables, dans l'ordre d'installation : (nom, prefixe du fichier dans UserPlugins)."""
     plug = os.path.join(res, "UserPlugins")
-    def has(prefix):
-        return any(glob.glob(os.path.join(plug, prefix + "*")))
-    miss = []
-    if not has("reaper_sws"):
-        miss.append("SWS / S&M  (https://www.sws-extension.org)")
-    if not has("reaper_js_ReaScriptAPI"):
-        miss.append("js_ReaScriptAPI  (dans ReaPack : ReaTeam Extensions)")
-    if not has("reaper_imgui"):
-        miss.append("ReaImGui  (dans ReaPack : ReaTeam Extensions)")
-    return miss
+    wanted = [("ReaPack", "reaper_reapack"), ("SWS", "reaper_sws"),
+              ("js_ReaScriptAPI", "reaper_js_ReaScriptAPI"), ("ReaImGui", "reaper_imgui")]
+    return [n for n, pre in wanted if not glob.glob(os.path.join(plug, pre + "*"))]
+
+
+def dep_steps(miss):
+    """Texte simple pour un musicien : ce qu'il reste a faire (une seule fois)."""
+    if not miss:
+        return []
+    lines = ["Dernieres etapes, une seule fois (extensions de REAPER) :"]
+    if "ReaPack" in miss:
+        lines += ["1. Installe ReaPack : " + REAPACK_URL + "  (telecharge le fichier pour ton systeme, mets-le dans le dossier UserPlugins de REAPER, puis redemarre REAPER).",
+                  "2. Dans REAPER : Extensions > ReaPack > Import repositories, colle cette adresse :",
+                  "   " + REATEAM_URL,
+                  "3. Dans REAPER : Extensions > ReaPack > Browse packages, cherche et installe :",
+                  "   js_ReaScriptAPI, reaper_imgui (ReaImGui), et SWS (reaper-oss_SWS) si elle manque.",
+                  "4. Clique sur Apply, puis redemarre REAPER."]
+    else:
+        lines += ["Dans REAPER : Extensions > ReaPack > Browse packages, installe : " + ", ".join(miss) + ". Puis Apply et redemarre."]
+    return lines
 
 
 def lua_str(s):
@@ -152,9 +167,8 @@ def install(res, auto_files, log=print):
     write_startup(res, scripts_dir, sorted(auto_files), log)
     miss = missing_deps(res)
     if miss:
-        log("A INSTALLER AUSSI (indispensable) :")
-        for m in miss:
-            log("  - " + m)
+        for line in dep_steps(miss):
+            log(line)
     else:
         log("Extensions SWS, js_ReaScriptAPI et ReaImGui : presentes.")
     log("Termine. Redemarre REAPER pour charger Dripsody.")
@@ -215,6 +229,18 @@ def run_gui():
             log("ERREUR : " + str(e))
             messagebox.showerror("Dripsody", "Installation interrompue :\n" + str(e))
     tk.Button(frm, text="INSTALLER", font=("Arial", 12, "bold"), height=2, command=go).pack(fill="x")
+    def copy_url():
+        root.clipboard_clear(); root.clipboard_append(REATEAM_URL)
+        log_box.insert("end", "Adresse copiee : colle-la dans ReaPack (Import repositories).\n")
+    def check():
+        miss = missing_deps(res_var.get().strip())
+        log_box.insert("end", ("Extensions : toutes presentes, rien a faire de plus.\n" if not miss else
+                               "Encore manquant : " + ", ".join(miss) + "\n"))
+        log_box.see("end")
+    bar = tk.Frame(frm); bar.pack(fill="x")
+    tk.Button(bar, text="Ouvrir ReaPack (site)", command=lambda: webbrowser.open(REAPACK_URL)).pack(side="left")
+    tk.Button(bar, text="Copier l'adresse du depot", command=copy_url).pack(side="left", padx=6)
+    tk.Button(bar, text="Verifier les extensions", command=check).pack(side="left")
     root.mainloop()
 
 
