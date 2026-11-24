@@ -19,7 +19,7 @@ reaper = {
   SetTempoTimeSigMarker = function(_, _, t, _, _, b) MK[#MK + 1] = { t = t, bpm = b }; return true end,
   UpdateTimeline = function() end, UpdateArrange = function() end, SetProjExtState = function(_, s, k, v) PROJ[k] = v; return 0 end, GetProjExtState = function(_, s, k) local v = PROJ[k]; if v then return #v, v end return 0, "" end,
   CountTrackMediaItems = function() return 0 end, GetTrackMediaItem = function() return nil end,
-  defer = function(f) DEFER = f end, atexit = function() end }
+  Track_GetPeakInfo = function() return PEAK or 0 end, defer = function(f) DEFER = f end, atexit = function() end }
 gfx = setmetatable({ w = 420, h = 200, mouse_x = 0, mouse_y = 0, mouse_cap = 0 }, { __index = function() return function() return 0 end end })
 gfx.getchar = function() return 0 end; gfx.measurestr = function() return 50, 14 end
 dofile(arg_path)
@@ -49,11 +49,16 @@ print("4 REC abouti : piste 11 :", rec(11), "| marqueurs de tempo", #MK, string.
 -- 5) 2e looper pendant le morceau : pas de nouveau morceau
 GM[950] = CLOCK; setl(1, true, 1, 0, 0); run(0.3); setl(1, true, 2, 96000, 0); run(0.3)
 print("5 2e looper : regions", #REGS, "| piste 12 :", rec(12))
--- 6) Clear du looper 1 : retour au monitoring
-setl(0, true, 0, 0, 1); run(0.3)
-print("6 clear L1 : piste 11 :", rec(11), "| piste 12 :", rec(12), "| regions", #REGS)
+-- 6) Clear du looper 1 : la piste 11 sonne encore (queue de delay) -> elle continue d'enregistrer, puis retour au monitoring quand le silence arrive
+PEAK = 0.5; setl(0, true, 0, 0, 1); run(0.3)
+print("6a clear L1, la piste sonne encore (0,3 s apres) : piste 11 :", rec(11), "(attendu : ENREGISTRE, queue)")
+run(1.0)
+print("6b encore 1,3 s apres, toujours -6 dB : piste 11 :", rec(11), "(attendu : ENREGISTRE)")
+PEAK = 0.0; run(0.7)
+print("6c silence (< -60 dB) : piste 11 :", rec(11), "| piste 12 :", rec(12), "| regions", #REGS, "(attendu : monitoring)")
+PEAK = 0.5; setl(0, true, 2, 96000, 1); run(0.3)
 -- 7) total clear puis 1er REC : morceau 2
-setl(1, true, 0, 0, 0); run(1.0)
+setl(0, true, 0, 0, 0); setl(1, true, 0, 0, 0); PEAK = 0; run(1.0)
 GM[950] = CLOCK; setl(2, true, 1, 0, 0); run(0.3)
 print("7 total clear + REC : regions", #REGS, string.format("| region 1 : %.2f -> %.2f | region 2 : debut %.2f", REGS[1].s, REGS[1].e, REGS[2] and REGS[2].s or -1))
 -- 8) arret : etat d'origine

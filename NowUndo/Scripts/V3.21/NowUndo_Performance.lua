@@ -29,6 +29,9 @@
   - GRILLE ALIGNEE (a posteriori, reversible) : bouton « ALIGNER LA GRILLE » = tempo exact par synchro (60 * N / L), mesure d'un nombre
     entier de temps, mesures de raccord entre les synchros : CHAQUE DEPART DE CYCLE TOMBE SUR UN PREMIER TEMPS. « ANCIENNE GRILLE » revient
     a la carte de tempo d'avant. Items, regions et marqueurs ne bougent pas. Ctrl+Z annule aussi.
+  - QUEUES D'EFFETS : quand un looper est efface (ou une entree desaffectee), la piste continue d'enregistrer tant qu'elle sonne encore
+    (delay, reverb...) : au moins 0,5 s, au plus 10 s, jusqu'a passer sous -60 dB. Reglages : ExtState « NowUndo_Perf/tail_s » (duree max, s)
+    et « NowUndo_Perf/tail_db » (seuil, dB). Redemande pendant la queue = meme item.
   - Au demarrage : repetition coupee. A l'arret : etats d'armement / modes d'enregistrement des pistes geree restaures,
     items regles en base de temps « temps ». Les evenements sont gardes dans l'ExtState du projet (« Dripsody_Perf »).
 
@@ -40,6 +43,7 @@ local GMEM = "nowundo_sync"
 local IN_FIRST, NB_IN, LP_FIRST, NB_LP = 2, 8, 11, 8     -- numeros de pistes (1 = premiere), comme le Launchpad / le Twister
 local REC_MODE = 3                                        -- 3 = sortie stereo avec compensation de latence
 local MON_MODE = 2                                        -- 2 = « disable (input monitoring only) » : la piste armee ecoute sans enregistrer
+local TAIL_MIN = 0.5                                      -- la queue d'une piste est toujours enregistree au moins 0,5 s apres l'arret demande
 local TOL = 0.03                                          -- pas de coupe a moins de 30 ms du bord d'un item (pas de miettes)
 local DASH = 6000                                          -- tableau de bord du Launchpad : [DASH+10+i] = entrees qui alimentent le looper i
 
@@ -524,15 +528,30 @@ function P.grid_apply()
 end
 
 -- ============================ regles (appelees ~20 fois par seconde) ============================
+-- niveau de sortie de la piste en dB (pic des deux canaux) : sert a laisser finir les queues d'effets (delay, reverb)
+function P.level_db(tr)
+  local a = math.max(R.Track_GetPeakInfo(tr, 0) or 0, R.Track_GetPeakInfo(tr, 1) or 0)
+  return a > 1e-9 and 20 * math.log(a, 10) or -200
+end
 function P.set_rec(m, want)                                 -- want = cette piste doit ENREGISTRER (sortie) maintenant
-  if not m.tr or m.rec == want then return end
-  m.rec = want
+  if not m.tr then return end
+  local now = R.time_precise()
   local pos = R.GetPlayPosition()
   if want then
+    m.tail_t = nil                                          -- redemande pendant la queue : on continue le meme item
+    if m.rec then return end
+    m.rec = true
     R.SetMediaTrackInfo_Value(m.tr, "I_RECMODE", REC_MODE)
     if m.save.arm < 0.5 then R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", 1) end
     m.iv = { pos }                                          -- debut d'une periode demandee (verifie a l'arret)
   else
+    if not m.rec then return end
+    -- QUEUE : apres le Clear / la desaffectation, on continue d'enregistrer tant que la piste sonne encore (delay, reverb...) :
+    -- au moins TAIL_MIN, au plus tail_s (10 s par defaut), et on s'arrete des que le niveau passe sous tail_db (-60 dB par defaut)
+    m.tail_t = m.tail_t or now
+    local el = now - m.tail_t
+    if el < TAIL_MIN or (el < P.tail_max and P.level_db(m.tr) > P.tail_db) then return end
+    m.tail_t, m.rec = nil, false
     if m.save.arm >= 0.5 then R.SetMediaTrackInfo_Value(m.tr, "I_RECMODE", MON_MODE)   -- reste armee : le monitoring continue
     else R.SetMediaTrackInfo_Value(m.tr, "I_RECARM", 0) end
     if m.iv then m.iv[2] = pos; m.ivs[#m.ivs + 1] = m.iv; m.iv = nil end
@@ -595,6 +614,8 @@ function P.start()
       if m.save.arm >= 0.5 and m.save.mode ~= MON_MODE then R.SetMediaTrackInfo_Value(m.tr, "I_RECMODE", MON_MODE) end
     end
   end
+  P.tail_max = tonumber(R.GetExtState(EXT, "tail_s")) or 10            -- duree maximale de la queue (s)
+  P.tail_db = tonumber(R.GetExtState(EXT, "tail_db")) or -60           -- on s'arrete quand la piste passe sous ce niveau (dB)
   P.rep = R.GetSetRepeat(-1); R.GetSetRepeat(0)
   P.songs, P.events, P.song, P.in_song, P.had_loop, P.key, P.segs, P.clk = {}, {}, nil, false, false, "none", {}, nil
   P.t_start = R.time_precise(); P.starting = true; P.msg = ""

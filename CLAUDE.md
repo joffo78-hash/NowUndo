@@ -260,6 +260,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   et le fichier `Dripsody_Perf_grid.txt` (diagnostic, dossier de REAPER) liste chaque item ; `Dripsody_Perf_log.txt` = journal du concert. Les entrées ne sont jamais prises en compte.
   Si ça ne colle toujours pas : demander `Dripsody_Perf_grid.txt` + capture avec règle et grille visibles.
   **Reste** : boutons Launchpad / MIDI Learn pour démarrer / arrêter le concert.
+- **QUEUES D'EFFETS (24 nov., demandé : « si je clear un looper et que j'ai un feedback de delay sur la piste, il ne sera pas enregistré ? »)** : à la fin d'une période
+  d'enregistrement (Clear d'un looper, entrée désaffectée), la piste **continue d'enregistrer** tant qu'elle sonne (`P.level_db` = pic de `Track_GetPeakInfo`) :
+  au moins 0,5 s (`TAIL_MIN`), au plus 10 s, jusqu'à passer sous -60 dB. Réglages : ExtState `NowUndo_Perf/tail_s` (durée max, s) et `NowUndo_Perf/tail_db` (seuil, dB).
+  Redemande pendant la queue = même item. Test `tools/tperf.lua` (6a/6b/6c, niveau simulé `PEAK`). **Non testé dans REAPER.**
 - **Essai jetable** `tools/Dripsody_PerfSpike.lua` (à lancer dans un projet vide, ~12 s) : arme / désarme / réarme des pistes en cours d'enregistrement, pose un
   marqueur 5/4, teste `SetCurrentBPM` avec un marqueur, crée et agrandit une région ; rapport `Dripsody_Spike_Report.txt`. Attendre ses résultats avant de coder.
 
