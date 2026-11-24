@@ -18,6 +18,11 @@
   - TEMPO : a chaque nouvelle synchro (nouveau maitre looper) un marqueur de tempo est AJOUTE a la position de lecture.
     Jamais de SetCurrentBPM ni de modification d'un tempo deja pose pendant la lecture (la tete de lecture sauterait,
     essai du 24 nov.). L'alignement des mesures sur les boucles se fera apres l'arret (etape 2).
+  - SAUCISSONNAGE (option, desactivee par defaut) : apres l'arret, les items des LOOPERS sont coupes a chaque depart de cycle de
+    l'horloge interne (le maitre de la synchro). Les departs de cycle sont retrouves en direct : a chaque image on lit la position
+    de l'horloge (gmem [o+3], publiee a chaque echantillon) et la position de lecture du projet ; la phase (mediane de centaines
+    de mesures) + la longueur exacte du cycle donnent T0 + k * L. Un decalage de phase (re-phase) ouvre un nouveau segment.
+    Reglage fin : ExtState « NowUndo_Perf/cut_ms » (ms, negatif = coupe plus tot ; 0 par defaut).
   - Au demarrage : repetition coupee. A l'arret : etats d'armement / modes d'enregistrement des pistes geree restaures,
     items regles en base de temps « temps ». Les evenements sont gardes dans l'ExtState du projet (« Dripsody_Perf »).
 
@@ -29,9 +34,10 @@ local GMEM = "nowundo_sync"
 local IN_FIRST, NB_IN, LP_FIRST, NB_LP = 2, 8, 11, 8     -- numeros de pistes (1 = premiere), comme le Launchpad / le Twister
 local REC_MODE = 3                                        -- 3 = sortie stereo avec compensation de latence
 local MON_MODE = 2                                        -- 2 = « disable (input monitoring only) » : la piste armee ecoute sans enregistrer
+local TOL = 0.03                                          -- pas de coupe a moins de 30 ms du bord d'un item (pas de miettes)
 local DASH = 6000                                          -- tableau de bord du Launchpad : [DASH+10+i] = entrees qui alimentent le looper i
 
-local P = { active = false, starting = false, tr = {}, songs = {}, events = {}, song = nil, in_song = false, had_loop = false,
+local P = { active = false, starting = false, tr = {}, songs = {}, events = {}, song = nil, in_song = false, had_loop = false, segs = {}, clk = nil,
             key = "none", t_rule = 0, t_region = 0, post_t = nil, msg = "", info = {} }
 R.gmem_attach(GMEM)
 local function g(a) return R.gmem_read(a) or 0 end
@@ -65,7 +71,7 @@ function P.master()                                         -- cle de la synchro
       local id = math.floor(g(o + 1) + .5); local len = g(o + 2)
       if len > 0 and id >= 1 and id <= 8 then
         local bpm = g(1000 + (id - 1) * 600 + p * 200 + 155)
-        return string.format("L%d:%d:%d", p, id, math.floor(len + .5)), bpm, len, id
+        return string.format("L%d:%d:%d", p, id, math.floor(len + .5)), bpm, len, id, p
       end
     elseif lock == 2 then return "HOST" end
   end
@@ -104,6 +110,93 @@ function P.tempo_marker(pos, bpm)
   R.SetTempoTimeSigMarker(0, -1, pos, -1, -1, bpm, 0, 0, false)       -- 0 / 0 : pas de changement de signature
   R.UpdateTimeline()
   return R.CountTempoTimeSigMarkers(0) > n0
+end
+
+-- ============================ horloge interne : phase des cycles ============================
+local function median(t)
+  local a = {}; for i = 1, #t do a[i] = t[i] end
+  table.sort(a); local n = #a
+  if n == 0 then return 0 end
+  return n % 2 == 1 and a[(n + 1) // 2] or (a[n // 2] + a[n // 2 + 1]) / 2
+end
+function P.clock_close(pos)
+  local c = P.clk; P.clk = nil
+  if not c or c.n < 8 then return end
+  local L = c.L
+  local T0 = (c.r0 + c.med) % L
+  P.segs[#P.segs + 1] = { key = c.key, L = L, T0 = T0, t0 = c.t0, t1 = c.t1 or pos, n = c.n }
+  P.ev(c.t1 or pos, "clock", string.format("%s L=%.6f T0=%.6f n=%d", c.key, L, T0, c.n))
+end
+function P.clock_sample(pos, key, len, id, part)
+  if not (key and key:sub(1, 1) == "L" and len and len > 0) then P.clock_close(pos); return end
+  local c = P.clk
+  if c and c.key ~= key then P.clock_close(pos); c = nil end
+  local sr = g(1000 + (id - 1) * 600 + part * 200 + 186)
+  if sr <= 0 then sr = R.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false); if sr <= 0 then sr = 48000 end end
+  local L = len / sr
+  local mpos = g(part * 10 + 3)
+  if not c then c = { key = key, L = L, t0 = P.next_t0 or pos, ds = {}, nds = 0, n = 0, bad = 0 }; P.clk = c; P.next_t0 = nil end
+  local r = (pos - mpos / sr) % L                              -- debut (modulo L) du cycle en cours, d'apres cette mesure
+  if not c.r0 then c.r0 = r end
+  local d = ((r - c.r0 + L / 2) % L) - L / 2                   -- ecart a la 1re mesure, ramene dans [-L/2, L/2[
+  if c.med and math.abs(d - c.med) > 0.015 then                -- ecart durable : re-phase de l'horloge -> nouveau segment
+    c.bad = c.bad + 1
+    if c.bad == 1 then c.bad_t0 = pos end
+    if c.bad >= 10 then P.clock_close(c.bad_t0 or pos); P.next_t0 = c.bad_t0; return end   -- le nouveau segment commence a la 1re mesure ecartee
+    return
+  end
+  c.bad = 0
+  c.nds = c.nds % 400 + 1; c.ds[c.nds] = d; c.n = c.n + 1       -- 400 dernieres mesures (anneau)
+  if c.n < 8 then c.med = median(c.ds) elseif c.n % 10 == 0 then c.med = median(c.ds) end
+  c.t1 = pos
+end
+function P.cut_times()
+  local cuts = {}
+  local off = (tonumber(R.GetExtState(EXT, "cut_ms")) or 0) / 1000
+  for _, sg in ipairs(P.segs) do
+    local m0 = math.ceil((sg.t0 - 0.05 - sg.T0) / sg.L)
+    local m1 = math.floor((sg.t1 + 0.05 - sg.T0) / sg.L)
+    for m = m0, m1 do cuts[#cuts + 1] = sg.T0 + m * sg.L + off end
+  end
+  table.sort(cuts)
+  local out = {}
+  for _, t in ipairs(cuts) do if #out == 0 or t - out[#out] > TOL then out[#out + 1] = t end end
+  return out
+end
+function P.split_items()
+  local cuts = P.cut_times()
+  local n_items, n_cuts = 0, 0
+  if #cuts == 0 then return 0, 0 end
+  R.Undo_BeginBlock(); R.PreventUIRefresh(1)
+  for _, m in ipairs(P.tr) do
+    if m.kind == "lp" and m.tr then
+      local list = {}
+      for i = 0, R.CountTrackMediaItems(m.tr) - 1 do
+        local it = R.GetTrackMediaItem(m.tr, i)
+        if R.GetMediaItemInfo_Value(it, "D_POSITION") >= (P.pos0 or 0) - 0.5 then list[#list + 1] = it end
+      end
+      for _, it in ipairs(list) do
+        local cur = it
+        local lo, hi = 1, #cuts + 1                                  -- 1re coupe apres le debut de l'item (recherche dichotomique)
+        local ip = R.GetMediaItemInfo_Value(cur, "D_POSITION")
+        while lo < hi do local mid = (lo + hi) // 2; if cuts[mid] <= ip + TOL then lo = mid + 1 else hi = mid end end
+        local k = lo
+        while k <= #cuts do
+          local cp = R.GetMediaItemInfo_Value(cur, "D_POSITION"); local ce = cp + R.GetMediaItemInfo_Value(cur, "D_LENGTH")
+          local t = cuts[k]
+          if t >= ce - TOL then break end
+          if t > cp + TOL then
+            local right = R.SplitMediaItem(cur, t)
+            if right then cur = right; n_cuts = n_cuts + 1 end
+          end
+          k = k + 1
+        end
+        n_items = n_items + 1
+      end
+    end
+  end
+  R.PreventUIRefresh(-1); R.Undo_EndBlock("Dripsody : decoupe des items par cycle", -1)
+  return n_items, n_cuts
 end
 
 -- ============================ regles (appelees ~20 fois par seconde) ============================
@@ -152,7 +245,8 @@ function P.rules()
     local pp = P.press_pos(); P.open_song(pp); P.ev(pp, "song_start", P.song.name)
   end
   -- synchro : nouveau maitre looper = marqueur de tempo (ajoute seulement)
-  local key, bpm, len = P.master()
+  local key, bpm, len, mid, mpart = P.master()
+  P.clock_sample(pos, key, len, mid, mpart)
   if key ~= P.key then
     local old = P.key; P.key = key
     if key:sub(1, 1) == "L" then
@@ -178,7 +272,7 @@ function P.start()
     end
   end
   P.rep = R.GetSetRepeat(-1); R.GetSetRepeat(0)
-  P.songs, P.events, P.song, P.in_song, P.had_loop, P.key = {}, {}, nil, false, false, "none"
+  P.songs, P.events, P.song, P.in_song, P.had_loop, P.key, P.segs, P.clk = {}, {}, nil, false, false, "none", {}, nil
   P.t_start = R.time_precise(); P.starting = true; P.msg = ""
   if (R.GetPlayState() & 4) == 0 then R.Main_OnCommand(1013, 0) end     -- Transport : enregistrer
 end
@@ -206,6 +300,7 @@ function P.stop(external)
   if not (P.active or P.starting) then return end
   local pos = R.GetPlayPosition()
   if P.active then
+    P.clock_close(pos)
     P.ev(pos, "stop")
     if P.song and P.song.idx then R.SetProjectMarker3(0, P.song.idx, true, P.song.start, pos, P.song.name, 0); P.song.stop = pos end
     if not external then R.Main_OnCommand(1016, 0) end                  -- Transport : arret
@@ -247,11 +342,16 @@ function P.post()
   local lines = { "Dripsody_Perf v1" }
   for _, t in ipairs(manquants) do lines[#lines + 1] = "MANQUANT\t" .. t end
   for _, s in ipairs(P.songs) do lines[#lines + 1] = string.format("S\t%d\t%.4f\t%.4f", s.n, s.start, s.stop or s.start) end
+  for _, sg in ipairs(P.segs) do lines[#lines + 1] = string.format("C\t%s\t%.6f\t%.6f\t%.4f\t%.4f", sg.key, sg.T0, sg.L, sg.t0, sg.t1) end
   for _, e in ipairs(P.events) do lines[#lines + 1] = "E\t" .. e end
   R.SetProjExtState(0, "Dripsody_Perf", "log", table.concat(lines, "\n"))
   R.UpdateArrange()
   P.msg = string.format("Termine : %d morceau(x), %d item(s) regle(s) en base de temps.", #P.songs, n)
   if #manquants > 0 then P.msg = "ATTENTION : rien d'enregistre pour : " .. table.concat(manquants, ", ") end
+  if R.GetExtState(EXT, "split") == "1" then
+    local ok, ni, nc = pcall(P.split_items)
+    P.msg = P.msg .. (ok and string.format("  Decoupe : %d item(s), %d coupe(s).", ni, nc) or ("  Erreur de decoupe : " .. tostring(ni)))
+  end
 end
 
 -- ============================ fenetre ============================
@@ -287,6 +387,17 @@ local function draw()
     line("Les autres pistes restent a ta charge.", .6, .62, .7)
   end
   if P.msg ~= "" then line(P.msg, 1, .8, .4) end
+  -- option : saucissonnage des items de loopers a chaque cycle (apres l'arret)
+  local on = R.GetExtState(EXT, "split") == "1"
+  local bx, by = 14, gfx.h - 30
+  gfx.set(on and .35 or .22, on and .75 or .24, on and .45 or .30, 1); gfx.rect(bx, by, 18, 18, 1)
+  gfx.set(1, 1, 1, 1); gfx.rect(bx, by, 18, 18, 0)
+  if on then gfx.x, gfx.y = bx + 3, by; gfx.drawstr("x") end
+  gfx.set(.85, .86, .9, 1); gfx.setfont(2, "Arial", 13); gfx.x, gfx.y = bx + 28, by + 1
+  gfx.drawstr("Decouper les items des loopers a chaque cycle (apres l'arret)")
+  if click and gfx.mouse_x >= bx and gfx.mouse_x <= bx + 400 and gfx.mouse_y >= by and gfx.mouse_y <= by + 18 then
+    R.SetExtState(EXT, "split", on and "0" or "1", true)
+  end
 end
 
 -- ============================ boucle principale ============================
@@ -324,5 +435,5 @@ do
   if R.time_precise() - hb < 1.0 then R.SetExtState(EXT, "cmd", "toggle", false); return end
 end
 R.atexit(function() if P.active or P.starting then P.restore(); R.SetExtState(EXT, "running", "0", false) end end)
-gfx.init("Dripsody Performance", 420, 200, 0, 140, 140)
+gfx.init("Dripsody Performance", 440, 250, 0, 140, 140)
 R.defer(main)
