@@ -196,6 +196,23 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - Reste à faire : modèle de projet (pistes 1-24, containers) à partir du .RPP de l'utilisateur ; notice d'installation ; bouton visible du mode
   d'import dans 8Waves (demandé implicitement le 24 nov. : l'utilisateur ne retrouvait pas les options dans le clic droit).
 
+## 24 nov. : enregistrement de performance (spécification validée, rien d'écrit dans le MSV3 / le Launchpad encore)
+
+- But : enregistrer **un concert entier** dans REAPER (un seul enregistrement continu). Un JSFX ne peut ni armer une piste, ni toucher au transport,
+  ni créer de marqueur : le **MSV3 publie les évènements** (bouton « REC PERFORMANCE » dans son interface + action Launchpad / MIDI Learn) et un
+  **script** agit. Décisions de l'utilisateur : pistes 2-9 (entrées) et 11-18 (loopers) en monitoring + record disable par défaut ; **entrée** armée
+  en « Record : output » (`I_RECMODE` 3 = stéréo avec compensation de latence) dès qu'elle est affectée à au moins un looper (même évènement que le
+  « mute » de l'entrée, `VL.set_input_parent`) ; **looper** armé dès qu'un enregistrement est abouti, désarmé au Clear (un item par période armée) ;
+  timeline qui tourne en continu, **marqueur de tempo à chaque synchro** (avec signature = nombre de temps de la boucle pour que le 1er temps tombe sur
+  le départ de la boucle : à confirmer) ; option : **découper les items à chaque cycle** de l'horloge interne (après l'arrêt, avec les heures exactes
+  publiées par le JSFX, pas en direct) ; **régions de morceaux** : un morceau commence au **1er REC alors que tous les loopers sont vides** (3 parts
+  comprises, quel que soit le geste de total clear), la région va jusqu'au 1er REC du morceau suivant (la dernière jusqu'à l'arrêt), créée au début et
+  agrandie en continu ; pas de durée minimale (une région de trop est acceptée) ; tempo de départ = celui du projet, pas de marge avant le 1er REC.
+- Pièges notés : Auto-Tempo (`VL.autotempo_tick`) fait `SetCurrentBPM` et **STOP au Unlock** → incompatible avec un enregistrement continu (mode performance :
+  marqueurs à la place, pas de STOP) ; base de temps des items = **temps** (sinon les marqueurs étirent l'audio) ; disque ≈ 16 Go / h (16 pistes stéréo 24 bits).
+- **Essai jetable** `tools/Dripsody_PerfSpike.lua` (à lancer dans un projet vide, ~12 s) : arme / désarme / réarme des pistes en cours d'enregistrement, pose un
+  marqueur 5/4, teste `SetCurrentBPM` avec un marqueur, crée et agrandit une région ; rapport `Dripsody_Spike_Report.txt`. Attendre ses résultats avant de coder.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par
