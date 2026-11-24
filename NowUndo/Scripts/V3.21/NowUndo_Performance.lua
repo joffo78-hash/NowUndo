@@ -430,6 +430,31 @@ function P.grid_build(mode)                                     -- mode : "measu
       end
     end
   end
+  -- ce qui compte pour l'utilisateur : le DEBUT DES ITEMS DES LOOPERS (pas des entrees) tombe-t-il sur un premier temps ?
+  local istat = { n = 0, med = 0, max = 0, ok = 0, list = {} }
+  do
+    local devs = {}
+    for _, m in ipairs(P.tr) do
+      if m.kind == "lp" then
+        m.tr = m.tr or R.GetTrack(0, m.n - 1)
+        for _, it in ipairs(m.tr and lp_items(m, pos0) or {}) do
+          local ip = R.GetMediaItemInfo_Value(it, "D_POSITION")
+          local b, meas, cml = R.TimeMap2_timeToBeats(0, ip)
+          local bpm_here = R.TimeMap_GetDividedBpmAtTime(ip) or 120
+          local signed = (b <= (cml or 4) / 2) and b or (b - (cml or 4))          -- temps avant (-) / apres (+) la barre la plus proche
+          local ms = signed * 60 / bpm_here * 1000
+          devs[#devs + 1] = math.abs(ms)
+          istat.list[#istat.list + 1] = string.format("  piste %d  item a %.4f s  mesure %s  ecart a la barre la plus proche : %+.1f ms", m.n, ip, tostring(meas), ms)
+        end
+      end
+    end
+    table.sort(devs)
+    istat.n = #devs
+    if #devs > 0 then
+      istat.med = devs[(#devs + 1) // 2]; istat.max = devs[#devs]
+      for _, d in ipairs(devs) do if d <= 30 then istat.ok = istat.ok + 1 end end
+    end
+  end
   pcall(function()                                                  -- rapport de la grille (pour diagnostic)
     local out = { "Dripsody grille (" .. mode .. ")", string.format("pos0 = %.4f ; zone reconstruite depuis b_a = %.4f s", pos0, b_a), "", "SEGMENTS" }
     for i, sg in ipairs(segs) do
@@ -450,19 +475,21 @@ function P.grid_build(mode)                                     -- mode : "measu
         out[#out + 1] = string.format("  seg %d cycle %d  t=%.6f  mesure=%s  temps=%.5f  (mesure de %s temps)", i, k, c, tostring(m), b, tostring(cml))
       end
     end
+    out[#out + 1] = ""; out[#out + 1] = string.format("DEBUT DES ITEMS DE LOOPERS (%d) : ecart median %.1f ms, max %.1f ms, %d a moins de 30 ms d'une barre", istat.n, istat.med, istat.max, istat.ok)
+    for i = 1, math.min(60, #istat.list) do out[#out + 1] = istat.list[i] end
     local f = io.open(R.GetResourcePath() .. "/Dripsody_Perf_grid.txt", "w")
     if f then f:write(table.concat(out, "\n")); f:close() end
   end)
-  return #plan, worst * 1000, moved, #segs
+  return #plan, worst * 1000, moved, #segs, istat
 end
 -- bouton : essaie la pose par mesure ; si les departs de cycle ne tombent pas sur un 1er temps (> 2 ms), refait avec la pose par instant
 function P.grid_apply()
-  local np, worst, moved, nsg = P.grid_build("measure")
+  local np, worst, moved, nsg, istat = P.grid_build("measure")
   local mode = "mesure"
   if np and worst > 2 then
-    np, worst, moved, nsg = P.grid_build("time"); mode = "instant"
+    np, worst, moved, nsg, istat = P.grid_build("time"); mode = "instant"
   end
-  if np then return np, worst, moved, nsg, mode end
+  if np then return np, worst, moved, nsg, mode, istat end
   return np, worst
 end
 
@@ -667,10 +694,12 @@ local function draw()
     local h1 = button(12, gfx.h - 58, bw, 38, "DECOUPER PAR CYCLE", false)
     local h2 = button(26 + bw, gfx.h - 58, bw, 38, "RECOLLER", false)
     if click and g1 and ns > 0 then
-      local ok, np, worst, moved, nsg, gmode = pcall(P.grid_apply)
+      local ok, np, worst, moved, nsg, gmode, ist = pcall(P.grid_apply)
       if not ok then P.msg = "Erreur de grille : " .. tostring(np)
       elseif not np then P.msg = tostring(worst)
-      else P.msg = string.format("Grille : %d marqueur(s), %d segment(s) ; depart des cycles sur un 1er temps a %.2f ms pres%s.%s Ctrl+Z annule.", np, nsg, worst, worst > 2 and " (ATTENTION : mal aligne, essaie ANCIENNE GRILLE)" or "", moved > 0 and (" " .. moved .. " element(s) remis en place.") or "") end
+      else P.msg = string.format("Grille : %d marqueur(s), %d segment(s) ; depart des cycles sur un 1er temps a %.2f ms pres%s.%s Ctrl+Z annule.", np, nsg, worst, worst > 2 and " (ATTENTION : mal aligne, essaie ANCIENNE GRILLE)" or "", moved > 0 and (" " .. moved .. " element(s) remis en place.") or "")
+        if ist and ist.n > 0 then P.msg = P.msg .. string.format("  ITEMS DE LOOPERS : %d, ecart median %.0f ms, max %.0f ms au 1er temps le plus proche.", ist.n, ist.med, ist.max) end
+      end
     elseif click and g2 then
       local ok, done = pcall(P.grid_restore)
       P.msg = ok and (done and "Ancienne grille de tempo restauree." or "Pas de grille sauvegardee a restaurer.") or ("Erreur : " .. tostring(done))

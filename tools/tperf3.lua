@@ -146,7 +146,8 @@ P.load_log()
 local function dump(title) print(title) for i, m in ipairs(MK) do print(string.format("   %2d  t=%9.4f  %8.3f BPM  sig %s", i, m.t, m.bpm, m.num and (m.num .. "/" .. (m.den or 4)) or "-")) end end
 dump("carte de tempo apres le concert (marqueurs poses en direct) :")
 local before = #MK
-local np, worst, moved, nsg, gmode = P.grid_apply()
+local np, worst, moved, nsg, gmode, ist = P.grid_apply()
+print(string.format('items de loopers : %d, ecart median %.1f ms, max %.1f ms', ist.n, ist.med, ist.max))
 dump("apres ALIGNER LA GRILLE :")
 print(string.format("script : %d marqueur(s), %d segment(s), ecart max annonce %.4f ms, elements remis en place %d, pose par %s", np, nsg, worst, moved, gmode))
 -- verification independante : chaque depart de cycle vrai est-il sur un 1er temps ?
