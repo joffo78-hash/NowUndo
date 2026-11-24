@@ -210,6 +210,20 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   agrandie en continu ; pas de durée minimale (une région de trop est acceptée) ; tempo de départ = celui du projet, pas de marge avant le 1er REC.
 - Pièges notés : Auto-Tempo (`VL.autotempo_tick`) fait `SetCurrentBPM` et **STOP au Unlock** → incompatible avec un enregistrement continu (mode performance :
   marqueurs à la place, pas de STOP) ; base de temps des items = **temps** (sinon les marqueurs étirent l'audio) ; disque ≈ 16 Go / h (16 pistes stéréo 24 bits).
+- **Résultats de l'essai (24 nov., projet de l'utilisateur)** : armer / désarmer / réarmer EN COURS d'enregistrement marche (item = +4-5 ms après l'ordre, un item
+  par période armée) ; `I_RECMODE` 3 accepté ; région agrandie en direct OK ; marqueur de tempo ajouté à la position de lecture = pas de saut. **MAIS** :
+  (1) un marqueur avec signature posé en milieu de mesure est coupé en 2 : tempo à l'instant demandé + signature repoussée à la **barre de mesure suivante**
+  → on ne peut pas aligner le 1er temps sur le départ d'une boucle en direct ; (2) **`SetCurrentBPM` (ou tout changement d'un tempo déjà posé) pendant la lecture
+  déplace la tête de lecture** (REAPER garde la position musicale : saut de +1,65 s observé) → INTERDIT en mode performance. L'alignement des mesures
+  sur les boucles se fera APRÈS l'arrêt (reconstruction de la carte de tempo, items en base de temps : pas de déplacement d'audio) = étape 2.
+- **Étape 1 livrée : `NowUndo_Performance.lua`** (fenêtre « Dripsody Performance », bouton REC PERFORMANCE ; relancer le script pendant un concert = bascule ;
+  test `tools/tperf.lua`, faux REAPER). Gère seulement les entrées 2-9 et les loopers 11-18 (constantes `IN_FIRST`, `LP_FIRST`) ; les instruments / aux sont routés
+  vers les entrées (confirmé par l'utilisateur) donc enregistrés par elles, les autres pistes restent à sa charge. Entrée armée si affectée à un looper
+  (gmem `6010+i`), looper armé si boucle > 0 et plus en REC / attente (états 1, 7, 8), régions « Morceau n » (1er REC alors que tous les loopers sont vides ; fin =
+  début du suivant), marqueur de tempo à chaque nouveau maître looper (tempo estimé `+155`), journal dans l'ExtState du projet `Dripsody_Perf/log` (lignes `S` morceaux,
+  `E` évènements) pour l'étape 2. Non testé dans REAPER. Question ouverte : armer aussi les entrées non affectées pendant le concert ?
+  Reste : étape 2 (grille alignée après l'arrêt, découpe optionnelle des items par cycle avec les heures exactes du JSFX) ; boutons Launchpad / MIDI Learn pour
+  la bascule (ExtState `NowUndo_Perf/cmd` = `toggle`).
 - **Essai jetable** `tools/Dripsody_PerfSpike.lua` (à lancer dans un projet vide, ~12 s) : arme / désarme / réarme des pistes en cours d'enregistrement, pose un
   marqueur 5/4, teste `SetCurrentBPM` avec un marqueur, crée et agrandit une région ; rapport `Dripsody_Spike_Report.txt`. Attendre ses résultats avant de coder.
 

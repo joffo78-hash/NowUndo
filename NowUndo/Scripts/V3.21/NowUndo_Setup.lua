@@ -24,6 +24,7 @@
 --   [main] NowUndo_Latency.lua
 --   [main] NowUndo_VirtualPedalBoard.lua
 --   [main] FX_Router_v2.lua
+--   [main] NowUndo_Performance.lua
 --   [webinterface] NowUndo.html
 --   [effect] ../../NowUndo_V3.27.jsfx
 --   [effect] ../../NU_DropCapture.jsfx
@@ -48,6 +49,7 @@ local SCRIPTS = {
   { "NowUndo_Scenario.lua",       "Rushes / Scenario",                       false },
   { "FX_Router_v2.lua",           "FX Router",                               false },
   { "NowUndo_VirtualPedalBoard.lua", "Pedalier virtuel",                     false },
+  { "NowUndo_Performance.lua",    "Performance (enregistrement du concert)", false },
 }
 
 local function sdir()
