@@ -254,6 +254,11 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (réaligner repart toujours de l'ancienne), items / régions / marqueurs remis en place s'ils ont bougé (`put_back`), blocs d'annulation. **À confirmer dans REAPER** :
   pose par mesure acceptée, indices de mesure 0-based (`TimeMap2_timeToBeats` / `TimeMap_GetMeasureInfo`), tolérance de 1 µs, aspect du tempo de raccord. Test `tools/tperf3.lua`
   (simulateur de carte de tempo : barres, signature repoussée à la barre suivante) : 15 départs de cycle examinés, tous sur un 1er temps ; restauration exacte ; mode repli.
+  **Retour de l'utilisateur (24 nov., captures)** : « c'est les LOOPERS qui doivent être calés, pas les inputs » / « t'appelle ça aligné ? » (début d'un item de looper pas sur la barre).
+  Corrections : `P.item_phase` = écart médian du **début des items de loopers** par rapport à la phase de l'horloge ; s'il dépasse 40 ms la grille est **recalée sur les items**
+  (message « Grille recalée sur le début des items… ») ; sinon l'horloge (plus précise) est gardée ; le message affiche toujours « ITEMS DE LOOPERS : n, écart médian X ms, max Y ms »
+  et le fichier `Dripsody_Perf_grid.txt` (diagnostic, dossier de REAPER) liste chaque item ; `Dripsody_Perf_log.txt` = journal du concert. Les entrées ne sont jamais prises en compte.
+  Si ça ne colle toujours pas : demander `Dripsody_Perf_grid.txt` + capture avec règle et grille visibles.
   **Reste** : boutons Launchpad / MIDI Learn pour démarrer / arrêter le concert.
 - **Essai jetable** `tools/Dripsody_PerfSpike.lua` (à lancer dans un projet vide, ~12 s) : arme / désarme / réarme des pistes en cours d'enregistrement, pose un
   marqueur 5/4, teste `SetCurrentBPM` avec un marqueur, crée et agrandit une région ; rapport `Dripsody_Spike_Report.txt`. Attendre ses résultats avant de coder.

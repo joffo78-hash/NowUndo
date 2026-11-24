@@ -333,6 +333,25 @@ local function plan_fill(plan, a, b, bpm_ref, num)            -- [a, b) : bar li
   if nb > 0 then plan[#plan + 1] = { t = a, bpm = bpm, num = num } end
   if r > 0 then plan[#plan + 1] = { t = (nb > 0) and (a + nb * num * 60 / bpm) or a, bpm = bpm, num = r } end
 end
+-- ce que voit l'utilisateur : le DEBUT DES ITEMS DES LOOPERS. Si la phase de l'horloge s'en ecarte de plus de 40 ms (mediane), la grille se cale sur les
+-- items (la phase de l'horloge n'est plus fiable sur ce projet) ; en dessous, on garde l'horloge, plus precise.
+function P.item_phase(sg, pos0)
+  local offs = {}
+  for _, m in ipairs(P.tr) do
+    if m.kind == "lp" then
+      m.tr = m.tr or R.GetTrack(0, m.n - 1)
+      for _, it in ipairs(m.tr and lp_items(m, pos0) or {}) do
+        local ip = R.GetMediaItemInfo_Value(it, "D_POSITION")
+        if ip >= sg.t0 - 1.0 and ip <= sg.t1 + 1.0 then
+          offs[#offs + 1] = ((ip - sg.T0 + sg.L / 2) % sg.L) - sg.L / 2        -- ecart du debut de l'item a la barre de cycle la plus proche
+        end
+      end
+    end
+  end
+  if #offs == 0 then return nil, 0 end
+  table.sort(offs)
+  return offs[(#offs + 1) // 2], #offs
+end
 function P.grid_plan(sv)
   local segs = {}
   for _, s in ipairs(sv.segs) do segs[#segs + 1] = s end
@@ -373,6 +392,16 @@ function P.grid_build(mode)                                     -- mode : "measu
   if rv0 and rv0 ~= 0 and bk ~= "" then P.grid_restore() end              -- on repart toujours de la grille d'origine
   local segs = P.grid_plan(sv)
   local pos0 = sv.pos0 or segs[1].t0
+  local corrs = {}
+  for i, sg in ipairs(segs) do
+    local d, n = P.item_phase(sg, pos0)
+    if d and math.abs(d) > 0.040 then
+      sg.T0 = sg.T0 + d                                                    -- grille recalee sur le debut des items
+      sg.c0 = sg.T0 + math.ceil((sg.t0 - 0.05 - sg.T0) / sg.L) * sg.L
+      corrs[#corrs + 1] = string.format("segment %d : %+.0f ms (%d item(s))", i, d * 1000, n)
+    end
+  end
+  P.last_corr = corrs
   local bpm0 = R.TimeMap_GetDividedBpmAtTime(pos0) or 120
   local bar0 = 4 * 60 / bpm0
   -- depart de la zone reconstruite : une barre de l'ancienne grille, au moins 2 mesures avant le 1er cycle
@@ -460,6 +489,7 @@ function P.grid_build(mode)                                     -- mode : "measu
     for i, sg in ipairs(segs) do
       out[#out + 1] = string.format("  %d  cle=%s  L=%.6f s  N=%d temps  q=%d/4  bpm=%.4f  t0=%.4f  t1=%.4f  T0=%.6f  1er cycle c0=%.6f", i, sg.key, sg.L, sg.N, sg.q, sg.bpm, sg.t0, sg.t1, sg.T0, sg.c0)
     end
+    for _, c in ipairs(P.last_corr or {}) do out[#out + 1] = "RECALAGE SUR LES ITEMS : " .. c end
     out[#out + 1] = ""; out[#out + 1] = "MARQUEURS POSES (instant, bpm, signature)"
     for _, x in ipairs(plan) do out[#out + 1] = string.format("  %.6f  %.4f BPM  %d/4", x.t, x.bpm, x.num) end
     out[#out + 1] = ""; out[#out + 1] = "CARTE DE TEMPO RELUE"
@@ -698,6 +728,7 @@ local function draw()
       if not ok then P.msg = "Erreur de grille : " .. tostring(np)
       elseif not np then P.msg = tostring(worst)
       else P.msg = string.format("Grille : %d marqueur(s), %d segment(s) ; depart des cycles sur un 1er temps a %.2f ms pres%s.%s Ctrl+Z annule.", np, nsg, worst, worst > 2 and " (ATTENTION : mal aligne, essaie ANCIENNE GRILLE)" or "", moved > 0 and (" " .. moved .. " element(s) remis en place.") or "")
+        if P.last_corr and #P.last_corr > 0 then P.msg = P.msg .. "  Grille recalee sur le debut des items (" .. table.concat(P.last_corr, ", ") .. ")." end
         if ist and ist.n > 0 then P.msg = P.msg .. string.format("  ITEMS DE LOOPERS : %d, ecart median %.0f ms, max %.0f ms au 1er temps le plus proche.", ist.n, ist.med, ist.max) end
       end
     elseif click and g2 then
