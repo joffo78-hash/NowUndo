@@ -121,6 +121,7 @@ end
 local function rescan()
   library = {}
   scan(LIB_FOLDER)
+  scan("NowUndo/NowUndo/Effects")                -- effets du paquet ReaPack (NU_Filter, NU_BBD_Delay...)
   table.sort(library, function(a, b) return a.name:lower() < b.name:lower() end)
 end
 rescan()

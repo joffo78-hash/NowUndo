@@ -2436,7 +2436,7 @@ function VL.drop_capture_on(tt)
   reaper.SetMediaTrackInfo_Value(tt, "I_NCHAN", n + 2)
   local before = reaper.TrackFX_GetCount(tt)
   local fx
-  for _, name in ipairs({ "JS:NU_DropCapture.jsfx", "JS:NU_DropCapture", "NU Drop Capture", "NU_DropCapture" }) do
+  for _, name in ipairs({ "JS:NU_DropCapture.jsfx", "JS:NU_DropCapture", "JS:NowUndo/NowUndo/NU_DropCapture.jsfx", "JS:NowUndo/NowUndo/NU_DropCapture", "NU Drop Capture", "NU_DropCapture" }) do
     local r = reaper.TrackFX_AddByName(tt, name, false, 1)
     if r and r >= 0 then fx = r break end
   end

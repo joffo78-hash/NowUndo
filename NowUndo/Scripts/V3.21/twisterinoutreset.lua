@@ -1089,6 +1089,7 @@ end
 local function fx_rescan()
   fx_lib = {}
   fx_scan(FX_LIB_FOLDER)
+  fx_scan("NowUndo/NowUndo/Effects")             -- effets du paquet ReaPack (NU_Filter, NU_BBD_Delay...)
   table.sort(fx_lib, function(a, b) return a.name:lower() < b.name:lower() end)
   fx_lib_t = reaper.time_precise()
 end

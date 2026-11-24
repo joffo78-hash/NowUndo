@@ -170,6 +170,25 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   `gfx.showmenu` reste 1..4). Test `tools/t8waves_import.lua` (faux reaper + faux JSFX) ; `tools/t8waves_ui.lua` inchangé OK.
   **Non testé dans REAPER** (décodage réel d'un fichier, glisser-déposer de l'explorateur).
 
+## 24 nov. : paquet ReaPack « NowUndo » (préparé sur la branche, pas encore publié)
+
+- **Un seul paquet** : `NowUndo/Scripts/V3.21/NowUndo_Setup.lua` (en-tête `@provides`) fournit tous les scripts (`[main]`), la page web
+  (`[webinterface] NowUndo.html`) et les effets (`[effect] ../../NowUndo_V3.27.jsfx`, `NU_DropCapture.jsfx`, `master_synchro`,
+  `Effects/NU_*.jsfx`). Les autres fichiers sont **ignorés** par `.reapack-index.conf` (pas de commentaires ni d'apostrophes dans ce fichier : le
+  format est celui d'une ligne de commande ; chemins avec espaces entre guillemets) : anciens scripts / versions JSFX, `tools/`, 8 Looper Panel (obsolète), `nowundo_vl_model.txt`
+  (écrit par l'utilisateur, un paquet l'écraserait à chaque mise à jour).
+- **Setup** (action « NowUndo : installation et démarrage automatique ») : vérifie SWS (`BR_`), js_ReaScriptAPI (`JS_`), ReaImGui ; menu à cocher
+  des scripts à lancer au démarrage (ExtState `NowUndo_Setup/auto_<fichier>`) ; écrit **un bloc balisé** dans `Scripts/__startup.lua`
+  (`-- >>> NOWUNDO … <<<`, le reste du fichier est conservé) qui lance les scripts par **chemin** (`AddRemoveReaScript`), plus d'ids `_RS…`.
+- Chemins après installation par ReaPack : scripts `Scripts/NowUndo/NowUndo/Scripts/V3.21/`, effets `Effects/NowUndo/NowUndo/` (looper, MSV3,
+  DropCapture) et `Effects/NowUndo/NowUndo/Effects/NU_*.jsfx`. FX Router et Twister scannent **aussi** `NowUndo/NowUndo/Effects` (en plus de
+  `MonRig`) ; le Launchpad cherche `NU_DropCapture` aussi sous `NowUndo/NowUndo/`.
+- Vérifié : `reapack-index --check` = 1 paquet, 0 erreur ; `--rebuild --no-commit` produit bien tous les `@provides`. **À confirmer à la 1re vraie
+  installation** : ReaPack accepte les chemins `../../` des effets (l'index les contient, pas vérifié côté REAPER) ; le menu du Setup ; le bloc
+  `__startup.lua`. Publication = fusion sur `main` (l'action GitHub régénère `index.xml`) : **ne pas fusionner sans l'accord de l'utilisateur**.
+- Reste à faire : modèle de projet (pistes 1-24, containers) à partir du .RPP de l'utilisateur ; notice d'installation ; bouton visible du mode
+  d'import dans 8Waves (demandé implicitement le 24 nov. : l'utilisateur ne retrouvait pas les options dans le clic droit).
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par
