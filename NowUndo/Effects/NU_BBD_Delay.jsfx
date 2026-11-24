@@ -1,0 +1,243 @@
+desc:NU BBD Delay (analog delay, Memory Man style)
+author: joffo78
+version: 1.0
+changelog:
+  Premiere version dans le pack NowUndo.
+
+options:no_slider
+
+slider1:0.5<0,1,0.01>-Blend (Dry/Wet)
+slider2:300<10,1200,1>-Delay Time (ms)
+slider3:0.4<0,1,0.001>-Feedback (Scaled)
+slider4:0.2<0,1,0.01>-Mod Depth
+slider5:0<0,1,1>-Mod Mode (0=Chorus, 1=Vibrato)
+slider6:1<0,10,0.1>-Mod Rate (Hz)
+slider7:0.5<0,1,0.01>-Darkness (BBD LPF)
+slider8:0<0,1,0.01>-Tape Saturation
+slider9:0<0,1,0.01>-Bit Crushing
+
+@init
+max_delay_sec = 1.2;
+delay_size = ceil(srate * max_delay_sec) + 1000;
+freembuf(0);
+delay_buf = 0;
+write_ptr = 0;
+
+lfo_phase = 0;
+bbd_lpf = 0;
+smooth_time = 300;
+active_knob = 0;
+crush_hold = 0;
+crush_cnt = 0;
+
+function tanh(x) (
+  x > 4 ? 1 : x < -4 ? -1 : (
+    e2x = exp(2 * x);
+    (e2x - 1) / (e2x + 1);
+  );
+);
+
+@slider
+
+@sample
+dry_l = spl0;
+dry_r = spl1;
+in_sig = (dry_l + dry_r) * 0.5;
+
+// Lissage du temps de délai
+smooth_time += (slider2 - smooth_time) * 0.001;
+
+time_ms = smooth_time;
+
+// Mappage exponentiel du feedback :
+// 0.0 à 0.8 du potentiomètre -> gain de 0.0 à 1.0 (répétitions très progressives)
+// 0.8 à 1.0 du potentiomètre -> gain de 1.0 à 1.4 (zone d'auto-oscillation)
+fb_knob = slider3;
+fb_knob <= 0.8 ? (
+  fb_gain = fb_knob * 1.25; // Rejoint 1.0 à 80% du bouton
+) : (
+  fb_gain = 1.0 + (fb_knob - 0.8) * 2.0; // Monte jusqu'à 1.4 à 100%
+);
+
+wet_mix = slider1;
+mod_depth = slider4;
+mod_mode = slider5;
+mod_rate = slider6;
+tone_val = slider7;
+sat_val = slider8;
+crush_val = slider9;
+
+// LFO
+lfo_inc = 2 * $pi * mod_rate / srate;
+lfo_phase += lfo_inc;
+lfo_phase >= 2 * $pi ? lfo_phase -= 2 * $pi;
+lfo_val = sin(lfo_phase);
+
+// Modulation
+mod_ms = lfo_val * (mod_depth * (mod_mode ? 12 : 6));
+target_delay_ms = max(5, min(1200, time_ms + mod_ms));
+
+dt_samples = (target_delay_ms / 1000) * srate;
+read_ptr = write_ptr - dt_samples;
+read_ptr < 0 ? read_ptr += delay_size;
+
+i_ptr = floor(read_ptr);
+frac = read_ptr - i_ptr;
+i_next = (i_ptr + 1) % delay_size;
+
+// Lecture du buffer
+raw_delayed = delay_buf[i_ptr] * (1 - frac) + delay_buf[i_next] * frac;
+
+// --- TRAITEMENT DANS LA BOUCLE (CUMULATIF) ---
+
+// 1. Filtrage BBD progressif (Darkness)
+cutoff_coeff = min(0.85, max(0.015, 0.85 - tone_val * 0.82));
+bbd_lpf += cutoff_coeff * (raw_delayed - bbd_lpf);
+proc_sig = bbd_lpf;
+
+// 2. Saturation de bande progressive
+sat_val > 0 ? (
+  drive = 1 + sat_val * 4;
+  sat_in = proc_sig * drive;
+  sat_out = (sat_in + 0.15 * sat_in * sat_in) / (1 + abs(sat_in));
+  proc_sig = proc_sig * (1 - sat_val * 0.5) + (sat_out / drive) * (sat_val * 0.5);
+);
+
+// Réinjection avec gain calibré
+fb_signal = proc_sig * fb_gain;
+next_write = in_sig + fb_signal;
+
+// Soft saturation analogique à genou doux pour borner l'auto-oscillation
+delay_buf[write_ptr] = tanh(next_write * 0.7) * 1.15;
+write_ptr = (write_ptr + 1) % delay_size;
+
+// --- TRAITEMENT HORS BOUCLE (SORTIE SEULEMENT) ---
+
+// 3. Bit Crushing
+wet_sig = proc_sig;
+crush_val > 0 ? (
+  step_hold = floor(1 + crush_val * 12);
+  crush_cnt += 1;
+  crush_cnt >= step_hold ? (
+    crush_cnt = 0;
+    levels = exp(log(2) * (16 - crush_val * 13));
+    crush_hold = floor(wet_sig * levels + 0.5) / levels;
+  );
+  wet_sig = crush_hold;
+);
+
+// Sortie globale (Mix Dry/Wet)
+spl0 = dry_l * (1 - wet_mix) + wet_sig * wet_mix;
+spl1 = dry_r * (1 - wet_mix) + wet_sig * wet_mix;
+
+@gfx 480 370
+// Fond général
+gfx_r = 0.82; gfx_g = 0.83; gfx_b = 0.85; gfx_a = 1;
+gfx_rect(0, 0, gfx_w, gfx_h);
+
+// Bandeau En-tête
+gfx_r = 0.12; gfx_g = 0.28; gfx_b = 0.52; gfx_a = 1;
+gfx_rect(0, 0, gfx_w, 42);
+
+gfx_r = 0.98; gfx_g = 0.98; gfx_b = 0.98; gfx_a = 1;
+gfx_x = 15; gfx_y = 12;
+gfx_drawstr("DELUXE MEMORY BBD & TAPE DESTRUCTION");
+
+// Fonctions de tracé
+function draw_section(x, y, w, h, title_str) (
+  gfx_r = 0.72; gfx_g = 0.73; gfx_b = 0.75; gfx_a = 1;
+  gfx_rect(x, y, w, h);
+  gfx_r = 0.55; gfx_g = 0.56; gfx_b = 0.58; gfx_a = 1;
+  gfx_rect(x, y, w, h, 0);
+  
+  gfx_r = 0.15; gfx_g = 0.15; gfx_b = 0.15; gfx_a = 1;
+  gfx_x = x + 8; gfx_y = y + 6;
+  gfx_drawstr(title_str);
+);
+
+function draw_knob(x, y, norm_val, label_str, val_str) (
+  gfx_r = 0.15; gfx_g = 0.15; gfx_b = 0.15; gfx_a = 1;
+  gfx_circle(x, y, 20, 1);
+  gfx_r = 0.4; gfx_g = 0.4; gfx_b = 0.4; gfx_a = 1;
+  gfx_circle(x, y, 20, 0);
+  
+  gfx_r = 0.9; gfx_g = 0.9; gfx_b = 0.9; gfx_a = 1;
+  gfx_circle(x, y, 10, 1);
+  
+  angle = (norm_val - 0.5) * (5 * $pi / 3);
+  gfx_r = 0.8; gfx_g = 0.1; gfx_b = 0.1; gfx_a = 1;
+  gfx_line(x + sin(angle)*3, y - cos(angle)*3, x + sin(angle)*18, y - cos(angle)*18);
+  
+  gfx_r = 0.1; gfx_g = 0.1; gfx_b = 0.1; gfx_a = 1;
+  gfx_x = x - 22; gfx_y = y + 26;
+  gfx_drawstr(label_str);
+  
+  gfx_r = 0.2; gfx_g = 0.3; gfx_b = 0.6; gfx_a = 1;
+  gfx_x = x - 18; gfx_y = y + 38;
+  gfx_drawstr(val_str);
+);
+
+// Encadrements des 4 sections
+draw_section(10, 50, 225, 145, "DELAY / REPEATS");
+draw_section(245, 50, 225, 145, "MODULATION");
+draw_section(10, 205, 320, 150, "CHARACTER & DEGRADATION");
+draw_section(340, 205, 130, 150, "MIX");
+
+// Clic initial et sélection
+mouse_cap == 1 && last_mouse_cap == 0 ? (
+  mouse_x >= 30 && mouse_x <= 80 && mouse_y >= 80 && mouse_y <= 160 ? active_knob = 2;
+  mouse_x >= 140 && mouse_x <= 190 && mouse_y >= 80 && mouse_y <= 160 ? active_knob = 3;
+  
+  mouse_x >= 265 && mouse_x <= 315 && mouse_y >= 80 && mouse_y <= 160 ? active_knob = 4;
+  mouse_x >= 345 && mouse_x <= 395 && mouse_y >= 80 && mouse_y <= 160 ? active_knob = 6;
+  mouse_x >= 415 && mouse_x <= 455 && mouse_y >= 80 && mouse_y <= 140 ? slider5 = !slider5;
+  
+  mouse_x >= 35 && mouse_x <= 85 && mouse_y >= 235 && mouse_y <= 320 ? active_knob = 7;
+  mouse_x >= 125 && mouse_x <= 175 && mouse_y >= 235 && mouse_y <= 320 ? active_knob = 8;
+  mouse_x >= 215 && mouse_x <= 265 && mouse_y >= 235 && mouse_y <= 320 ? active_knob = 9;
+  
+  mouse_x >= 380 && mouse_x <= 430 && mouse_y >= 235 && mouse_y <= 320 ? active_knob = 1;
+  
+  last_mouse_y = mouse_y;
+);
+
+// Glissement
+mouse_cap == 1 && active_knob > 0 ? (
+  dy = last_mouse_y - mouse_y;
+  
+  active_knob == 1 ? slider1 = min(1, max(0, slider1 + dy * 0.005));
+  active_knob == 2 ? slider2 = min(1200, max(10, slider2 + dy * 4));
+  active_knob == 3 ? slider3 = min(1, max(0, slider3 + dy * 0.003));
+  active_knob == 4 ? slider4 = min(1, max(0, slider4 + dy * 0.005));
+  active_knob == 6 ? slider6 = min(10, max(0.1, slider6 + dy * 0.02));
+  active_knob == 7 ? slider7 = min(1, max(0, slider7 + dy * 0.005));
+  active_knob == 8 ? slider8 = min(1, max(0, slider8 + dy * 0.005));
+  active_knob == 9 ? slider9 = min(1, max(0, slider9 + dy * 0.005));
+  
+  last_mouse_y = mouse_y;
+);
+
+mouse_cap == 0 ? ( active_knob = 0; );
+last_mouse_cap = mouse_cap;
+
+// Dessin des commandes par section
+draw_knob(55, 110, (slider2 - 10) / 1190, "TIME", sprintf(#, "%.0f ms", slider2));
+draw_knob(165, 110, slider3, "FEEDBK", sprintf(#, "%.0f %%", slider3 * 100));
+
+draw_knob(290, 110, slider4, "DEPTH", sprintf(#, "%.0f %%", slider4 * 100));
+draw_knob(370, 110, (slider6 - 0.1) / 9.9, "RATE", sprintf(#, "%.1f Hz", slider6));
+
+// Switch Mode
+gfx_r = 0.2; gfx_g = 0.2; gfx_b = 0.2; gfx_a = 1;
+gfx_rect(420, 85, 30, 40);
+gfx_r = 0.7; gfx_g = 0.7; gfx_b = 0.7; gfx_a = 1;
+gfx_rect(423, slider5 ? 87 : 105, 24, 18);
+gfx_r = 0.1; gfx_g = 0.1; gfx_b = 0.1; gfx_a = 1;
+gfx_x = 412; gfx_y = 136;
+gfx_drawstr(slider5 ? "VIB" : "CHO");
+
+draw_knob(60, 270, slider7, "DARK", sprintf(#, "%.0f %%", slider7 * 100));
+draw_knob(150, 270, slider8, "TAPE", sprintf(#, "%.0f %%", slider8 * 100));
+draw_knob(240, 270, slider9, "CRUSH", sprintf(#, "%.0f %%", slider9 * 100));
+
+draw_knob(405, 270, slider1, "BLEND", sprintf(#, "%.0f %%", slider1 * 100));

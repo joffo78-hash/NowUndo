@@ -1,0 +1,62 @@
+desc:NU Stutter
+author: joffo78
+version: 1.0
+changelog:
+  Premiere version dans le pack NowUndo.
+
+//version: 2.0
+
+slider1:0<0,5,1{1/8,1/16,1/32,1/6,1/12,1/24}>Rate
+slider2:10<0,100,0.1>Attack
+slider3:30<0,100,0.1>Decay
+slider4:100<0,100,0.1>Dry/Wet
+
+in_pin:L in
+in_pin:R in
+out_pin:L out
+out_pin:R out
+
+@init
+ext_noinit = 1;
+phase = 0;
+divs[0] = 0.5;  divs[1] = 0.25;  divs[2] = 0.125;
+divs[3] = 1/6;  divs[4] = 1/12;  divs[5] = 1/24;
+
+@slider
+rate_div = divs[slider1|0];
+mix = slider4 * 0.01;
+
+@block
+samples_per_slice = max(32, (rate_div * srate * 60) / max(tempo, 1));
+
+// Paramètres d'enveloppe (calculés une fois par bloc)
+att_ms     = 1 + slider2 * 0.25;                       // 1 → 26 ms
+att_ratio  = max(0.001, (att_ms * srate * 0.001) / samples_per_slice);
+open_ratio = 0.08 + (slider3 * 0.01) * 0.82;           // 0.08 → 0.90
+rel_ratio  = max(0.001, (2 * srate * 0.001) / samples_per_slice); // 2 ms anti-clic
+
+// Transport en lecture/enregistrement : on se cale sur la grille
+play_state & 1 ? (
+  sp = beat_position / rate_div;
+  phase = (sp - floor(sp)) * samples_per_slice;
+);
+// Sinon : phase libre (fonctionne en live, transport arrêté)
+
+@sample
+phase += 1;
+phase >= samples_per_slice ? phase -= samples_per_slice;
+pos = phase / samples_per_slice;
+
+pos < att_ratio ? (
+  env = pos / att_ratio;
+) : pos < open_ratio ? (
+  env = 1;
+) : pos < open_ratio + rel_ratio ? (
+  env = 1 - (pos - open_ratio) / rel_ratio;
+) : (
+  env = 0;
+);
+
+gain = (1 - mix) + env * mix;
+spl0 *= gain;
+spl1 *= gain; 

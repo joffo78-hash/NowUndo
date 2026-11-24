@@ -152,7 +152,9 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   **Faits le 24 nov.** (`NowUndo/Effects/`, non testés dans REAPER, bancs Python) : `NU_GRM_Comb.jsfx` (= grm_sweep_comb de
   l'utilisateur, sliders renumérotés : Mix, Sweep, Freq A, Résonance en tête ; sortie identique à l'ancien, écart 0) et
   `NU_Filter.jsfx` (remplace Filters_LPHP, code original RBJ : HP, LP, Résonance, Drive, pente 12/24 dB ; ouvert = son inchangé).
-  Vérifiés OK pour les autres : bbddelay, joffo_stutter, Manipulator_Formant. Restent : `16rec` (pas reçu), delay NU éventuel
+  Vérifiés OK pour les autres : bbddelay, joffo_stutter, Manipulator_Formant. **L'utilisateur accepte de partager BBD delay** (à lui,
+  confirmé 24 nov.) : `NU_BBD_Delay`, `NU_Stutter`, `NU_Manipulator_Formant` ajoutés dans `NowUndo/Effects/` (copies du fichier de
+  l'utilisateur + en-tête `author/version/changelog` pour ReaPack, DSP inchangé, même ordre de réglages). Licence : pas encore choisie. Restent : `16rec` (pas reçu), delay NU éventuel
   (origine de bbddelay inconnue → l'utilisateur dit qu'il est à lui, à confirmer).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)

@@ -1,0 +1,635 @@
+desc:NU Manipulator Pitch + Formant Shifter
+author: joffo78
+version: 1.0
+changelog:
+  Premiere version dans le pack NowUndo.
+
+
+// Les 16 sliders sont masqués (préfixe "-") : tout se règle dans l'interface graphique.
+// Ils restent automatisables. Ordre des paramètres : Hauteur, Timbre, Réglage fin, Spirale en premier.
+slider1:0<-24,24,1>-Hauteur (notes)
+slider2:0<-18,18,0.1>-Timbre (voix)
+slider3:0<-100,100,1>-Réglage fin (centièmes)
+slider4:0<0,90,1>-Spirale (écho de hauteur)
+slider5:100<0,100,1>-Mélange
+slider6:1<0,1,1{Suit la hauteur,Préservée}>-Voix
+slider7:10<0,500,1>-Glissando (ms)
+slider8:60<20,200,1>-Grain (ms)
+slider9:250<60,800,1>-Douceur du timbre (Hz)
+slider10:0<0,4,1{Off,Sinus,Carré,Aléatoire,Rampe}>-Vibrato forme
+slider11:4<0.05,32,0.01>-Vibrato vitesse (Hz)
+slider12:0<0,24,0.1>-Vibrato profondeur (notes)
+slider13:0<0,1,1{Fluide,Par notes}>-Vibrato sauts
+slider14:0<0,4,1{Off,Sinus,Carré,Aléatoire,Rampe}>-Wah-voix forme
+slider15:0.5<0.05,32,0.01>-Wah-voix vitesse (Hz)
+slider16:0<0,18,0.1>-Wah-voix profondeur
+
+in_pin:Gauche
+in_pin:Droite
+out_pin:Gauche
+out_pin:Droite
+
+@init
+// NB : les noms de variables JSFX sont insensibles à la casse (N et n = même variable),
+// d'où "fsz" pour la taille FFT.
+fsz = 2048;
+HOP = fsz / 4;
+nm = fsz - 1;
+hm = HOP - 1;
+half = fsz / 2;
+norm = 1 / (fsz * 1.5);   // Hann analyse + synthèse, recouvrement 75 %
+eps = 0.000000001;        // remplace 1e-9 (notation scientifique non supportée)
+
+bs = 131072;
+mask = bs - 1;
+offL = 0;
+offR = bs;
+dryL = 2 * bs;
+dryR = 3 * bs;
+fftb = 4 * bs;            // 2*fsz flottants (complexes entrelacés)
+winb = fftb + 2 * fsz;
+magb = winb + fsz;
+cumb = magb + fsz;
+envb = cumb + fsz;
+sbL  = envb + fsz;
+sbR  = sbL + fsz;
+olaL = sbR + fsz;
+olaR = olaL + fsz;
+memset(0, 0, olaR + fsz);
+
+idx = 0;
+loop(fsz,
+  winb[idx] = 0.5 - 0.5 * cos(2 * $pi * idx / fsz);
+  idx += 1;
+);
+
+wp = 0; ip = 0; ph = 0;
+lfoP = 0; lfoF = 0; rndP = 0; rndF = 0;
+curP = 0; curF = 0;
+h = 4;
+lastdryD = -1;
+
+// ====================== fonctions DSP ======================
+function rd(off, d) local(p, i, f, a, b) global(wp, bs, mask) (
+  p = wp - d + bs;
+  i = floor(p);
+  f = p - i;
+  a = off + (i & mask);
+  b = off + ((i + 1) & mask);
+  a[] * (1 - f) + b[] * f;
+);
+
+function lfoval(s, x, r) (
+  s == 1 ? sin(2 * $pi * x) :
+  s == 2 ? (x < 0.5 ? 1 : -1) :
+  s == 3 ? r :
+  s == 4 ? x * 2 - 1 : 0;
+);
+
+// Déplace l'enveloppe spectrale d'un facteur fr (>1 = formants plus aigus)
+function procch(inb, olab, ip0, fr)
+  local(j, k, re, im, pos, i, fc, e, g, lo, hi)
+  global(fsz, nm, half, h, fftb, winb, magb, cumb, envb, norm, eps) (
+  j = 0;
+  loop(fsz,
+    fftb[2 * j] = inb[(ip0 + j) & nm] * winb[j];
+    fftb[2 * j + 1] = 0;
+    j += 1;
+  );
+  fft(fftb, fsz);
+  fft_permute(fftb, fsz);
+
+  // magnitudes + somme cumulée
+  cumb[0] = 0;
+  k = 0;
+  loop(half + 1,
+    re = fftb[2 * k];
+    im = fftb[2 * k + 1];
+    magb[k] = sqrt(re * re + im * im);
+    cumb[k + 1] = cumb[k] + magb[k];
+    k += 1;
+  );
+
+  // enveloppe = moyenne glissante de la magnitude
+  k = 0;
+  loop(half + 1,
+    lo = max(0, k - h);
+    hi = min(half, k + h);
+    envb[k] = (cumb[hi + 1] - cumb[lo]) / (hi - lo + 1) + eps;
+    k += 1;
+  );
+
+  // remappage de l'enveloppe : gain = env(k/fr) / env(k)
+  k = 0;
+  loop(half + 1,
+    pos = k / fr;
+    pos > half ? pos = half;
+    i = floor(pos);
+    fc = pos - i;
+    e = envb[i] * (1 - fc) + envb[min(i + 1, half)] * fc;
+    g = e / envb[k];
+    g = min(max(g, 0.03), 8);
+    fftb[2 * k] *= g;
+    fftb[2 * k + 1] *= g;
+    (k > 0 && k < half) ? (
+      fftb[2 * (fsz - k)] *= g;
+      fftb[2 * (fsz - k) + 1] *= g;
+    );
+    k += 1;
+  );
+
+  fft_ipermute(fftb, fsz);
+  ifft(fftb, fsz);
+
+  j = 0;
+  loop(fsz,
+    olab[(ip0 + j) & nm] += fftb[2 * j] * winb[j] * norm;
+    j += 1;
+  );
+);
+
+// Lecture des 16 sliders et calcul des paramètres dérivés
+function derive()
+  global(slider1, slider2, slider3, slider4, slider5, slider6, slider7, slider8,
+         slider9, slider10, slider11, slider12, slider13, slider14, slider15, slider16,
+         fShift, fMode, fShape, incF, fDepth, h, pShift, pFine, W, fbk, pShape, incP,
+         pDepth, pQuant, glide, coef, mix, dryD, srate, fsz) (
+  pShift = slider1;
+  fShift = slider2;
+  pFine  = slider3;
+  fbk    = slider4 * 0.01;
+  mix    = slider5 * 0.01;
+  fMode  = slider6;
+  glide  = slider7 * 0.001 * srate;
+  W      = slider8 * 0.001 * srate;
+  h      = max(1, min(64, floor(slider9 / (srate / fsz) / 2 + 0.5)));
+  pShape = slider10;
+  incP   = slider11 / srate;
+  pDepth = slider12;
+  pQuant = slider13;
+  fShape = slider14;
+  incF   = slider15 / srate;
+  fDepth = slider16;
+  coef   = glide < 1 ? 1 : 1 - exp(-1 / glide);
+  dryD   = floor(fsz + W * 0.5);
+);
+
+// ====================== fonctions interface ======================
+// accès aux sliders par numéro
+function getsl(i)
+  global(slider1, slider2, slider3, slider4, slider5, slider6, slider7, slider8,
+         slider9, slider10, slider11, slider12, slider13, slider14, slider15, slider16) (
+  i == 1 ? slider1 : i == 2 ? slider2 : i == 3 ? slider3 : i == 4 ? slider4 :
+  i == 5 ? slider5 : i == 6 ? slider6 : i == 7 ? slider7 : i == 8 ? slider8 :
+  i == 9 ? slider9 : i == 10 ? slider10 : i == 11 ? slider11 : i == 12 ? slider12 :
+  i == 13 ? slider13 : i == 14 ? slider14 : i == 15 ? slider15 : slider16;
+);
+
+function setsl(i, v)
+  global(slider1, slider2, slider3, slider4, slider5, slider6, slider7, slider8,
+         slider9, slider10, slider11, slider12, slider13, slider14, slider15, slider16) (
+  i == 1 ? (slider1 = v) : i == 2 ? (slider2 = v) : i == 3 ? (slider3 = v) : i == 4 ? (slider4 = v) :
+  i == 5 ? (slider5 = v) : i == 6 ? (slider6 = v) : i == 7 ? (slider7 = v) : i == 8 ? (slider8 = v) :
+  i == 9 ? (slider9 = v) : i == 10 ? (slider10 = v) : i == 11 ? (slider11 = v) : i == 12 ? (slider12 = v) :
+  i == 13 ? (slider13 = v) : i == 14 ? (slider14 = v) : i == 15 ? (slider15 = v) : (slider16 = v);
+);
+
+// texte centré / aligné à gauche autour du point (x, y)
+function txtc(s, x, y) local(tw, th) global(gfx_x, gfx_y) (
+  gfx_measurestr(s, tw, th);
+  gfx_x = x - tw * 0.5;
+  gfx_y = y - th * 0.5;
+  gfx_drawstr(s);
+);
+
+function txtl(s, x, y) local(tw, th) global(gfx_x, gfx_y) (
+  gfx_measurestr(s, tw, th);
+  gfx_x = x;
+  gfx_y = y - th * 0.5;
+  gfx_drawstr(s);
+);
+
+// texte de la valeur affichée sous chaque réglage
+function fmtval(p, v) (
+  p == 1 ? ( v == 0 ? strcpy(#vt, "0") : sprintf(#vt, "%+d notes", v) ) :
+  p == 2 ? ( abs(v) < 0.05 ? strcpy(#vt, "0.0") : sprintf(#vt, "%+.1f", v) ) :
+  p == 3 ? ( v == 0 ? strcpy(#vt, "0") : sprintf(#vt, "%+d ct", v) ) :
+  p == 4 ? sprintf(#vt, "%d%%", v) :
+  p == 5 ? sprintf(#vt, "%d%%", v) :
+  p == 7 ? sprintf(#vt, "%d ms", v) :
+  p == 8 ? sprintf(#vt, "%d ms", v) :
+  p == 9 ? sprintf(#vt, "%d Hz", v) :
+  (p == 11 || p == 15) ? sprintf(#vt, "%.2f Hz", v) :
+  sprintf(#vt, "%.1f", v);
+);
+
+// métadonnées des paramètres : min, max, défaut, pas
+function setp(i, mn, mx, df, st) global(pmin, pmax, pdef, pstep) (
+  pmin[i] = mn;
+  pmax[i] = mx;
+  pdef[i] = df;
+  pstep[i] = st;
+);
+
+// déclaration d'un contrôle : type (0 bouton rotatif, 2 choix), paramètre, x, y, w (rayon), h, légende, aide
+function addc(a1, a2, a3, a4, a5, a6, a7, a8)
+  global(nctl, c_type, c_par, c_x, c_y, c_w, c_h, c_lab, c_hint) (
+  c_type[nctl] = a1;
+  c_par[nctl]  = a2;
+  c_x[nctl]    = a3;
+  c_y[nctl]    = a4;
+  c_w[nctl]    = a5;
+  c_h[nctl]    = a6;
+  c_lab[nctl]  = a7;
+  c_hint[nctl] = a8;
+  nctl += 1;
+);
+
+// ====================== tables de l'interface ======================
+ub = olaR + fsz + 64;
+pmin = ub;  pmax = ub + 32;  pdef = ub + 64;  pstep = ub + 96;  plog = ub + 128;
+optb = ub + 160;
+ctlb = ub + 300;
+c_type = ctlb;        c_par = ctlb + 32;   c_x = ctlb + 64;    c_y = ctlb + 96;
+c_w = ctlb + 128;     c_h = ctlb + 160;    c_lab = ctlb + 192; c_hint = ctlb + 224;
+memset(ub, 0, 600);
+nctl = 0;
+
+setp(1,  -24,  24,   0,    1);     // Hauteur
+setp(2,  -18,  18,   0,    0.1);   // Timbre
+setp(3, -100, 100,   0,    1);     // Réglage fin
+setp(4,    0,  90,   0,    1);     // Spirale
+setp(5,    0, 100, 100,    1);     // Mélange
+setp(6,    0,   1,   1,    1);     // Voix
+setp(7,    0, 500,  10,    1);     // Glissando
+setp(8,   20, 200,  60,    1);     // Grain
+setp(9,   60, 800, 250,    1);     // Douceur
+setp(10,   0,   4,   0,    1);     // Vibrato forme
+setp(11, 0.05, 32,   4,    0.01);  // Vibrato vitesse
+setp(12,   0,  24,   0,    0.1);   // Vibrato profondeur
+setp(13,   0,   1,   0,    1);     // Vibrato sauts
+setp(14,   0,   4,   0,    1);     // Wah forme
+setp(15, 0.05, 32, 0.5,    0.01);  // Wah vitesse
+setp(16,   0,  18,   0,    0.1);   // Wah profondeur
+plog[11] = 1;
+plog[15] = 1;
+
+// libellés des choix (index = paramètre * 6 + option)
+optb[6 * 6 + 0]  = "Suit la hauteur";
+optb[6 * 6 + 1]  = "Préservée";
+optb[13 * 6 + 0] = "Fluide";
+optb[13 * 6 + 1] = "Par notes";
+optb[10 * 6 + 0] = "Off";
+optb[10 * 6 + 1] = "Sinus";
+optb[10 * 6 + 2] = "Carré";
+optb[10 * 6 + 3] = "Aléa";
+optb[10 * 6 + 4] = "Rampe";
+optb[14 * 6 + 0] = "Off";
+optb[14 * 6 + 1] = "Sinus";
+optb[14 * 6 + 2] = "Carré";
+optb[14 * 6 + 3] = "Aléa";
+optb[14 * 6 + 4] = "Rampe";
+
+// Rangée principale : les 4 réglages importants, dans l'ordre, puis le mélange
+addc(0, 1, 90,  125, 50, 0, "HAUTEUR",     "HAUTEUR : monte ou descend la voix, en notes (12 = une octave). Double-clic = remise à zéro.");
+addc(0, 2, 250, 125, 50, 0, "TIMBRE",      "TIMBRE : change la taille de la gorge sans changer la note. Plus = petit et clair, moins = grand et sombre.");
+addc(0, 3, 410, 125, 50, 0, "RÉGLAGE FIN", "RÉGLAGE FIN : ajuste la hauteur par petits pas (100 centièmes = une note entière).");
+addc(0, 4, 570, 125, 50, 0, "SPIRALE",     "SPIRALE : renvoie le son décalé dans l'effet. Les échos montent ou descendent en spirale.");
+addc(0, 5, 730, 125, 50, 0, "MÉLANGE",     "MÉLANGE : 0 % = son d'origine, 100 % = effet seul.");
+
+// Vibrato (ondulation de la hauteur)
+addc(2, 10, 45,  256, 340, 26, -1,      "FORME : l'onde qui fait onduler la hauteur (vibrato). Off = pas de vibrato.");
+addc(0, 11, 105, 334, 30,  0,  "VITESSE",     "VITESSE : rapidité du vibrato, en battements par seconde.");
+addc(0, 12, 215, 334, 30,  0,  "PROFONDEUR",  "PROFONDEUR : ampleur du vibrato, en notes.");
+addc(2, 13, 275, 330, 110, 26, "SAUTS",       "SAUTS : Fluide = la hauteur glisse en continu. Par notes = elle saute de note en note.");
+
+// Wah-voix (ondulation du timbre)
+addc(2, 14, 435, 256, 340, 26, -1,      "FORME : l'onde qui fait onduler le timbre (effet wah-voix). Off = timbre fixe.");
+addc(0, 15, 520, 334, 30,  0,  "VITESSE",     "VITESSE : rapidité de l'ondulation du timbre, en battements par seconde.");
+addc(0, 16, 650, 334, 30,  0,  "PROFONDEUR",  "PROFONDEUR : ampleur de l'ondulation du timbre.");
+
+// Réglages avancés
+addc(2, 6, 45,  470, 230, 28, "VOIX",      "VOIX : Suit la hauteur = effet souris ou géant. Préservée = le timbre reste naturel malgré la transposition.");
+addc(0, 7, 400, 504, 28, 0,   "GLISSANDO", "GLISSANDO : temps pour glisser d'une hauteur à l'autre (0 = instantané).");
+addc(0, 8, 540, 504, 28, 0,   "GRAIN",     "GRAIN : taille des morceaux de son découpés. Court = réactif, long = plus propre dans les graves.");
+addc(0, 9, 680, 504, 28, 0,   "DOUCEUR",   "DOUCEUR : lissage du timbre. Haut = timbre plus flou et stable, bas = plus précis.");
+
+u_drag = -1;
+u_lastdown = 0;
+u_lct = -100;
+u_lci = -1;
+u_dnv = 0;
+u_lasty = 0;
+
+@slider
+derive();
+pdc_delay = dryD;
+pdc_bot_ch = 0;
+pdc_top_ch = 2;
+
+@block
+derive();
+dryD != lastdryD ? ( pdc_delay = dryD; lastdryD = dryD; );
+
+@sample
+inL0 = spl0;
+inR0 = spl1;
+
+// --- LFO pitch ---
+lfoP += incP;
+lfoP >= 1 ? ( lfoP -= 1; rndP = rand(2) - 1; );
+m = pDepth * lfoval(pShape, lfoP, rndP);
+pQuant ? m = floor(m + 0.5);
+curP += (pShift + pFine * 0.01 + m - curP) * coef;
+r = exp(curP * 0.05776226504666);
+
+// --- LFO formants ---
+lfoF += incF;
+lfoF >= 1 ? ( lfoF -= 1; rndF = rand(2) - 1; );
+curF += (fShift + fDepth * lfoval(fShape, lfoF, rndF) - curF) * coef;
+fst = curF - (fMode ? curP : 0);   // mode "préservée" : compense le décalage dû au pitch
+fr = min(max(exp(fst * 0.05776226504666), 0.2), 5);
+
+// --- étage pitch (2 têtes croisées) ---
+ph += (1 - r) / W;
+ph >= 1 ? ph -= 1;
+ph < 0 ? ph += 1;
+phB = ph + 0.5;
+phB >= 1 ? phB -= 1;
+sA = sin($pi * ph);  gA = sA * sA;
+sB = sin($pi * phB); gB = sB * sB;
+dA = ph * W + 1;
+dB = phB * W + 1;
+
+wetL = gA * rd(offL, dA) + gB * rd(offL, dB);
+wetR = gA * rd(offR, dA) + gB * rd(offR, dB);
+
+offL[wp] = inL0 + wetL * fbk;
+offR[wp] = inR0 + wetR * fbk;
+dryL[wp] = inL0;
+dryR[wp] = inR0;
+
+// --- étage formants (STFT) ---
+oL = olaL[ip];
+oR = olaR[ip];
+olaL[ip] = 0;
+olaR[ip] = 0;
+sbL[ip] = wetL;
+sbR[ip] = wetR;
+ip = (ip + 1) & nm;
+(ip & hm) == 0 ? (
+  procch(sbL, olaL, ip, fr);
+  procch(sbR, olaR, ip, fr);
+);
+
+// --- sortie ---
+dL = rd(dryL, dryD);
+dR = rd(dryR, dryD);
+wp = (wp + 1) & mask;
+
+spl0 = dL * (1 - mix) + oL * mix;
+spl1 = dR * (1 - mix) + oR * mix;
+
+@gfx 820 600
+// espace de conception 820 x 600, mis à l'échelle selon la taille de la fenêtre
+sc = min(gfx_w / 820, gfx_h / 600);
+sc = max(0.5, min(sc, 3));
+ox = (gfx_w - 820 * sc) * 0.5;
+oy = (gfx_h - 600 * sc) * 0.5;
+tm = time_precise();
+
+gfx_setfont(1, "Arial", floor(13 * sc + 0.5), 'b');
+gfx_setfont(2, "Arial", floor(11 * sc + 0.5));
+gfx_setfont(3, "Arial", floor(20 * sc + 0.5), 'b');
+
+u_down = (mouse_cap & 1) ? 1 : 0;
+u_press = (u_down && !u_lastdown) ? 1 : 0;
+u_hovci = -1;
+
+// ---------- fond uni ----------
+gfx_set(0.11, 0.11, 0.12, 1);
+gfx_rect(0, 0, gfx_w, gfx_h);
+
+// ---------- titre ----------
+gfx_setfont(3);
+gfx_set(0.92, 0.92, 0.94, 1);
+txtl("MANIPULATOR", ox + 30 * sc, oy + 30 * sc);
+gfx_setfont(2);
+gfx_set(0.55, 0.55, 0.60, 1);
+txtl("Hauteur  ·  Timbre  ·  Spirale", ox + 30 * sc, oy + 54 * sc);
+
+// ---------- panneaux ----------
+u_i = 0;
+loop(3,
+  u_i == 0 ? ( u_px = 30;  u_py = 222; u_pw = 370; u_pph = 185; ) :
+  u_i == 1 ? ( u_px = 420; u_py = 222; u_pw = 370; u_pph = 185; ) :
+             ( u_px = 30;  u_py = 420; u_pw = 760; u_pph = 150; );
+  gfx_set(0.15, 0.15, 0.17, 1);
+  gfx_rect(ox + u_px * sc, oy + u_py * sc, u_pw * sc, u_pph * sc);
+  gfx_set(0.24, 0.24, 0.27, 1);
+  gfx_roundrect(ox + u_px * sc, oy + u_py * sc, u_pw * sc, u_pph * sc, 0, 0);
+  u_i += 1;
+);
+
+gfx_setfont(2);
+gfx_set(0.62, 0.62, 0.68, 1);
+txtl("VIBRATO  ·  la hauteur ondule", ox + 45 * sc, oy + 236 * sc);
+txtl("WAH-VOIX  ·  le timbre ondule", ox + 435 * sc, oy + 236 * sc);
+txtl("RÉGLAGES AVANCÉS", ox + 45 * sc, oy + 434 * sc);
+
+// ---------- contrôles ----------
+u_ci = 0;
+loop(nctl,
+  u_ty  = c_type[u_ci];
+  u_p   = c_par[u_ci];
+  u_x   = ox + c_x[u_ci] * sc;
+  u_y   = oy + c_y[u_ci] * sc;
+  u_w   = c_w[u_ci] * sc;
+  u_h   = c_h[u_ci] * sc;
+  u_mn  = pmin[u_p];
+  u_mx  = pmax[u_p];
+  u_msk = pow(2, u_p - 1);
+  u_v   = getsl(u_p);
+
+  u_ty == 0 ? (
+    // ===== bouton rotatif =====
+    u_R = u_w;
+    u_dx = mouse_x - u_x;
+    u_dy = mouse_y - u_y;
+    u_hov = (u_dx * u_dx + u_dy * u_dy) <= (u_R * 1.08) * (u_R * 1.08);
+    u_hov ? (u_hovci = u_ci);
+
+    // clic : remise à zéro (double-clic, Ctrl/Cmd ou Alt) ou début de glissement
+    (u_press && u_hov) ? (
+      ((mouse_cap & 4) || (mouse_cap & 16) || (tm - u_lct < 0.35 && u_lci == u_ci)) ? (
+        setsl(u_p, pdef[u_p]);
+        sliderchange(u_msk);
+        slider_automate(u_msk);
+        slider_automate(u_msk, 1);
+        u_lct = -100;
+      ) : (
+        u_nv = plog[u_p] ? log(u_v / u_mn) / log(u_mx / u_mn) : (u_v - u_mn) / (u_mx - u_mn);
+        u_drag = u_ci;
+        u_dnv = max(0, min(1, u_nv));
+        u_lasty = mouse_y;
+        u_lct = tm;
+        u_lci = u_ci;
+      );
+    );
+
+    // glissement vertical (Maj = précision)
+    (u_drag == u_ci && u_down) ? (
+      u_dnv += (u_lasty - mouse_y) * ((mouse_cap & 8) ? 0.0007 : 0.006);
+      u_lasty = mouse_y;
+      u_dnv = max(0, min(1, u_dnv));
+      u_nw = plog[u_p] ? u_mn * exp(u_dnv * log(u_mx / u_mn)) : u_mn + u_dnv * (u_mx - u_mn);
+      pstep[u_p] > 0 ? (u_nw = floor(u_nw / pstep[u_p] + 0.5) * pstep[u_p]);
+      u_nw = max(u_mn, min(u_mx, u_nw));
+      u_nw != u_v ? (
+        setsl(u_p, u_nw);
+        sliderchange(u_msk);
+        slider_automate(u_msk);
+      );
+      u_hovci = u_ci;
+    );
+
+    // molette
+    (u_hov && mouse_wheel != 0) ? (
+      u_dir = mouse_wheel > 0 ? 1 : -1;
+      u_nw = plog[u_p] ? u_v * (u_dir > 0 ? 1.1 : 0.909) : u_v + u_dir * max(pstep[u_p], (u_mx - u_mn) * 0.01);
+      pstep[u_p] > 0 ? (u_nw = floor(u_nw / pstep[u_p] + 0.5) * pstep[u_p]);
+      u_nw = max(u_mn, min(u_mx, u_nw));
+      u_nw != u_v ? (
+        setsl(u_p, u_nw);
+        sliderchange(u_msk);
+        slider_automate(u_msk);
+        slider_automate(u_msk, 1);
+      );
+    );
+
+    // valeur à jour après interaction
+    u_v = getsl(u_p);
+    u_nv = plog[u_p] ? log(u_v / u_mn) / log(u_mx / u_mn) : (u_v - u_mn) / (u_mx - u_mn);
+    u_nv = max(0, min(1, u_nv));
+    u_act = (u_hov || u_drag == u_ci) ? 1 : 0;
+
+    // piste de l'arc (gris) puis arc de valeur (depuis le centre pour les réglages bipolaires)
+    u_bip = (u_mn < 0 && u_mx > 0) ? 1 : 0;
+    u_f0 = u_bip ? (0 - u_mn) / (u_mx - u_mn) : 0;
+    u_lo = min(u_f0, u_nv);
+    u_hi = max(u_f0, u_nv);
+    u_rr = u_R - 3 * sc;
+
+    gfx_set(0.26, 0.26, 0.30, 1);
+    u_j = 0;
+    loop(3,
+      gfx_arc(u_x, u_y, u_rr - u_j * sc * 0.8, -2.356, 2.356, 1);
+      u_j += 1;
+    );
+
+    (u_hi - u_lo) > 0.002 ? (
+      u_act ? gfx_set(0.45, 0.82, 0.74, 1) : gfx_set(0.36, 0.70, 0.62, 1);
+      u_j = 0;
+      loop(3,
+        gfx_arc(u_x, u_y, u_rr - u_j * sc * 0.8, -2.356 + u_lo * 4.712, -2.356 + u_hi * 4.712, 1);
+        u_j += 1;
+      );
+    );
+
+    // corps du bouton
+    gfx_set(0.19, 0.19, 0.22, 1);
+    gfx_circle(u_x, u_y, u_R - 9 * sc, 1, 1);
+    gfx_set(0.30, 0.30, 0.34, 1);
+    gfx_circle(u_x, u_y, u_R - 9 * sc, 0, 1);
+
+    // aiguille
+    u_ang = -2.356 + u_nv * 4.712;
+    u_sn = sin(u_ang);
+    u_cs = cos(u_ang);
+    u_pr0 = u_R * 0.15;
+    u_pr1 = u_R - 13 * sc;
+    gfx_set(0.93, 0.93, 0.95, 1);
+    u_j = -1;
+    loop(3,
+      gfx_line(u_x + u_sn * u_pr0 + u_cs * u_j * 0.7 * sc, u_y - u_cs * u_pr0 + u_sn * u_j * 0.7 * sc,
+               u_x + u_sn * u_pr1 + u_cs * u_j * 0.7 * sc, u_y - u_cs * u_pr1 + u_sn * u_j * 0.7 * sc, 1);
+      u_j += 1;
+    );
+
+    // légende et valeur
+    gfx_setfont(1);
+    gfx_set(0.88, 0.88, 0.91, 1);
+    txtc(c_lab[u_ci], u_x, u_y + u_R + 11 * sc);
+    fmtval(u_p, u_v);
+    gfx_setfont(2);
+    gfx_set(0.55, 0.78, 0.72, 1);
+    txtc(#vt, u_x, u_y + u_R + 27 * sc);
+  ) : (
+    // ===== choix (puces) =====
+    u_n = u_mx - u_mn + 1;
+    u_cwid = u_w / u_n;
+    u_hov = (mouse_x >= u_x && mouse_x < u_x + u_w && mouse_y >= u_y && mouse_y < u_y + u_h) ? 1 : 0;
+    u_hov ? (u_hovci = u_ci);
+
+    (u_press && u_hov) ? (
+      u_k = floor((mouse_x - u_x) / u_cwid);
+      u_k = max(0, min(u_n - 1, u_k));
+      setsl(u_p, u_mn + u_k);
+      sliderchange(u_msk);
+      slider_automate(u_msk);
+      slider_automate(u_msk, 1);
+    );
+
+    u_cur = getsl(u_p) - u_mn;
+
+    // légende au-dessus des puces
+    c_lab[u_ci] >= 0 ? (
+      gfx_setfont(2);
+      gfx_set(0.62, 0.62, 0.68, 1);
+      txtl(c_lab[u_ci], u_x, u_y - 11 * sc);
+    );
+
+    u_k = 0;
+    loop(u_n,
+      u_cx0 = u_x + u_k * u_cwid;
+      u_k == u_cur ? (
+        gfx_set(0.36, 0.70, 0.62, 1);
+        gfx_rect(u_cx0 + 1, u_y, u_cwid - 2, u_h);
+        gfx_set(0.07, 0.10, 0.09, 1);
+      ) : (
+        gfx_set(0.21, 0.21, 0.24, 1);
+        gfx_rect(u_cx0 + 1, u_y, u_cwid - 2, u_h);
+        gfx_set(0.80, 0.80, 0.85, 1);
+      );
+      gfx_setfont(2);
+      txtc(optb[u_p * 6 + u_k], u_cx0 + u_cwid * 0.5, u_y + u_h * 0.5);
+      u_k += 1;
+    );
+
+    u_hov ? (
+      gfx_set(0.7, 0.7, 0.75, 1);
+      gfx_roundrect(u_x, u_y, u_w, u_h, 0, 0);
+    );
+  );
+  u_ci += 1;
+);
+
+// fin de glissement
+(!u_down && u_drag >= 0) ? (
+  slider_automate(pow(2, c_par[u_drag] - 1), 1);
+  u_drag = -1;
+);
+
+// ---------- barre d'aide ----------
+gfx_setfont(2);
+u_hovci >= 0 ? (
+  gfx_set(0.90, 0.90, 0.92, 1);
+  txtc(c_hint[u_hovci], ox + 410 * sc, oy + 588 * sc);
+) : (
+  gfx_set(0.50, 0.50, 0.56, 1);
+  txtc("Glisser : régler  ·  Maj : précision  ·  Double-clic : remise à zéro  ·  Molette : pas à pas", ox + 410 * sc, oy + 588 * sc);
+);
+
+u_lastdown = u_down;
+mouse_wheel = 0;
+
