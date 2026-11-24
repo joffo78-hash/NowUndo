@@ -19,8 +19,8 @@ L'utilisateur est francophone (tutoiement), musicien, teste tout lui-même dans 
   | `Virtual_Launchpad_secondary.lua` | Miroir (3 pages non affichées), charge `virtuallaunchpad_main.lua` en `mirror_mode`. |
   | `twisterinoutreset.lua` | Midi Fighter Twister v3.5 (8 pages, page 7 Custom, page 8 Display, sélection d'effet FX Router). |
   | `nowundo_midi_learn.lua` | MIDI Learn v2.8 + raccourcis clavier (js_ReaScriptAPI), cumul clavier/MIDI, double appui. Écoute aussi le **MIDI des rushes** (table `RL`, V3.27). |
-  | `NowUndo_8Looper_Panel.lua` | Panneau 8 loopers + import de fichiers audio (glisser-déposer, modes Adapter / Indépendant / Étirer). |
-  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, fond de la forme d'onde teinté de la couleur du looper (arrêt, et un peu plus sombre en lecture : plus de noir), cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées ; étiquette : L n (partie seulement si ≠ MAIN) + sources entre parenthèses + état + REVERSE / SLICE / CLOUD + SP (speed ≠ 1) / PS (pitch ≠ 0) + « FX n » en rose ; M / S / F tout à droite ; VU vertical d'entrée à gauche (`+172`) et de sortie à droite (`+173`) ; état MUTE (`+199`) ; saturation de **tout le cadre** = Out Vol (`+22`) : 0 dB couleur pleine → -40 dB noir et blanc, courbe ^1.5, gris un peu assombri, textes / tête gardent une luminosité ≥ 0,8 ; Mute = noir et blanc ; VU d'entrée et cadre de groupe restent en couleur). Pas de paramètres, sources ni boutons ; **interactif depuis le 21 nov.** (voir « 8Waves interactif »). Fenêtre `NowUndo_8Waves`. |
+  | `NowUndo_8Looper_Panel.lua` | **OBSOLÈTE (24 nov.)** : ancien panneau 8 loopers. L'import de fichiers audio a été porté dans **8Waves** (voir `IMP` dans `NowUndo_8Waves.lua`). Gardé dans le dépôt, ne plus le modifier. |
+  | `NowUndo_8Waves.lua` | Variante du 8 Panel : les 8 formes d'onde empilées, pleine largeur, affichage seul (couleurs d'état, Cloud + zone des grains, Slicer + slices, sync point, In/Out, tête, fond de la forme d'onde teinté de la couleur du looper (arrêt, et un peu plus sombre en lecture : plus de noir), cadre + fond teinté de la sélection / du groupe autour de la zone In/Out seulement, parties hors In/Out grisées ; étiquette : L n (partie seulement si ≠ MAIN) + sources entre parenthèses + état + REVERSE / SLICE / CLOUD + SP (speed ≠ 1) / PS (pitch ≠ 0) + « FX n » en rose ; M / S / F tout à droite ; VU vertical d'entrée à gauche (`+172`) et de sortie à droite (`+173`) ; état MUTE (`+199`) ; saturation de **tout le cadre** = Out Vol (`+22`) : 0 dB couleur pleine → -40 dB noir et blanc, courbe ^1.5, gris un peu assombri, textes / tête gardent une luminosité ≥ 0,8 ; Mute = noir et blanc ; VU d'entrée et cadre de groupe restent en couleur). Pas de paramètres, sources ni boutons ; **interactif depuis le 21 nov.** (voir « 8Waves interactif ») ; **import de fichiers audio depuis le 24 nov.** (voir ci-dessous). Fenêtre `NowUndo_8Waves`. |
   | `NowUndo_Scenario.lua` | Séquenceur de scénarios + **Rushes** (ex « macros ») : éditeur, assistant, palette ; V3.27 : cibles dans les rushes, sous-pages de la page 4 (+ PAGE / NOM / SUPPR), MIDI par rush, modèle de démarrage. |
   | `NowUndo_Twister_Web.lua` | Pont gmem ↔ ExtState pour l'onglet Twister In/Out et l'onglet **Loopers** du web. |
   | `NowUndo_Latency.lua` | Réglage global de la compensation de latence (V3.23). |
@@ -156,6 +156,19 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   confirmé 24 nov.) : `NU_BBD_Delay`, `NU_Stutter`, `NU_Manipulator_Formant` ajoutés dans `NowUndo/Effects/` (copies du fichier de
   l'utilisateur + en-tête `author/version/changelog` pour ReaPack, DSP inchangé, même ordre de réglages). **Licence : MIT** (choisie par l'utilisateur le 24 nov., fichier `LICENSE` à la racine, copyright « 2026 joffo78 » ; vaut pour tout le dépôt, les effets de tiers ne sont pas inclus et gardent leur licence). Restent : `16rec` (pas reçu), delay NU éventuel
   (origine de bbddelay inconnue → l'utilisateur dit qu'il est à lui, à confirmer).
+
+## 24 nov. : import de fichiers audio dans 8Waves (le 8 Looper Panel est abandonné)
+
+- Demande : « adapter toutes les fonctions d'import de fichier audio du 8 Panel au 8 Waveform, le premier étant obsolète ».
+- `NowUndo_8Waves.lua` : table `IMP` (moteur repris à l'identique du 8 Panel : protocole gmem `LD_BASE = 1000000`, commandes
+  `+48` = 32 requête de longueur puis 31 copie, lecture par petits blocs, modes 1 Adapter / 2 Indépendant / 3 Étirer en
+  Hermite, tronqué à la capacité, 1er fichier sans maître = tempo du projet via `SetCurrentBPM`). **Glisser-déposer** sur la
+  ligne d'un looper actif (une ligne = un looper ; un seul fichier à la fois, les autres sont ignorés avec un message) ; **clic droit sur une
+  ligne** = menu : « Charger un fichier audio dans le looper N… » (sélecteur REAPER `GetUserFileNameForRead`) + les 3 modes
+  (coché = actif, mémorisé dans `NowUndo_8Waves/load_mode`, repris de `NowUndo_8Looper_Panel/load_mode` au 1er lancement).
+  Bandeau d'état en haut au centre (progression, résultat). Menu sans séparateur ni ligne grisée (la numérotation de
+  `gfx.showmenu` reste 1..4). Test `tools/t8waves_import.lua` (faux reaper + faux JSFX) ; `tools/t8waves_ui.lua` inchangé OK.
+  **Non testé dans REAPER** (décodage réel d'un fichier, glisser-déposer de l'explorateur).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 

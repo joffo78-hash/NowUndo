@@ -3,7 +3,8 @@
 -- Meme lecture gmem et memes codes que le 8 Looper Panel : couleur d'etat de la forme d'onde (verte en lecture, bleue
 -- en Cloud), zone des grains du Cloud, cadre jaune du Slicer / bleu du Cloud, slices, sync point, In / Out, tete de
 -- lecture, cadre de selection (jaune) et de groupe (couleur du groupe, clignote si selectionne).
--- Pas de parametres, pas de sources, pas de boutons : affichage seul. La fenetre se redimensionne librement.
+-- Pas de parametres, pas de sources, pas de boutons. La fenetre se redimensionne librement.
+-- Import de fichiers audio (glisser-deposer / clic droit sur une ligne) : voir IMP plus bas.
 
 local MAX_INST = 8
 local DASH_BASE = 6000
@@ -414,6 +415,214 @@ function UI.tick(ch)
   if want ~= UI.cur then UI.cur = want; if gfx.setcursor then gfx.setcursor(want) end end
 end
 
+-- ============================================================================================================
+-- IMPORT D'UN FICHIER AUDIO (repris du 8 Looper Panel, qui est abandonne) : glisser un son sur la ligne d'un looper,
+-- ou clic droit sur la ligne > « Charger un fichier audio... ». Le fichier est decode par REAPER (tous formats lisibles),
+-- reechantillonne a la frequence du looper, depose dans gmem, puis copie par le looper dans sa boucle ; le looper reste
+-- a l'ARRET. S'il n'y a pas de maitre il le devient (comme un 1er REC) et le fichier fixe le tempo du projet.
+-- Si une synchro est active ET qu'une boucle tourne dans un autre looper, le mode choisi (menu du clic droit) s'applique :
+--   1 ADAPTER (longueur arrondie au multiple du maitre) | 2 INDEPENDANT (longueur d'origine, sans synchro)
+--   3 ETIRER (reechantillonne a la bonne longueur)
+-- Meme protocole gmem que le 8 Panel : LD_BASE, commandes +48 = 32 (requete de longueur) puis 31 (copie).
+-- ============================================================================================================
+local IMP = { LD_BASE = 1000000, LD_MAXN = 3500000, CHUNK = 16384, msg = "", msg_t = 0, rdown = false, job = nil }
+IMP.NAMES = { "ADAPTER", "INDEPENDANT", "ETIRER" }
+do
+  local m = tonumber(reaper.GetExtState(EXT, "load_mode"))
+  if not m or m == 0 then m = tonumber(reaper.GetExtState("NowUndo_8Looper_Panel", "load_mode")) end   -- reprend le choix du 8 Panel
+  IMP.mode = math.max(1, math.min(3, math.floor(m or 1)))
+end
+function IMP.say(m) IMP.msg = m; IMP.msg_t = reaper.time_precise() end
+function IMP.alive(i, now_t) return read(100, i) > 0 and (now_t - read(130, i)) <= 3.0 end
+function IMP.block(i)                                                -- base gmem de la part ACTIVE de l'instance i
+  local b0 = 1000 + i * 600; local ap = math.floor(read(b0, 42) + .5); local pp = (ap >= 1 and ap <= 3) and (ap - 1) or 0
+  return b0 + pp * 200
+end
+function IMP.cleanup(J)
+  if J.acc then pcall(reaper.DestroyAudioAccessor, J.acc); J.acc = nil end
+  if J.tr then pcall(reaper.DeleteTrack, J.tr); J.tr = nil; J.src = nil
+  elseif J.src then pcall(reaper.PCM_Source_Destroy, J.src); J.src = nil end
+end
+function IMP.start(i, path, now_t)
+  if IMP.job then IMP.say("Chargement deja en cours"); return end
+  if not IMP.alive(i, now_t) then IMP.say("Looper " .. (i + 1) .. " absent : fichier ignore"); return end
+  local src = reaper.PCM_Source_CreateFromFile(path)
+  if not src then IMP.say("Fichier illisible"); return end
+  local D, isqn = reaper.GetMediaSourceLength(src)
+  if isqn or not D or D <= 0.01 then reaper.PCM_Source_Destroy(src); IMP.say("Fichier audio invalide"); return end
+  local gb = IMP.block(i)
+  local sr = read(gb, 186); if sr <= 0 then sr = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false); if sr <= 0 then sr = 44100 end end
+  local N = math.floor(D * sr + .5)
+  local qid = math.floor(reaper.time_precise() * 1000) % 1000000 + 1
+  IMP.job = { i = i, gb = gb, src = src, D = D, sr = sr, N = N, qid = qid, phase = "query", t0 = now_t, name = path:match("[^/\\]+$") or path }
+  reaper.gmem_write(IMP.LD_BASE + 1, N); reaper.gmem_write(IMP.LD_BASE + 2, qid); reaper.gmem_write(IMP.LD_BASE + 3, 0)
+  reaper.gmem_write(gb + 49, 0); reaper.gmem_write(gb + 48, 32)          -- cmd 32 : requete de longueur
+end
+function IMP.step(now_t)
+  local J = IMP.job; if not J then return end
+  local LB = IMP.LD_BASE
+  if J.phase == "query" then
+    if read(LB, 3) == J.qid then
+      local has_ref = read(LB, 4) > .5; local Nad = math.floor(read(LB, 5) + .5); local cap = math.floor(read(LB, 7) + .5)
+      -- 0 = natif : aucune reference (pas de maitre / Host). La reference suffit : l'horloge du maitre tourne meme a l'arret.
+      local mode = has_ref and IMP.mode or 0
+      J.had_ref = has_ref
+      local Nf, refm, stretch = J.N, 0, false
+      if mode == 1 then Nf = Nad; refm = 1 elseif mode == 3 then Nf = Nad; refm = 1; stretch = true end
+      if cap > 0 and Nf > cap then Nf = cap; IMP.say("Fichier tronque a la capacite du looper") end
+      J.Nf = Nf; J.ref = refm; J.stretch = stretch; J.mode = mode
+      J.nread = stretch and Nf or math.min(J.N, Nf)
+      J.phase = "read"
+    elseif now_t - J.t0 > 2.0 then
+      IMP.say("Looper " .. (J.i + 1) .. " ne repond pas (JSFX a jour ?)"); IMP.cleanup(J); IMP.job = nil
+    end
+  elseif J.phase == "read" then
+    -- 1) cree la piste / l'item / l'accessor temporaires (rien d'autre dans cette image)
+    local ok = pcall(function()
+      reaper.PreventUIRefresh(1)
+      local n = reaper.CountTracks(0); reaper.InsertTrackAtIndex(n, false); local tr = reaper.GetTrack(0, n); J.tr = tr
+      local item = reaper.AddMediaItemToTrack(tr); local take = reaper.AddTakeToMediaItem(item)
+      reaper.SetMediaItemTake_Source(take, J.src)               -- la source appartient desormais a la piste temporaire
+      reaper.SetMediaItemInfo_Value(item, "D_POSITION", 0); reaper.SetMediaItemInfo_Value(item, "D_LENGTH", J.D)
+      J.acc = reaper.CreateTakeAudioAccessor(take)
+      J.t0 = reaper.GetAudioAccessorStartTime(J.acc)
+      J.sr_req = J.sr                                            -- lecture toujours a la frequence du projet
+      J.buf = reaper.new_array(IMP.CHUNK * 2)
+      if J.stretch then J.r = J.N / J.Nf; J.bufs = reaper.new_array((IMP.CHUNK * 4 + 16) * 2) end
+    end)
+    pcall(reaper.PreventUIRefresh, -1)
+    if not ok or not J.acc or not J.buf then IMP.cleanup(J); IMP.say("Lecture du fichier impossible"); IMP.job = nil; return end
+    J.k = 0; J.phase = "stream"
+  elseif J.phase == "stream" then
+    -- 2) lecture PAR PETITS BLOCS (jamais tout le fichier d'un coup) et ecriture dans gmem
+    local t_end = reaper.time_precise() + 0.008
+    local Lb, Rb = LB + 16, LB + 16 + IMP.LD_MAXN
+    local ok = pcall(function()
+      while J.k < J.Nf and reaper.time_precise() < t_end do
+        local k = J.k; local n = math.min(IMP.CHUNK, J.Nf - k)
+        local nr = 0
+        if J.stretch then
+          -- ETIRER : sortie k..k+n-1 <- entree x = sortie * N/Nf (Hermite 4 points), lue par fenetre a la frequence du projet
+          local r = J.r
+          n = math.max(1, math.min(n, math.floor((IMP.CHUNK * 4) / math.max(r, 0.0001))))
+          local i0 = math.max(0, math.floor(k * r) - 1)
+          local cnt = math.floor((k + n - 1) * r) + 3 - i0
+          reaper.GetAudioAccessorSamples(J.acc, J.sr, 2, J.t0 + i0 / J.sr, cnt, J.bufs)
+          local B = J.bufs
+          local function g(i, c) local j = i - i0; if j < 0 or j >= cnt then return 0 end return B[2 * j + c] end
+          for f = 0, n - 1 do
+            local x = (k + f) * r; local i = math.floor(x); local t = x - i
+            for c = 1, 2 do
+              local y0, y1, y2, y3 = g(i - 1, c), g(i, c), g(i + 1, c), g(i + 2, c)
+              local c1 = 0.5 * (y2 - y0); local c2 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3; local c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2)
+              local v = ((c3 * t + c2) * t + c1) * t + y1
+              reaper.gmem_write((c == 1 and Lb or Rb) + k + f, v)
+            end
+          end
+          nr = n
+        elseif k < J.nread then
+          nr = math.min(n, J.nread - k)
+          reaper.GetAudioAccessorSamples(J.acc, J.sr_req, 2, J.t0 + k / J.sr_req, nr, J.buf)
+        end
+        if not J.stretch then
+          local buf = J.buf
+          for f = 0, nr - 1 do
+            reaper.gmem_write(Lb + k + f, buf[2 * f + 1]); reaper.gmem_write(Rb + k + f, buf[2 * f + 2])
+          end
+          for f = nr, n - 1 do reaper.gmem_write(Lb + k + f, 0); reaper.gmem_write(Rb + k + f, 0) end
+        end
+        J.k = k + n
+      end
+    end)
+    if not ok then IMP.cleanup(J); IMP.say("Lecture du fichier interrompue"); IMP.job = nil; return end
+    if J.k >= J.Nf then J.buf = nil; J.phase = "free_acc" end
+  elseif J.phase == "free_acc" then
+    -- 3) l'accessor est detruit seul, dans sa propre image
+    if J.acc then pcall(reaper.DestroyAudioAccessor, J.acc); J.acc = nil end
+    J.phase = "free_track"
+  elseif J.phase == "free_track" then
+    -- 4) puis la piste temporaire (elle detruit aussi la source) dans une autre image
+    if J.tr then pcall(reaper.DeleteTrack, J.tr); J.tr = nil; J.src = nil end
+    reaper.gmem_write(LB + 8, J.Nf); reaper.gmem_write(LB + 9, J.ref); reaper.gmem_write(LB + 10, 0)
+    reaper.gmem_write(J.gb + 49, 0); reaper.gmem_write(J.gb + 48, 31)   -- cmd 31 : copie dans la boucle
+    J.phase = "wait"; J.t1 = now_t
+  elseif J.phase == "wait" then
+    if read(LB, 10) == J.qid then
+      local how = (J.mode == 1) and " (adapte)" or (J.mode == 3 and " (etire)" or (J.mode == 2 and " (independant)" or ""))
+      IMP.say(string.format("Looper %d : %s charge, %.2f s%s", J.i + 1, J.name, J.Nf / J.sr, how))
+      -- Premier fichier (aucune reference : il devient le maitre) -> il fixe le tempo du projet REAPER
+      if not J.had_ref then J.phase = "tempo"; J.t2 = now_t else IMP.job = nil end
+    elseif now_t - J.t1 > 30 then
+      IMP.say("Looper " .. (J.i + 1) .. " : chargement non termine"); IMP.job = nil
+    end
+  elseif J.phase == "tempo" then
+    -- tempo musical estime par le looper (nombre de temps le plus plausible pour cette longueur), publie a +155
+    local bpm = read(J.gb, 155)
+    if bpm > 20 and bpm < 400 then
+      reaper.SetCurrentBPM(0, bpm, true)
+      IMP.say(string.format("Looper %d : %s charge, tempo du projet = %.2f BPM", J.i + 1, J.name, bpm)); IMP.job = nil
+    elseif now_t - J.t2 > 1.5 then IMP.job = nil end
+  end
+end
+-- depot de fichiers + clic droit (menu) + etat affiche ; appele a chaque image apres le dessin des lignes
+function IMP.tick(now_t, w, h)
+  local mx, my = gfx.mouse_x, gfx.mouse_y
+  -- glisser-deposer : gfx.getdropfile(idx) renvoie DEUX valeurs (retval, nom) ; retval vaut 0 quand il n'y a (plus) rien
+  local rv0 = gfx.getdropfile(0)
+  if rv0 and rv0 ~= 0 then
+    local files, k = {}, 0
+    while k < 64 do
+      local rv, f = gfx.getdropfile(k)
+      if not rv or rv == 0 or not f or f == "" then break end
+      files[#files + 1] = f; k = k + 1
+    end
+    gfx.getdropfile(-1)
+    local i = UI.row_at(mx, my)
+    if i and files[1] then
+      IMP.start(i, files[1], now_t)
+      if #files > 1 then IMP.say("Un seul fichier a la fois : " .. (#files - 1) .. " ignore(s)") end
+    else IMP.say("Deposez le fichier sur la ligne d'un looper actif") end
+  end
+  -- clic droit sur une ligne : charger un fichier / choisir le mode
+  local rd = (gfx.mouse_cap & 2) == 2
+  if rd and not IMP.rdown then
+    local i, R = UI.row_at(mx, my)
+    if R then
+      -- pas de separateur ni de ligne grisee : la numerotation de gfx.showmenu reste 1, 2, 3, 4
+      local items = { "Charger un fichier audio dans le looper " .. (i + 1) .. "...",
+                      "Si une boucle tourne deja : ADAPTER la longueur (multiple du maitre)",
+                      "Si une boucle tourne deja : fichier INDEPENDANT (longueur d'origine)",
+                      "Si une boucle tourne deja : ETIRER a la bonne longueur" }
+      items[1 + IMP.mode] = "!" .. items[1 + IMP.mode]
+      gfx.x, gfx.y = mx, my
+      local c = gfx.showmenu(table.concat(items, "|"))
+      if c == 1 then
+        local ok, path = reaper.GetUserFileNameForRead("", "Charger un fichier audio dans le looper " .. (i + 1), "")
+        if ok and path and path ~= "" then IMP.start(i, path, reaper.time_precise()) end
+      elseif c >= 2 and c <= 4 then
+        IMP.mode = c - 1; reaper.SetExtState(EXT, "load_mode", tostring(IMP.mode), true)
+        IMP.say("Fichier : " .. IMP.NAMES[IMP.mode])
+      end
+    end
+  end
+  IMP.rdown = rd
+  IMP.step(now_t)
+  -- etat du chargement / message (bandeau en haut, au centre)
+  local msg
+  local J = IMP.job
+  if J then
+    local pct = J.phase == "stream" and math.floor(100 * (J.k or 0) / math.max(1, J.Nf or 1)) or 0
+    msg = string.format("Chargement looper %d : %s  %s", J.i + 1, J.name, J.phase == "stream" and (pct .. "%") or J.phase)
+  elseif now_t - IMP.msg_t < 5 and IMP.msg ~= "" then msg = IMP.msg end
+  if msg then
+    setfont(13, true)
+    local tw = gfx.measurestr(msg)
+    local bx, by = (w - tw) * .5 - 10, 4
+    rect(bx, by, tw + 20, 24, .05, .05, .07, .92, 1); rect(bx, by, tw + 20, 24, 1, .85, .35, 1, 0)
+    text(bx + 10, by + 5, msg, 13, 1, .85, .35, true)
+  end
+end
+
 local function main()
   local ch = gfx.getchar(); if ch < 0 then return end
   win_save()
@@ -425,6 +634,7 @@ local function main()
   local m, gap = 6, 4
   local rh = (h - 2 * m - gap * (MAX_INST - 1)) / MAX_INST
   for i = 0, MAX_INST - 1 do draw_row(i, m, m + i * (rh + gap), w - 2 * m, rh, now_t) end
+  IMP.tick(now_t, w, h)
   gfx.update(); reaper.defer(main)
 end
 
