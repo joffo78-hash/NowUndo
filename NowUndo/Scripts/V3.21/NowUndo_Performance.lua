@@ -430,6 +430,29 @@ function P.grid_build(mode)                                     -- mode : "measu
       end
     end
   end
+  pcall(function()                                                  -- rapport de la grille (pour diagnostic)
+    local out = { "Dripsody grille (" .. mode .. ")", string.format("pos0 = %.4f ; zone reconstruite depuis b_a = %.4f s", pos0, b_a), "", "SEGMENTS" }
+    for i, sg in ipairs(segs) do
+      out[#out + 1] = string.format("  %d  cle=%s  L=%.6f s  N=%d temps  q=%d/4  bpm=%.4f  t0=%.4f  t1=%.4f  T0=%.6f  1er cycle c0=%.6f", i, sg.key, sg.L, sg.N, sg.q, sg.bpm, sg.t0, sg.t1, sg.T0, sg.c0)
+    end
+    out[#out + 1] = ""; out[#out + 1] = "MARQUEURS POSES (instant, bpm, signature)"
+    for _, x in ipairs(plan) do out[#out + 1] = string.format("  %.6f  %.4f BPM  %d/4", x.t, x.bpm, x.num) end
+    out[#out + 1] = ""; out[#out + 1] = "CARTE DE TEMPO RELUE"
+    for i = 0, R.CountTempoTimeSigMarkers(0) - 1 do
+      local _, tp, mp, bp, bpm, num, den = R.GetTempoTimeSigMarker(0, i)
+      out[#out + 1] = string.format("  %d  t=%.6f  mesure=%s temps=%s  %.4f BPM  sig %s/%s", i, tp, tostring(mp), tostring(bp), bpm, tostring(num), tostring(den))
+    end
+    out[#out + 1] = ""; out[#out + 1] = "DEPARTS DE CYCLE (temps dans la mesure ; 0 = premier temps)"
+    for i, sg in ipairs(segs) do
+      for k = 0, 4 do
+        local c = sg.c0 + k * sg.L
+        local b, m, cml = R.TimeMap2_timeToBeats(0, c)
+        out[#out + 1] = string.format("  seg %d cycle %d  t=%.6f  mesure=%s  temps=%.5f  (mesure de %s temps)", i, k, c, tostring(m), b, tostring(cml))
+      end
+    end
+    local f = io.open(R.GetResourcePath() .. "/Dripsody_Perf_grid.txt", "w")
+    if f then f:write(table.concat(out, "\n")); f:close() end
+  end)
   return #plan, worst * 1000, moved, #segs
 end
 -- bouton : essaie la pose par mesure ; si les departs de cycle ne tombent pas sur un 1er temps (> 2 ms), refait avec la pose par instant
@@ -589,6 +612,10 @@ function P.post()
   for _, sg in ipairs(P.segs) do lines[#lines + 1] = string.format("C\t%s\t%.6f\t%.6f\t%.4f\t%.4f", sg.key, sg.T0, sg.L, sg.t0, sg.t1) end
   for _, e in ipairs(P.events) do lines[#lines + 1] = "E\t" .. e end
   R.SetProjExtState(0, "Dripsody_Perf", "log", table.concat(lines, "\n"))
+  pcall(function()                                                  -- copie lisible dans le dossier de REAPER (pour diagnostic)
+    local f = io.open(R.GetResourcePath() .. "/Dripsody_Perf_log.txt", "w")
+    if f then f:write(table.concat(lines, "\n")); f:close() end
+  end)
   R.UpdateArrange()
   P.msg = string.format("Termine : %d morceau(x), %d item(s) regle(s) en base de temps.", #P.songs, n)
   if #manquants > 0 then P.msg = "ATTENTION : rien d'enregistre pour : " .. table.concat(manquants, ", ") end
