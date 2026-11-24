@@ -216,7 +216,7 @@ function P.post()
   local lines = { "Dripsody_Perf v1" }
   for _, s in ipairs(P.songs) do lines[#lines + 1] = string.format("S\t%d\t%.4f\t%.4f", s.n, s.start, s.stop or s.start) end
   for _, e in ipairs(P.events) do lines[#lines + 1] = "E\t" .. e end
-  R.SetProjectExtState(0, "Dripsody_Perf", "log", table.concat(lines, "\n"))
+  R.SetProjExtState(0, "Dripsody_Perf", "log", table.concat(lines, "\n"))
   R.UpdateArrange()
   P.msg = string.format("Termine : %d morceau(x), %d item(s) regle(s) en base de temps.", #P.songs, n)
 end
@@ -273,11 +273,12 @@ local function main()
   elseif P.active then
     if (ps & 4) == 0 then P.stop(true)                                  -- arret par REAPER (barre espace...) : on termine proprement
     else
-      if now - P.t_rule >= 0.05 then P.t_rule = now; P.rules() end
-      if now - P.t_region >= 0.25 then P.t_region = now; P.grow_region(R.GetPlayPosition()) end
+      -- pcall : une erreur ne doit jamais couper la logique en plein concert (elle est affichee dans la fenetre)
+      if now - P.t_rule >= 0.05 then P.t_rule = now; local ok, e = pcall(P.rules); if not ok then P.msg = "Erreur : " .. tostring(e) end end
+      if now - P.t_region >= 0.25 then P.t_region = now; local ok, e = pcall(P.grow_region, R.GetPlayPosition()); if not ok then P.msg = "Erreur : " .. tostring(e) end end
     end
   end
-  if P.post_t and now >= P.post_t then P.post_t = nil; P.post() end
+  if P.post_t and now >= P.post_t then P.post_t = nil; local ok, e = pcall(P.post); if not ok then P.msg = "Erreur a l'ecriture du journal : " .. tostring(e) end end
   if ch >= 0 then draw() end
   gfx.update()
   if ch < 0 and not (P.active or P.starting or P.post_t) then return end   -- fenetre fermee hors enregistrement : fin du script

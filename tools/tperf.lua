@@ -17,7 +17,7 @@ reaper = {
   TimeMap_GetDividedBpmAtTime = function() return MK[#MK].bpm end,
   CountTempoTimeSigMarkers = function() return #MK end,
   SetTempoTimeSigMarker = function(_, _, t, _, _, b) MK[#MK + 1] = { t = t, bpm = b }; return true end,
-  UpdateTimeline = function() end, UpdateArrange = function() end, SetProjectExtState = function(_, s, k, v) PROJ[k] = v end,
+  UpdateTimeline = function() end, UpdateArrange = function() end, SetProjExtState = function(_, s, k, v) PROJ[k] = v; return 0 end,
   CountTrackMediaItems = function() return 0 end, GetTrackMediaItem = function() return nil end,
   defer = function(f) DEFER = f end, atexit = function() end }
 gfx = setmetatable({ w = 420, h = 200, mouse_x = 0, mouse_y = 0, mouse_cap = 0 }, { __index = function() return function() return 0 end end })
