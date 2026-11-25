@@ -267,6 +267,21 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Essai jetable** `tools/Dripsody_PerfSpike.lua` (à lancer dans un projet vide, ~12 s) : arme / désarme / réarme des pistes en cours d'enregistrement, pose un
   marqueur 5/4, teste `SetCurrentBPM` avec un marqueur, crée et agrandit une région ; rapport `Dripsody_Spike_Report.txt`. Attendre ses résultats avant de coder.
 
+## 25 nov. : page MIDI Learn rationalisée = onglets par catégorie + une cible par looper (non testé dans REAPER)
+
+- Demande de l'utilisateur : « page indigeste » ; **Aux supprimé** (il n'y en avait aucune d'affectée) ; onglets **Transport / Playback / Loop / Slicer / Cloud / Output**
+  (+ **Pages**, **Twister**, **Autres**) ; dans chaque onglet, chaque fonction a un learn **Sélection** puis **L1..L8** ; **règle : un looper qui appartient à un
+  groupe fait suivre tout le groupe** quand on change sa valeur (sauf « inhibe groupe » maintenu et sauf `Restart Ln`, volontairement individuel).
+- `nowundo_midi_learn.lua` : `TABS`, `TAB_SLOTS`, `ACT_TAB` / `PAR_TAB` (onglet de chaque cible), `UIS` (onglet + looper affiché, ExtState `NowUndo_MIDILearn/ui_tab`
+  / `ui_slot`). Chaque cible a `tab`, `fn` (fonction commune), `slot` (0 = sélection, 1..8 = looper). Variantes par looper : id `<id>_L<n>` (ex. `par:fdbk_L3`,
+  `act:reverse_L2`), champs `looper = n`, `grp = true` ; `group_members(i)` (membres du groupe de i). **Les ids d'avant ne changent pas** (les learns existants restent).
+- Nouvelles cibles : **Speed** (1/4 x .. 4 x, comme la page 2 du Twister), **Pitch**, Scaler, Grain, tous les réglages Slicer / Cloud du catalogue Custom (générés depuis
+  `CU_KNOBS`), et **In / Out / Width** (`io:in` / `io:out` / `io:width`, fraction de la boucle ; `io_write` : **autonomes** = commandes 1 / 2 / 3, règle absolue). Courbe
+  `"log"` gérée dans `param_value` / `param_norm`.
+- Interface : barre d'onglets, puces « Afficher : Tous / Sélection / L1..L8 », titres de fonction (lignes `hdr`), touches 1-9 = onglet, 0 = tout, F = recherche
+  (cherche dans tout le catalogue). Retiré : lignes Aux, touches A / X / N, résumé « Aux ». Test `tools/tlearn_tabs.lua` (faux REAPER : groupe, In / Out, Restart, Reverse).
+  Locales : 141.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par

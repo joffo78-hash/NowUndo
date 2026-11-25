@@ -60,7 +60,7 @@ local function S(v) return math.floor(v * ui_scale + 0.5) end
 local function layout_cols()
   return {
     { id = "name",  x = S(8),   w = S(240), title = "Fonction" },
-    { id = "cat",   x = S(252), w = S(90),  title = "Groupe" },
+    { id = "cat",   x = S(252), w = S(90),  title = "Cible" },
     { id = "midi",  x = S(346), w = S(230), title = "MIDI  @ peripherique" },
     { id = "learn", x = S(584), w = S(80),  title = "Learn" },
     { id = "ret",   x = S(672), w = S(60),  title = "Return" },
@@ -236,24 +236,6 @@ for idx = 0, 15 do
   }
 end
 
--- LEARN AUX : 16 knobs + 16 push pour CHAQUE page Twister (1..7 ; la page 8 Display n'a rien a piloter)
--- Un controleur appris ici pilote la page en permanence (page active ou non).
-for p = 1, 7 do                                    -- V3.27 : pas d'aux pour la page 9 Looper (comme la page 8 Display)
-  for idx = 0, 15 do
-    local row, col = math.floor(idx / 4) + 1, (idx % 4) + 1
-    TARGETS[#TARGETS + 1] = {
-      id = string.format("aux:%d:knob:%d", p, idx),
-      name = string.format("P%d %s - Knob %d (r%d c%d)", p, FIGHTER_NAMES[p], idx + 1, row, col),
-      cat = "Aux P" .. p, kind = "aux_knob", page = p, idx = idx,
-    }
-    TARGETS[#TARGETS + 1] = {
-      id = string.format("aux:%d:btn:%d", p, idx),
-      name = string.format("P%d %s - Push %d (r%d c%d)", p, FIGHTER_NAMES[p], idx + 1, row, col),
-      cat = "Aux P" .. p, kind = "aux_btn", page = p, idx = idx,
-    }
-  end
-end
-
 -- ===== CATALOGUE page Twister 7 "Custom" (IDENTIQUE dans nowundo_midi_learn.lua et twisterinoutreset.lua) =====
 -- Familles (couleur) : play = rouge (lecture / sortie / transport), pitch = rose, inout = vert (fenetre / rec),
 --                      slicer = jaune, cloud = bleu.
@@ -407,6 +389,84 @@ function CUL.menu(t)
   return false
 end
 
+--------------------------------------------------------------------------
+-- V3.27 : ONGLETS par categorie. Chaque fonction a une cible « selection » (looper ou groupe selectionne) et une
+-- cible par looper L1..L8 (id = <id>_L<n>) : un looper qui appartient a un groupe fait suivre tout le groupe.
+--------------------------------------------------------------------------
+local TABS = { "Pages", "Transport", "Playback", "Loop", "Slicer", "Cloud", "Output", "Twister", "Autres" }
+local TAB_SLOTS = { Transport = true, Playback = true, Loop = true, Slicer = true, Cloud = true, Output = true }
+local ACT_TAB = {
+  rec_overdub = "Transport", stop_play = "Transport", replace = "Transport", auto_rep = "Transport", multiply = "Transport",
+  rerec = "Transport", restart = "Transport", clear = "Transport", clear_full = "Transport", clear_all = "Transport",
+  clear_all_full = "Transport", undo = "Transport", redo = "Transport", auto = "Transport", part = "Transport",
+  rec_dub_toggle = "Transport", drop_group = "Transport", dub_raw = "Transport",
+  reverse = "Playback", auto_rev = "Playback", one_shot = "Playback", link = "Playback", warp = "Playback",
+  speed_step = "Playback", pitch_step = "Playback", reset = "Playback",
+  beat_repeat = "Loop", full_loop = "Loop", quantise_inout = "Loop",
+  slicer = "Slicer", cloud = "Cloud", mute = "Output",
+}
+local PAR_TAB = { density = "Transport", dens_len = "Transport", io_frac = "Loop", fade = "Loop", mix = "Output", degrad = "Output",
+  stereo = "Output", fdbk = "Output", out_vol = "Output", sl_mix = "Slicer", cl_mix = "Cloud", br_mix = "Loop",
+  warp_grid = "Playback", warp_force = "Playback", dub_raw = "Transport", fx_mix = "Output" }
+local FAM_TAB = { play = "Output", pitch = "Playback", inout = "Loop", slicer = "Slicer", cloud = "Cloud" }
+local NEW_TAB = { auto_thr = "Transport", pos = "Loop" }
+-- actions qui ont une cible par looper (les actions globales : Clear All, Drop, Launch, Scenario... n'en ont pas)
+local PER_ACT = { rec_overdub = 1, stop_play = 1, replace = 1, auto_rep = 1, multiply = 1, rerec = 1, clear = 1, clear_full = 1,
+  undo = 1, redo = 1, auto = 1, reverse = 1, auto_rev = 1, one_shot = 1, link = 1, warp = 1, speed_step = 1, pitch_step = 1,
+  reset = 1, beat_repeat = 1, full_loop = 1, quantise_inout = 1, slicer = 1, cloud = 1, mute = 1, dub_raw = 1 }
+local FAM_NAME = { play = "Output", pitch = "Playback", inout = "Loop", slicer = "Slicer", cloud = "Cloud" }
+
+for _, t in ipairs(TARGETS) do                      -- onglet de chaque cible existante
+  if t.kind == "tw_knob" or t.kind == "tw_btn" or t.kind == "cu_knob" or t.kind == "cu_btn" then t.tab = "Twister"
+  elseif t.kind == "nav" and t.nav and t.nav.what == "fxsel" then t.tab = "Autres"
+  elseif t.kind == "nav" or t.kind == "ui" then t.tab = "Pages"
+  elseif t.kind == "action" then t.tab = ACT_TAB[t.action] or "Autres"
+  elseif t.kind == "param" then t.tab = PAR_TAB[t.id:sub(5)] or "Output"
+  else t.tab = "Autres" end
+  t.fn, t.slot = t.id, 0
+  if t.kind == "action" and t.looper then t.fn, t.slot, t.cat = "act:restart", t.looper, "L" .. t.looper end   -- Restart Ln (individuel)
+end
+
+do  -- tous les reglages du catalogue Custom qui n'ont pas encore de cible (Speed, Pitch, Slicer, Cloud...) + In / Out / Width
+  local have = {}
+  for _, t in ipairs(TARGETS) do if t.kind == "param" then have[t.wr] = true end end
+  for _, k in ipairs(CU_KNOBS) do
+    if k[11] then
+      TARGETS[#TARGETS + 1] = { id = "io:" .. k[11], name = k[2] .. "  (fraction de la boucle)", cat = "Loop", kind = "io",
+                                io = k[11], def = k[8], tab = "Loop", fn = "io:" .. k[11], slot = 0 }
+    elseif type(k[4]) == "number" and k[4] > 0 and not have[k[4]] then
+      have[k[4]] = true
+      local lo, hi = k[6], k[7]
+      if k[1] == "speed" then lo, hi = 0.25, 4 end           -- comme la page 2 du Twister : 1/4 x .. 4 x
+      TARGETS[#TARGETS + 1] = { id = "par:" .. k[1], name = k[2], cat = FAM_NAME[k[3]] or "Looper", kind = "param", wr = k[4], off = k[5],
+                                lo = lo, hi = hi, def = k[8], curve = k[9] or 1, step = k[10],
+                                tab = NEW_TAB[k[1]] or FAM_TAB[k[3]] or "Output", fn = "par:" .. k[1], slot = 0 }
+    end
+  end
+end
+
+local PRIO = { ["io:in"] = -10, ["io:out"] = -9, ["io:width"] = -8, ["par:speed"] = -10, ["par:pitch"] = -9, ["par:scale"] = -8,
+               ["par:out_vol"] = -10, ["par:fdbk"] = -9 }
+for _, t in ipairs(TARGETS) do t.prio = PRIO[t.id] end
+
+do  -- une cible par looper
+  local base = {}
+  for _, t in ipairs(TARGETS) do base[#base + 1] = t end
+  for _, t in ipairs(base) do
+    local per = (t.kind == "param" or t.kind == "io") or (t.kind == "action" and PER_ACT[t.action] and not t.looper)
+    if per and TAB_SLOTS[t.tab] then
+      t.cat = "Selection"
+      for i = 1, 8 do
+        local v = {}
+        for k, val in pairs(t) do v[k] = val end
+        v.id, v.name, v.cat = t.id .. "_L" .. i, t.name .. "  L" .. i, "L" .. i
+        v.looper, v.slot, v.grp = i, i, true
+        TARGETS[#TARGETS + 1] = v
+      end
+    end
+  end
+end
+
 local BY_ID = {}
 for _, t in ipairs(TARGETS) do BY_ID[t.id] = t end
 
@@ -432,6 +492,7 @@ local maps = {}
 local learn_id, learn_armed_t = nil, 0
 local learn_add = false   -- V3.25 : Ctrl + clic sur Learn = AJOUTER cette fonction au controleur (sans retirer les autres)
 local scroll, filter = 0, ""
+local UIS = { tab = tonumber(reaper.GetExtState(EXT, "ui_tab")) or 2, slot = tonumber(reaper.GetExtState(EXT, "ui_slot")) or -1 }      -- onglet courant, looper affiche (-1 tous, 0 selection, 1..8)
 local status_msg, status_t = "", 0
 local midi_out_idx, last_seq = -1, 0
 local last_cap = 0
@@ -754,6 +815,16 @@ local function targets()
   return { sel_looper() }
 end
 
+-- Membres a piloter quand on agit sur le looper i : tout son groupe (sauf si « inhibe groupe » est maintenu)
+local function group_members(i)
+  if group_inhibited() then return { i } end
+  local g = group_of(i)
+  if g == 0 then return { i } end
+  local t = {}
+  for k = 1, 8 do if group_of(k) == g then t[#t + 1] = k end end
+  return #t > 0 and t or { i }
+end
+
 local function active_part(looper)
   local ap = reaper.gmem_read(gbase(looper, 1) + 42) or 1
   if ap < 1 or ap > 3 then ap = 1 end
@@ -798,8 +869,29 @@ local function write_param(looper, id, value)
   if not PQ.try(b, id, value) then PQ.q[#PQ.q + 1] = { b = b, id = id, v = value } end
 end
 
+-- In / Out / Width d'un looper, valeur = fraction de la boucle. REGLE ABSOLUE : le MIDI Learn n'a pas de mode, donc
+-- In et Out sont AUTONOMES (In = commande 1 : Out reste ; Out = commande 2 : In reste ; Width = commande 3 : In reste).
+local function io_write(i, which, n)
+  reaper.gmem_attach(GMEM)
+  local b = gbase(i, active_part(i))
+  local len = reaper.gmem_read(b + 46) or 0
+  if len <= 0 then return end
+  local in_s = reaper.gmem_read(b + 44) or 0
+  local w_s = reaper.gmem_read(b + 45) or 0
+  if which == "in" then
+    local new_in = math.max(0, math.min(math.min(len, in_s + w_s), n * len))
+    reaper.gmem_write(b + 161, new_in); reaper.gmem_write(b + 160, 1)
+  elseif which == "out" then
+    local out = math.max(in_s, math.min(len, n * len))
+    reaper.gmem_write(b + 162, out); reaper.gmem_write(b + 160, 2)
+  else
+    local w = math.max(0, math.min(len - in_s, n * len))
+    reaper.gmem_write(b + 162, w); reaper.gmem_write(b + 160, 3)
+  end
+end
+
 local SCN_CMD = { scn_validate = "validate", scn_prev = "prev", scn_next = "next", scn_capture = "toggle" }
-local function fire_action(action, args, looper)
+local function fire_action(action, args, looper, follow)
   if action == "rec_dub_toggle" or action == "drop_group" then   -- [REC>DUB] / drop : file de commandes lue par le Launchpad
     local cur = reaper.GetExtState("NowUndo_VLcmd", "q")
     reaper.SetExtState("NowUndo_VLcmd", "q", cur .. string.format("%s\t%.3f\n", action, reaper.time_precise()), false)
@@ -815,8 +907,10 @@ local function fire_action(action, args, looper)
     return
   end
   local cmd = CMD[action]
-  if looper then   -- action ciblee sur UN looper precis (ex : Restart L3)
-    if alive(looper) then write_cmd(looper, cmd, args) end
+  if looper then   -- action ciblee sur UN looper precis (Restart L3 : lui seul ; les autres L n : tout son groupe)
+    for _, i in ipairs(follow and group_members(looper) or { looper }) do
+      if alive(i) then write_cmd(i, cmd, args) end
+    end
     return
   end
   if action == "clear_all" or action == "clear_all_full" or action == "reset_all" or action == "restart_all" then
@@ -1033,17 +1127,22 @@ end
 
 -- v2.5 : reglages continus "param"
 local function param_value(t, n)
-  n = math.max(0, math.min(1, n)) ^ (t.curve or 1)
-  local v = t.lo + n * (t.hi - t.lo)
+  n = math.max(0, math.min(1, n))
+  local v
+  if t.curve == "log" and t.lo > 0 then v = t.lo * (t.hi / t.lo) ^ n
+  else v = t.lo + (n ^ (type(t.curve) == "number" and t.curve or 1)) * (t.hi - t.lo) end
   if t.step then v = math.floor(v / t.step + 0.5) * t.step end
   return v
 end
 local function param_norm(t, v)
+  if t.curve == "log" and t.lo > 0 then
+    return math.max(0, math.min(1, math.log(math.max(v, t.lo) / t.lo) / math.log(t.hi / t.lo)))
+  end
   local n = math.max(0, math.min(1, (v - t.lo) / (t.hi - t.lo)))
-  return n ^ (1 / (t.curve or 1))
+  return n ^ (1 / (type(t.curve) == "number" and t.curve or 1))
 end
 local function param_write(t, v)
-  for _, i in ipairs(targets()) do
+  for _, i in ipairs(t.looper and group_members(t.looper) or targets()) do
     if alive(i) then
       write_param(i, t.wr, v)
       if t.also then for _, w in ipairs(t.also) do write_param(i, w, v) end end
@@ -1053,8 +1152,8 @@ end
 -- Soft takeover (Pickup coche) : la valeur entrante est ignoree tant qu'elle n'a pas rejoint / croise la valeur actuelle
 local pk_par = {}
 local function param_pickup_ok(t, n)
-  local s = sel_looper()
-  if not alive(s) then return true end
+  local s = t.looper or sel_looper()
+  if not alive(s) or type(t.off) ~= "number" then return true end
   reaper.gmem_attach(GMEM)
   local cur = param_norm(t, reaper.gmem_read(gbase(s, active_part(s)) + t.off) or t.def)
   local now = reaper.time_precise()
@@ -1109,6 +1208,15 @@ local function execute_target(tgt, m, velocity, is_on, is_off)
     end
     return
   end
+  if tgt.kind == "io" then                           -- In / Out / Width : fraction de la boucle, autonomes
+    local list = tgt.looper and group_members(tgt.looper) or targets()
+    if m.status == 0xB0 then
+      for _, i in ipairs(list) do if alive(i) then io_write(i, tgt.io, velocity / 127) end end
+    elseif is_on then
+      for _, i in ipairs(list) do if alive(i) then io_write(i, tgt.io, tgt.def or 0) end end
+    end
+    return
+  end
   -- Twister : applique ET renvoye par le script Twister. Ici on ne fait rien
   -- (avant : "Return" renvoyait 127 a chaque tick de knob => l'anneau sautait a fond).
   if tgt.kind == "tw_knob" or tgt.kind == "tw_btn" then return end
@@ -1124,9 +1232,9 @@ local function execute_target(tgt, m, velocity, is_on, is_off)
     end
     if is_on then auto_twister(tgt.action, tgt.looper, tgt.args) end   -- v2.5 : AVANT l'action (l'etat lu est celui d'avant)
     if m.gate then
-      if is_on or is_off then fire_action(tgt.action, tgt.args, tgt.looper) end
+      if is_on or is_off then fire_action(tgt.action, tgt.args, tgt.looper, tgt.grp) end
     else
-      if is_on then fire_action(tgt.action, tgt.args, tgt.looper) end
+      if is_on then fire_action(tgt.action, tgt.args, tgt.looper, tgt.grp) end
     end
   elseif tgt.kind == "ui" and tgt.ui.inhibit then
     if is_on then reaper.SetExtState(VL_SEC, "group_inhibit_ml", "1", false)
@@ -1602,10 +1710,38 @@ end
 
 local function filtered_list()
   local out, f = {}, filter:lower()
-  for _, t in ipairs(TARGETS) do
-    if f == "" or t.name:lower():find(f, 1, true) or t.cat:lower():find(f, 1, true) then
-      out[#out + 1] = t
+  if f ~= "" then                                    -- recherche : tout le catalogue, sans onglet
+    for _, t in ipairs(TARGETS) do
+      if t.name:lower():find(f, 1, true) or t.cat:lower():find(f, 1, true) then out[#out + 1] = t end
     end
+    return out
+  end
+  local tab = TABS[UIS.tab] or TABS[1]
+  local groups, order = {}, {}
+  for _, t in ipairs(TARGETS) do
+    if t.tab == tab then
+      local g = groups[t.fn]
+      if not g then g = {}; groups[t.fn] = g; order[#order + 1] = t.fn end
+      g[#g + 1] = t
+    end
+  end
+  local idx = {}
+  for k, fn in ipairs(order) do idx[fn] = k end
+  table.sort(order, function(a, b)
+    local pa, pb = groups[a][1].prio or 0, groups[b][1].prio or 0
+    if pa ~= pb then return pa < pb end
+    return idx[a] < idx[b]
+  end)
+  local slots = TAB_SLOTS[tab]
+  for _, fn in ipairs(order) do
+    local rows = groups[fn]
+    table.sort(rows, function(a, b) return a.slot < b.slot end)
+    local pick = {}
+    for _, t in ipairs(rows) do
+      if not slots or UIS.slot < 0 or t.slot == UIS.slot then pick[#pick + 1] = t end
+    end
+    if slots and UIS.slot < 0 and #pick > 1 then out[#out + 1] = { hdr = true, name = rows[1].name } end
+    for _, t in ipairs(pick) do out[#out + 1] = t end
   end
   return out
 end
@@ -1632,7 +1768,7 @@ end
 local function draw()
   local w, h = gfx.w, gfx.h
   local ROW_H = S(26)
-  local HEADER_H = S(88)
+  local HEADER_H = S(146)
   local COLS = layout_cols()
   local font_title = S(17)
   local font_body = S(13)
@@ -1656,25 +1792,6 @@ local function draw()
   gfx.drawstr(string.format("%d maps  |  Twister page %d (%s)  |  zoom %.0f%%",
     nmap, fighter_page(), FIGHTER_NAMES[fighter_page()] or "?", ui_scale * 100))
 
-  do  -- resume des pages aux
-    local cnt = {}
-    for id in pairs(maps) do
-      local p = id:match("^aux:(%d):")
-      if p then cnt[tonumber(p)] = (cnt[tonumber(p)] or 0) + 1 end
-    end
-    local parts = {}
-    for p = 1, NFIGHTER do
-      if cnt[p] then
-        local ex = reaper.GetExtState(EXT, "aux_excl_" .. p) == "1" and " excl" or ""
-        parts[#parts + 1] = string.format("P%d:%d%s", p, cnt[p], ex)
-      end
-    end
-    local txt = "Aux  " .. (#parts > 0 and table.concat(parts, "  ") or "aucune") .. (auto_next and "  |  auto-suivant" or "")
-    gfx.set(0.55, 0.8, 0.95)
-    gfx.x, gfx.y = w - gfx.measurestr(txt) - S(12), S(8)
-    gfx.drawstr(txt)
-  end
-
   if RL.learn then
     gfx.set(1, 0.4, 0.2)
     gfx.x, gfx.y = S(10), S(32)
@@ -1690,7 +1807,7 @@ local function draw()
   else
     gfx.set(0.55, 0.55, 0.6)
     gfx.x, gfx.y = S(10), S(32)
-    gfx.drawstr((RL.n > 0 and ("Rushes appris : " .. RL.n .. " (fenetre Rushes)  |  ") or "") .. "1-6 page aux  0 tout  |  K pickup en bloc  R return en bloc  N auto-suivant  A sortie aux  X exclusif  I bloque touches  |  F filtre  S sauver  O OUT  |  Esc")
+    gfx.drawstr((RL.n > 0 and ("Rushes appris : " .. RL.n .. " (fenetre Rushes)  |  ") or "") .. "1-9 onglet  0 tout afficher  |  K pickup en bloc  R return en bloc  I bloque touches  |  F filtre  S sauver  O OUT  |  Esc")
   end
 
   local y0 = HEADER_H
@@ -1770,6 +1887,56 @@ local function draw()
     gfx.setfont(1, "Arial", font_body)
   end
 
+  do  -- onglets (categories) et choix du looper affiche
+    local ty, th = S(86), S(26)
+    local tx = S(10)
+    gfx.setfont(1, "Arial", font_small, "b")
+    for k, name in ipairs(TABS) do
+      local tw = math.floor(gfx.measurestr(name)) + S(22)
+      local on = (UIS.tab == k) and filter == ""
+      local hov = mx >= tx and mx < tx + tw and my >= ty and my < ty + th
+      if on then gfx.set(0.28, 0.48, 0.85) elseif hov then gfx.set(0.30, 0.30, 0.36) else gfx.set(0.20, 0.20, 0.24) end
+      gfx.rect(tx, ty, tw, th, 1)
+      gfx.set(1, 1, 1)
+      gfx.x, gfx.y = tx + S(11), ty + math.floor((th - gfx.texth) / 2)
+      gfx.drawstr(name)
+      if clicked and hov then
+        UIS.tab = k; filter = ""; scroll = 0
+        reaper.SetExtState(EXT, "ui_tab", tostring(k), true)
+      end
+      tx = tx + tw + S(4)
+    end
+    local cy, ch = S(116), S(24)
+    if filter ~= "" then
+      gfx.set(0.95, 0.7, 0.3)
+      gfx.x, gfx.y = S(10), cy + math.floor((ch - gfx.texth) / 2)
+      gfx.drawstr("Recherche : \"" .. filter .. "\"  (0 ou clic sur un onglet pour revenir)")
+    elseif TAB_SLOTS[TABS[UIS.tab] or ""] then
+      local cx = S(10)
+      gfx.set(0.6, 0.65, 0.7)
+      gfx.x, gfx.y = cx, cy + math.floor((ch - gfx.texth) / 2)
+      gfx.drawstr("Afficher :")
+      cx = cx + math.floor(gfx.measurestr("Afficher :")) + S(8)
+      local chips = { { "Tous", -1 }, { "Selection", 0 } }
+      for i = 1, 8 do chips[#chips + 1] = { "L" .. i, i } end
+      for _, c in ipairs(chips) do
+        local cw = math.floor(gfx.measurestr(c[1])) + S(18)
+        local on = UIS.slot == c[2]
+        local hov = mx >= cx and mx < cx + cw and my >= cy and my < cy + ch
+        if on then gfx.set(0.25, 0.6, 0.4) elseif hov then gfx.set(0.30, 0.30, 0.36) else gfx.set(0.20, 0.20, 0.24) end
+        gfx.rect(cx, cy, cw, ch, 1)
+        gfx.set(1, 1, 1)
+        gfx.x, gfx.y = cx + S(9), cy + math.floor((ch - gfx.texth) / 2)
+        gfx.drawstr(c[1])
+        if clicked and hov then
+          UIS.slot = c[2]; scroll = 0
+          reaper.SetExtState(EXT, "ui_slot", tostring(c[2]), true)
+        end
+        cx = cx + cw + S(4)
+      end
+    end
+  end
+
   gfx.setfont(1, "Arial", font_body)
   for row = 0, visible - 1 do
     local idx = scroll + row + 1
@@ -1782,6 +1949,16 @@ local function draw()
     elseif row % 2 == 0 then gfx.set(0.12, 0.12, 0.14)
     else gfx.set(0.11, 0.11, 0.13) end
     gfx.rect(0, y, w, ROW_H, 1)
+    if t.hdr then                                    -- titre de fonction (pas de learn)
+      gfx.set(0.16, 0.21, 0.28)
+      gfx.rect(0, y, w, ROW_H, 1)
+      gfx.setfont(1, "Arial", font_body, "b")
+      gfx.set(0.75, 0.88, 1)
+      gfx.x, gfx.y = COLS[1].x, y + S(5)
+      gfx.drawstr(t.name)
+      gfx.setfont(1, "Arial", font_body)
+      goto continue
+    end
 
     local m = maps[t.id]
     gfx.set(0.92, 0.92, 0.92)
@@ -1877,6 +2054,7 @@ local function draw()
         notify("Cleared " .. t.name)
       end
     end
+    ::continue::
   end
 
   if #list > visible then
@@ -1938,55 +2116,6 @@ local function out_label(idx)
   return (ok and name) and name or ("#" .. idx)
 end
 
--- Sortie MIDI (renvoi de valeurs) propre a chaque page aux
-local function pick_aux_out()
-  local items = {}
-  for p = 1, NFIGHTER do
-    local cur = tonumber(reaper.GetExtState(EXT, "aux_out_" .. p)) or -1
-    items[#items + 1] = string.format("P%d %s   sortie: %s", p, FIGHTER_NAMES[p], out_label(cur))
-  end
-  local pg = gfx.showmenu(table.concat(items, "|"))
-  if not pg or pg < 1 then return end
-  local n = reaper.GetNumMIDIOutputs and reaper.GetNumMIDIOutputs() or 0
-  local menu, idxs = {}, {}
-  local cur = tonumber(reaper.GetExtState(EXT, "aux_out_" .. pg)) or -1
-  for i = 0, n - 1 do
-    local ok, name = reaper.GetMIDIOutputName(i, "")
-    if ok and name then
-      menu[#menu + 1] = ((i == cur) and "!" or "") .. name
-      idxs[#idxs + 1] = i
-    end
-  end
-  menu[#menu + 1] = ""
-  menu[#menu + 1] = "Aucune (pas de renvoi)"
-  local pick = gfx.showmenu(table.concat(menu, "|"))
-  if not pick or pick < 1 then return end
-  if pick <= #idxs then
-    local okn, nm = reaper.GetMIDIOutputName(idxs[pick], "")
-    reaper.SetExtState(EXT, "aux_out_" .. pg, tostring(idxs[pick]), true)
-    reaper.SetExtState(EXT, "aux_out_name_" .. pg, (okn and nm) or "", true)
-    notify(string.format("P%d aux OUT: %s", pg, out_label(idxs[pick])))
-  else
-    reaper.SetExtState(EXT, "aux_out_" .. pg, "-1", true)
-    reaper.SetExtState(EXT, "aux_out_name_" .. pg, "", true)
-    notify(string.format("P%d aux OUT desactive", pg))
-  end
-end
-
--- Exclusif : le Twister principal n'agit plus sur cette page
-local function pick_aux_excl()
-  local items = {}
-  for p = 1, NFIGHTER do
-    local on = reaper.GetExtState(EXT, "aux_excl_" .. p) == "1"
-    items[#items + 1] = (on and "!" or "") .. string.format("P%d %s : controleur aux seul", p, FIGHTER_NAMES[p])
-  end
-  local pg = gfx.showmenu(table.concat(items, "|"))
-  if not pg or pg < 1 then return end
-  local on = reaper.GetExtState(EXT, "aux_excl_" .. pg) == "1"
-  reaper.SetExtState(EXT, "aux_excl_" .. pg, on and "0" or "1", true)
-  notify(string.format("P%d : %s", pg, on and "Twister principal actif aussi" or "controleur aux exclusif"))
-end
-
 local function open_ui()
   gfx.init("Dripsody MIDI Learn", W, H, 0, 100, 100)
   gfx.clear = 0x1A1A1E
@@ -2016,10 +2145,6 @@ local function handle_ui()
     import_model()
   elseif char == string.byte("o") or char == string.byte("O") then
     pick_midi_out()
-  elseif char == string.byte("a") or char == string.byte("A") then
-    pick_aux_out()
-  elseif char == string.byte("x") or char == string.byte("X") then
-    pick_aux_excl()
   elseif char == string.byte("k") or char == string.byte("K") then
     -- soft takeover en bloc sur les knobs appris de la liste affichee
     local rows, any_off = {}, false
@@ -2057,11 +2182,9 @@ local function handle_ui()
     local on = reaper.GetExtState(EXT, "kbd_intercept") == "0"
     reaper.SetExtState(EXT, "kbd_intercept", on and "1" or "0", true)
     notify(on and "Touches apprises BLOQUEES pour REAPER (raccourcis d'origine inactifs)" or "Touches apprises LAISSEES PASSER a REAPER")
-  elseif char == string.byte("n") or char == string.byte("N") then
-    auto_next = not auto_next
-    notify(auto_next and "Auto-suivant ON (learn aux enchaine)" or "Auto-suivant OFF")
-  elseif char >= string.byte("1") and char <= string.byte("0") + NFIGHTER then
-    filter = "Aux P" .. string.char(char); scroll = 0
+  elseif char >= string.byte("1") and char <= string.byte("0") + #TABS then
+    UIS.tab = char - string.byte("0"); filter = ""; scroll = 0
+    reaper.SetExtState(EXT, "ui_tab", tostring(UIS.tab), true)
   elseif char == string.byte("0") then
     filter = ""; scroll = 0
   elseif char == string.byte("f") or char == string.byte("F") then
@@ -2207,7 +2330,7 @@ do
 end
 reaper.atexit(function()
   KB.release_all()                                     -- v2.7 : rend toutes les touches a REAPER
-  reaper.SetExtState(EXT, "hb", "0", false)
+notify(string.format("%d fonctions | onglets : touches 1-9", #TARGETS))
   reaper.SetExtState(VL_SEC, "group_inhibit_ml", "0", false)   -- jamais d'inhibition bloquee
 end)
 
