@@ -871,6 +871,15 @@ Beat Repeat (1/16 vs 1/32) : **tous résolus**. Ne pas les rouvrir sauf nouveau 
 
 ## Idées en suspens (proposées, pas faites)
 
+- **ROADMAP (ajouté le 26 nov., demandé par l'utilisateur)** :
+  - **Supprimer l'ancien `NowUndo/Scripts/DashBoard.lua`** (panneau gfx des 8 instances, v1.3) : « n'a plus aucune raison d'être ».
+    Il est encore cité dans l'ancien `index.xml` (paquet ReaPack du 1er nov., régénéré à la publication) et ignoré par
+    `.reapack-index.conf` (ligne `--ignore` à retirer avec le fichier). Vérifier qu'aucun `__startup.lua` ne le lance.
+  - **Miroir de 8Waves en page web** : onglet de `NowUndo.html` qui reprend l'affichage de `NowUndo_8Waves.lua` (8 formes d'onde
+    empilées, couleurs d'état, In / Out, tête, Cloud / Slicer, VU, Mute, saturation selon Out Vol) et, si possible, ses gestes au doigt
+    (sélection, tap de statut, In / Out). Base existante : l'onglet Loopers du web (forme d'onde d'un looper, In / Out au doigt) et le
+    pont `NowUndo_Twister_Web.lua` (`lv_wave`). À penser avec l'onglet Dashboard (même page, tablette + écran tactile).
+
 - **GRAND CHANTIER « tout est rush » (validé sur le principe, à faire plus tard, par étapes)** :
   1. Moteur commun `NowUndo_Rush.lua` (langage des rushes sorti du Scenario), exécuté **directement par le Launchpad**
      (pas de détour par le Scenario : garder l'heure d'appui du REC calé) ; les mots qui ont une action Launchpad passent
