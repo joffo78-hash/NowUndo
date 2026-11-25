@@ -282,6 +282,20 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (cherche dans tout le catalogue). Retiré : lignes Aux, touches A / X / N, résumé « Aux ». Test `tools/tlearn_tabs.lua` (faux REAPER : groupe, In / Out, Restart, Reverse).
   Locales : 141.
 
+## 25 nov. : DASHBOARD (spécification validée, à coder sur la branche `nowundo-dashboard`)
+
+- Demande : une page blanche pour composer sa propre surface de contrôle, à l'image des pages Custom du Twister et du Launchpad.
+- **Fenêtre à part** « Dripsody Dashboard », **grille 8 × 8**. Chaque case = **knob** ou **pad** (vide au départ). Retour visuel en direct
+  (valeurs, états, couleur de famille comme le Twister). Interaction directe à la souris (glisser / molette sur un knob, clic ou gate sur un pad).
+- **Configuration d'une case** : clic droit sur une case vide → knob ou pad → fonction du catalogue (paramètres de looper, actions) ou **rush** ;
+  **portée par case** (sélection, L1..L8, groupe, tous). **Cible individuelle par case** (comme les rushes), pas de cible globale imposée.
+- **Learn par case** : réutilise le mécanisme MIDI Learn existant (cumul possible, appareil strict).
+- **Par projet** : la grille est stockée dans le projet REAPER (ExtState projet, comme `Dripsody_Perf`). **Modèle par défaut** (fichier) pour les projets neufs.
+- **Fermer la fenêtre ne coupe rien** : le script reste actif (comme le Scenario, `H._bg`) ; relancer le script rouvre la fenêtre.
+- Interface en **ReaImGui** (déjà installé par l'installeur ; utilisé par FX Router).
+- **Découpage** : v1 = fenêtre + grille 8 × 8 + knobs (Pitch, Speed, Feedback, Out vol, In, Out) avec portée par case + sauvegarde projet + modèle
+  + fermeture sans arrêt. v2 = pads et import de rushes. Test d'abord avec faux REAPER, puis essai dans REAPER.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par
