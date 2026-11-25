@@ -282,19 +282,50 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (cherche dans tout le catalogue). Retiré : lignes Aux, touches A / X / N, résumé « Aux ». Test `tools/tlearn_tabs.lua` (faux REAPER : groupe, In / Out, Restart, Reverse).
   Locales : 141.
 
-## 25 nov. : DASHBOARD (spécification validée, à coder sur la branche `nowundo-dashboard`)
+## 25 nov. : DASHBOARD (spécification validée, à coder sur la branche `nowundo-dashboard`) — EN SUSPENS, revue le 26 nov.
 
+- **DÉCISION DU 26 NOV. (remplace la fenêtre ReaImGui)** : le dashboard devient un **onglet « Dashboard » de la page web `NowUndo.html`**,
+  pensé pour le **tactile**. L'utilisateur a **une tablette et un écran tactile** sur le PC : la même page sert aux deux (tablette par le Wi-Fi,
+  écran tactile du PC dans un navigateur à côté de REAPER). Raison : le navigateur gère le **multi-touch** (plusieurs knobs à la fois), une fenêtre
+  REAPER / ReaImGui n'a qu'un seul pointeur. Le nom `DashBoard.lua` est déjà pris par un **ancien** panneau gfx des 8 instances (sans rapport) :
+  ne pas le réutiliser pour le pont.
+- Ce que le dashboard apporte par rapport aux learns seuls (discuté le 26 nov.) : voir valeurs et états au même endroit, **disposition par projet**
+  (les learns sont globaux), jouer sans contrôleur, pads de rushes à l'écran. Recoupe la page 7 Custom du Twister et le MIDI Learn par looper.
 - Demande : une page blanche pour composer sa propre surface de contrôle, à l'image des pages Custom du Twister et du Launchpad.
-- **Fenêtre à part** « Dripsody Dashboard », **grille 8 × 8**. Chaque case = **knob** ou **pad** (vide au départ). Retour visuel en direct
-  (valeurs, états, couleur de famille comme le Twister). Interaction directe à la souris (glisser / molette sur un knob, clic ou gate sur un pad).
-- **Configuration d'une case** : clic droit sur une case vide → knob ou pad → fonction du catalogue (paramètres de looper, actions) ou **rush** ;
-  **portée par case** (sélection, L1..L8, groupe, tous). **Cible individuelle par case** (comme les rushes), pas de cible globale imposée.
-- **Learn par case** : réutilise le mécanisme MIDI Learn existant (cumul possible, appareil strict).
-- **Par projet** : la grille est stockée dans le projet REAPER (ExtState projet, comme `Dripsody_Perf`). **Modèle par défaut** (fichier) pour les projets neufs.
-- **Fermer la fenêtre ne coupe rien** : le script reste actif (comme le Scenario, `H._bg`) ; relancer le script rouvre la fenêtre.
-- Interface en **ReaImGui** (déjà installé par l'installeur ; utilisé par FX Router).
-- **Découpage** : v1 = fenêtre + grille 8 × 8 + knobs (Pitch, Speed, Feedback, Out vol, In, Out) avec portée par case + sauvegarde projet + modèle
-  + fermeture sans arrêt. v2 = pads et import de rushes. Test d'abord avec faux REAPER, puis essai dans REAPER.
+- **Grille 8 × 8**. Chaque case = **knob** ou **pad** (vide au départ). Retour visuel en direct (valeurs, états, couleur de famille comme le Twister).
+  Interaction directe au doigt (glisser sur un knob, appui ou gate sur un pad ; plusieurs doigts en même temps).
+- **Configuration d'une case** : **appui long** sur une case (menu tactile, à la place du clic droit) → knob ou pad → fonction du catalogue
+  (paramètres de looper, actions) ou **rush** ; **portée par case** (sélection, L1..L8, groupe, tous). **Cible individuelle par case** (comme les rushes),
+  pas de cible globale imposée.
+- **Learn par case** : déclenché depuis la page, fait par le MIDI Learn existant (cumul possible, appareil strict).
+- **Par projet** : la grille est stockée dans le projet REAPER (ExtState projet, comme `Dripsody_Perf`) par un **petit pont côté REAPER** (comme
+  `NowUndo_Twister_Web.lua`). **Modèle par défaut** (fichier) pour les projets neufs.
+- **Fermer la page ne coupe rien** : le pont continue de tourner dans REAPER.
+- **Découpage** : v1 = onglet + grille 8 × 8 + knobs (Pitch, Speed, Feedback, Out vol, In, Out) avec portée par case + sauvegarde projet + modèle.
+  v2 = pads et import de rushes. Test d'abord avec faux REAPER + Playwright (`tools/*.js`, `reaper_main.js`), puis essai dans REAPER.
+
+## 26 nov. : idée « Dripsody Net Session » (jouer à plusieurs sur un LAN) — discutée, rien de codé, EN SUSPENS
+
+- Demande : plusieurs utilisateurs de Dripsody se voient sur un LAN et jouent ensemble en partageant la synchro. Mêmes règles qu'en local, mais
+  **le premier qui verrouille la synchro la verrouille pour tout le monde** (« super maître »), les autres se calent dessus.
+- **Pas d'audio par le réseau** (décidé) : chacun sort sur la table de mixage / son ampli. Le réseau ne transporte que la synchro et un peu d'état.
+- **Ableton Link** : protocole LAN de tempo + phase sans serveur (Live, Push, Move, Note, MPC Live / X / Force, Reason, Traktor, Maschine, Max,
+  Serato, beaucoup d'apps iOS / Android, Eurorack). REAPER ne l'a pas en natif, mais l'extension **reablink** (ak5k, ReaPack, dernière mise à jour
+  juillet 2025) donne l'horloge Link aux ReaScripts (`Blink_GetBeatAtTime`, `Blink_GetPhaseAtTime`, quantum…) et a deux modes : **Puppet** (REAPER suit
+  Link : transport, tempo écrit en marqueurs, phase tenue par de petits changements de playrate, actions 40524 / 40525 / 40521) et **Master**.
+- **Montage recommandé (B)** : Link → script → **MSV3** (nouveau mode « esclave réseau », proche du mode Host) → loopers ; **REAPER reste libre**
+  (pas de Puppet : un changement de tempo en lecture fait sauter la tête, voir 24 nov. ; conflit avec l'Auto-Tempo et l'enregistrement de performance) ;
+  grille alignée après coup comme « Aligner la grille ». Montage A (REAPER en Puppet + MSV3 en Host) = option si on joue avec du contenu du projet.
+- Boucle du super maître = tempo `60·N/L` + quantum N (temps). **Le déphasage est conservé** : les loopers gardent leur sync point par rapport au
+  MSV3 local (précision réseau ~1 ms en câble, plus en Wi-Fi ; au sample près sur une même machine).
+- **Un joueur Live dans la session** : Dripsody prend son tempo et sa phase ; 1er REC arrondi à un nombre entier de temps / mesures. Recommandé :
+  si Live est là avant, son tempo fait référence (super maître) ; la règle du premier qui verrouille vaut entre joueurs Dripsody. Changement de
+  tempo par Live en cours de jeu : recommandé = les boucles suivent (Speed / stretch), avec une option pour refuser les changements pendant qu'on joue.
+- Difficultés : dérive des cartes son (corriger en douceur), gigue Wi-Fi (câble + switch recommandé), latence de sortie de chaque machine (CAL / LAT),
+  relève du super maître (garder l'horloge tant qu'un joueur a une boucle, comme le Clear du maître du 23 nov.).
+- « Se voir » : commencer par liste des joueurs + super maître + longueur de boucle + repère du début de cycle ; état des loopers des autres plus tard.
+- L'utilisateur est **sur PC (Windows)** : Mac sans importance. **À faire d'abord** : installer reablink par ReaPack, essai avec Live et le script
+  « ReaBlink Monitor » (pairs, tempo, phase).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
