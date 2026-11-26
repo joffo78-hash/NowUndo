@@ -346,6 +346,12 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   Réglage à la main du send du looper possible ensuite. **Le « in mute » de l'entrée ne compte pas** : on copie le réglage des sends, pas leur
   coupure (une boucle enregistrée en silence garde sa reverb). Plusieurs entrées → pour chaque aux, le **plus grand** niveau. Suivi en direct
   (choix A) écarté : fermer la reverb de l'entrée changerait les boucles déjà jouées.
+- **Le looper impose ses sends à ses entrées tant qu'il a une boucle (demandé le 26 nov., « jamais de différence »)** : looper **vide** = l'entrée
+  décide (copie au REC ci-dessus) ; looper **avec une boucle** = les entrées routées vers lui prennent **exactement** ses sends vers les aux (à la place
+  de leurs propres réglages, pas un « au moins ») : l'overdub s'entend avec la même reverb que la boucle. Entrée désaffectée ou looper vidé = l'entrée
+  retrouve ses propres sends (mémorisés). « In mute » coupe toujours tout. **Entrée routée vers plusieurs loopers aux sends différents** : priorité au
+  looper qui **enregistre / overdub** en ce moment, sinon au **looper sélectionné** (Launchpad / 8Waves / web / MIDI Learn, celui de la page 9 du Twister),
+  sinon le **plus grand** niveau par aux.
 - Conséquences : **Performance** (`NowUndo_Performance.lua`) doit aussi enregistrer les pistes aux 20-24 (sinon la reverb partagée manque dans
   l'enregistrement du concert) ; le **Drop** n'inclut toujours pas les aux (la reverb partagée continue par le send après la bascule).
 
