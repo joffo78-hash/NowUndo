@@ -329,6 +329,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **26 nov. après-midi : reablink INSTALLÉ et fonctionne** chez l'utilisateur. Il est dans le dépôt **ReaTeam Extensions** (Browse packages > « ReaBlink »),
   pas besoin d'importer de dépôt (importer `https://github.com/ak5k/reablink` = erreur XML : page GitHub, pas un index). **Essai réussi le 26 nov. : deux REAPER
   (PC fixe + portable) se voient en Link** (ReaBlink_Monitor). Pas d'app Android gratuite fiable trouvée (Soundbrenner payante) ; test Live = version d'essai.
+  **Essai Wi-Fi (26 nov., 2 REAPER)** : se cale et suit le tempo, mais **changer le tempo en cours de lecture ne passe pas** (champ tempo de REAPER).
+  Lu dans le code de reablink : en Puppet, l'extension réécrit elle-même les marqueurs de tempo ; le changement prévu passe par `Blink_SetTempo`
+  (actions fournies `ReaBlink_IncreaseTempoByOneBpm` / `DecreaseTempoByOneBpm`). Pour Dripsody (montage B) : le MSV3 / le script enverra le tempo par
+  `Blink_SetTempo`, jamais par le champ tempo de REAPER. À confirmer : essai des actions ReaBlink en cours de lecture.
 
 ## 26 nov. : SENDS VERS LES PISTES AUX (spécification validée, rien de codé)
 
