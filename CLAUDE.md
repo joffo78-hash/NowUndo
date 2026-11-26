@@ -327,6 +327,22 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - L'utilisateur est **sur PC (Windows)** : Mac sans importance. **À faire d'abord** : installer reablink par ReaPack, essai avec Live et le script
   « ReaBlink Monitor » (pairs, tempo, phase).
 
+## 26 nov. : SENDS VERS LES PISTES AUX (spécification validée, rien de codé)
+
+- Demande : doser le signal envoyé dans un effet en le gardant actif (comme un send vers une aux), sans toucher à l'architecture des 4 containers.
+  Proposition écartée : mode « Send » par container (container en parallèle REAPER 7 + JSFX de gain en tête). **Choix de l'utilisateur : pistes aux
+  partagées** (« moins de plomberie, plus clair, cohérent que les loopers partagent les mêmes reverb / delay »).
+- **Pistes aux = 20 à 24** (5 aux, déjà dans son projet). Les containers d'effets restent en **insert** (inchangés). Les **reverbs des entrées restent
+  en insert** quand elles doivent être enregistrées dans le looper (un send vers une aux sort de la piste : le looper ne l'entend jamais).
+- **Dripsody crée les envois** (comme `LPF.send_nomidi` : MIDI coupé, `I_MIDIFLAGS` = 31) **post-fader** (Out Vol / volume de piste baissent aussi la
+  reverb), des loopers 11-18 et des entrées 2-9 vers les aux 20-24. Si les pistes aux manquent (projet neuf / autre utilisateur) : à créer (à confirmer).
+- **Réglage** : niveau de send par looper × aux, au Twister / MIDI Learn / rush (`l1 aux2 0.5`), **règle de groupe** habituelle (un looper groupé fait
+  suivre son groupe). Pad = ouvrir / fermer le send avec un court fondu, réouverture au **dernier niveau réglé** ; les queues continuent sur l'aux.
+- **Entrées** : sends vers les aux possibles (reverb entendue en direct, non enregistrée). **Quand la sortie vers le parent est coupée (« in mute »,
+  `VL.set_input_parent`, gmem `6050+n`), ses sends vers les aux sont coupés aussi**, puis remis à l'identique : enregistrer en silence dans un looper.
+- Conséquences : **Performance** (`NowUndo_Performance.lua`) doit aussi enregistrer les pistes aux 20-24 (sinon la reverb partagée manque dans
+  l'enregistrement du concert) ; le **Drop** n'inclut toujours pas les aux (la reverb partagée continue par le send après la bascule).
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par
