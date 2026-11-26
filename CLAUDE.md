@@ -335,7 +335,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Pistes aux = 20 à 24** (5 aux, déjà dans son projet). Les containers d'effets restent en **insert** (inchangés). Les **reverbs des entrées restent
   en insert** quand elles doivent être enregistrées dans le looper (un send vers une aux sort de la piste : le looper ne l'entend jamais).
 - **Dripsody crée les envois** (comme `LPF.send_nomidi` : MIDI coupé, `I_MIDIFLAGS` = 31) **post-fader** (Out Vol / volume de piste baissent aussi la
-  reverb), des loopers 11-18 et des entrées 2-9 vers les aux 20-24. Si les pistes aux manquent (projet neuf / autre utilisateur) : à créer (à confirmer).
+  reverb ; mode REAPER post-fader = **après les effets d'insert** de la piste, looper + 4 containers : demandé le 26 nov., ne jamais utiliser le mode pré-FX), des loopers 11-18 et des entrées 2-9 vers les aux 20-24. Si les pistes aux manquent (projet neuf / autre utilisateur) : à créer (à confirmer).
 - **Réglage** : niveau de send par looper × aux, au Twister / MIDI Learn / rush (`l1 aux2 0.5`), **règle de groupe** habituelle (un looper groupé fait
   suivre son groupe). Pad = ouvrir / fermer le send avec un court fondu, réouverture au **dernier niveau réglé** ; les queues continuent sur l'aux.
 - **Entrées** : sends vers les aux possibles (reverb entendue en direct, non enregistrée). **Quand la sortie vers le parent est coupée (« in mute »,
