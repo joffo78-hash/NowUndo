@@ -327,7 +327,8 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - L'utilisateur est **sur PC (Windows)** : Mac sans importance. **À faire d'abord** : installer reablink par ReaPack, essai avec Live et le script
   « ReaBlink Monitor » (pairs, tempo, phase).
 - **26 nov. après-midi : reablink INSTALLÉ et fonctionne** chez l'utilisateur. Il est dans le dépôt **ReaTeam Extensions** (Browse packages > « ReaBlink »),
-  pas besoin d'importer de dépôt (importer `https://github.com/ak5k/reablink` = erreur XML : page GitHub, pas un index). Reste : essai avec un autre appareil Link.
+  pas besoin d'importer de dépôt (importer `https://github.com/ak5k/reablink` = erreur XML : page GitHub, pas un index). **Essai réussi le 26 nov. : deux REAPER
+  (PC fixe + portable) se voient en Link** (ReaBlink_Monitor). Pas d'app Android gratuite fiable trouvée (Soundbrenner payante) ; test Live = version d'essai.
 
 ## 26 nov. : SENDS VERS LES PISTES AUX (spécification validée, rien de codé)
 
