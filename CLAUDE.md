@@ -341,7 +341,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Entrées** : sends vers les aux possibles (reverb entendue en direct, non enregistrée). **Quand la sortie vers le parent est coupée (« in mute »,
   `VL.set_input_parent`, gmem `6050+n`), ses sends vers les aux sont coupés aussi**, puis remis à l'identique : enregistrer en silence dans un looper.
 - **Les loopers héritent des sends de leurs entrées, COPIE AU REC (choix B de l'utilisateur, 26 nov.)** : quand un looper commence à enregistrer
-  (REC, Re-Rec ; overdub à préciser) une entrée qui lui est affectée (masques `6010+i` / `6020+i`), il copie les niveaux de send de cette entrée
+  (REC, Re-Rec ; **un overdub ne change rien** : les sends du 1er REC sont gardés, c'est au musicien de garder une même famille de sons dans un looper) une entrée qui lui est affectée (masques `6010+i` / `6020+i`), il copie les niveaux de send de cette entrée
   vers les aux 20-24 et les **garde** (la boucle sonne comme jouée ; changer ensuite les sends de l'entrée ne touche pas les boucles déjà posées).
   Réglage à la main du send du looper possible ensuite. **Le « in mute » de l'entrée ne compte pas** : on copie le réglage des sends, pas leur
   coupure (une boucle enregistrée en silence garde sa reverb). Plusieurs entrées → pour chaque aux, le **plus grand** niveau. Suivi en direct
