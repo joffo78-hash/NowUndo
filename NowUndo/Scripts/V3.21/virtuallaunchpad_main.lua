@@ -499,7 +499,7 @@ VL.config = {
   -- Reglages propres a ce script (hors S.cfg : la synchro avec le miroir / la remote web ecrase S.cfg)
   unrouted_mode = "parent",        -- "parent" : coupe l'envoi au parent (B_MAINSEND) | "mute" : mute de piste (B_MUTE)
   follow_aux_sends = true,         -- les sources d'un looper suivent ses sends vers les pistes d'effets auxiliaires
-  aux_track_first = 20, aux_track_count = 4,   -- pistes d'effets auxiliaires : numeros REAPER 20 a 23
+  aux_track_first = 20, aux_track_count = 5,   -- pistes d'effets auxiliaires : numeros REAPER 20 a 24 (26 nov. : 5 aux)
   aux_follow_chain = true,         -- inclut les sources qui atteignent le looper via des routes looper -> looper
   sync_fx_patterns = { "master sync", "master_synchro", "central timebase" },   -- nom du JSFX Master Sync (minuscules)
   sync_inbox = 96,                 -- gmem[96..98] : boite de commandes du JSFX Master Sync (Main / Chorus / Bridge)
@@ -720,64 +720,283 @@ function LPF.reachable_loopers(k)
   return seen
 end
 
+-- 26 nov. 2026 : SENDS vers les pistes AUX (reverb, delay... partagees), voir CLAUDE.md « SENDS VERS LES PISTES AUX ».
+--  * envois post-fader (apres les effets d'insert de la piste), MIDI coupe ; jamais supprimes, fermes = mute (le niveau reste)
+--  * LOOPER : ses sends = l'etat REEL des envois REAPER (rush "l1 aux2 0.5", table de mixage...)
+--  * ENTREE : ses sends « propres » sont memorises dans la piste (P_EXT) ; ils s'appliquent quand aucun looper qui a une
+--    boucle ne l'impose. Un looper AVEC BOUCLE impose EXACTEMENT ses sends aux entrees qui l'alimentent (on entend
+--    l'overdub avec la reverb de la boucle) ; priorite : looper qui enregistre / overdub > looper selectionne > plus grand niveau.
+--  * IN MUTE (entree sortie du parent) : ses sends vers les aux sont coupes aussi (enregistrer en silence) ; ses reglages restent.
+--  * COPIE AU REC : quand un looper entre en REC (1er REC ou Re-Rec, pas l'overdub), il prend les sends PROPRES de ses
+--    entrees (plus grand niveau par aux) et les garde.
+--  * AUX -> LOOPER (rush "l3 from aux2") : envoi de la piste aux vers le looper (reechantillonner une reverb) ; refuse si
+--    le looper envoie deja vers cette aux (boucle de feedback).
+--  * ouverture / fermeture avec un fondu de ~60 ms (pas de clic) ; les queues continuent sur l'aux.
+VL.AUX = VL.AUX or { w = {}, ramps = {}, prev = {}, t = 0, own = {}, own_t = {} }
+VL.AUX.KEY = "P_EXT:nowundo_aux_own"
+VL.AUX.FADE = 0.06
+
+function LPF.aux_count() return math.max(0, math.min(8, VL.config.aux_track_count or 5)) end
+function LPF.aux_track(a) return LPF.track_by_index_1based((VL.config.aux_track_first or 20) + a - 1) end
+
+-- etat REEL d'un envoi : ouvert ?, volume (amplitude), index
+function LPF.aux_get(src, dst)
+  local idx = LPF.find_send(src, dst)
+  if not idx then return false, nil, nil end
+  return send_val(src, idx, "B_MUTE") == 0, send_val(src, idx, "D_VOL"), idx
+end
+
+-- applique l'etat voulu d'un envoi src -> dst (ouvert / ferme + volume), avec fondu a l'ouverture et a la fermeture
+function LPF.aux_apply(src, dst, open, vol, key)
+  if not (src and dst) then return end
+  local A = VL.AUX
+  vol = math.max(0, math.min(4, vol or 1))
+  local r = A.ramps[key]
+  if r then                                            -- fondu en cours : on change juste sa cible
+    if open then r.v1 = vol; r.close = false; r.final = vol
+    else r.v1 = 0; r.close = true; r.final = r.final or vol end
+    A.w[key] = { open = open, vol = vol }
+    return
+  end
+  local cur_open, cur_vol, idx = LPF.aux_get(src, dst)
+  if open then
+    if not idx then
+      idx = LPF.ensure_send(src, dst)                  -- post-fader, stereo, sans MIDI (cree ferme puis fondu)
+      if not idx then return end
+      reaper.SetTrackSendInfo_Value(src, 0, idx, "B_MUTE", 1)
+      cur_open = false
+    end
+    LPF.send_nomidi(src, idx)
+    if not cur_open then
+      reaper.SetTrackSendInfo_Value(src, 0, idx, "D_VOL", 0)
+      reaper.SetTrackSendInfo_Value(src, 0, idx, "B_MUTE", 0)
+      A.ramps[key] = { src = src, dst = dst, v0 = 0, v1 = vol, t0 = reaper.time_precise(), close = false, final = vol }
+    elseif math.abs((cur_vol or 0) - vol) > 1e-4 then
+      reaper.SetTrackSendInfo_Value(src, 0, idx, "D_VOL", vol)
+    end
+  elseif idx and cur_open then
+    A.ramps[key] = { src = src, dst = dst, v0 = cur_vol or 0, v1 = 0, t0 = reaper.time_precise(), close = true, final = vol }
+  end
+  A.w[key] = { open = open, vol = vol }
+end
+
+-- avance les fondus (appele a chaque tick du Launchpad)
+function VL.aux_ramps(t)
+  local A = VL.AUX
+  for key, r in pairs(A.ramps) do
+    local idx = LPF.find_send(r.src, r.dst)
+    if not idx then A.ramps[key] = nil
+    else
+      local x = math.min(1, (t - r.t0) / A.FADE)
+      local v = r.v0 + (r.v1 - r.v0) * x
+      reaper.SetTrackSendInfo_Value(r.src, 0, idx, "D_VOL", v)
+      if x >= 1 then
+        if r.close then                                -- ferme : mute, puis on remet le niveau (reouverture au dernier niveau)
+          reaper.SetTrackSendInfo_Value(r.src, 0, idx, "B_MUTE", 1)
+          reaper.SetTrackSendInfo_Value(r.src, 0, idx, "D_VOL", r.final or r.v0)
+        end
+        A.ramps[key] = nil
+      end
+    end
+  end
+end
+
+-- sends PROPRES d'une entree : { [a] = { on = bool, vol = n } }, memorises dans la piste (survit au projet)
+function LPF.aux_own(k, tr)
+  local A = VL.AUX
+  if A.own[k] then return A.own[k] end
+  local own = {}
+  local _, s = reaper.GetSetMediaTrackInfo_String(tr, A.KEY, "", false)
+  local a = 0
+  for on, v in (s or ""):gmatch("(%d):([%d%.]+)") do a = a + 1; own[a] = { on = on == "1", vol = tonumber(v) or 1 } end
+  for b = 1, LPF.aux_count() do                        -- rien de memorise : l'etat actuel des envois REAPER
+    if not own[b] then
+      local aux = LPF.aux_track(b)
+      local o, v = false, nil
+      if aux then o, v = LPF.aux_get(tr, aux) end
+      own[b] = { on = o, vol = v or 1 }
+    end
+  end
+  A.own[k] = own
+  return own
+end
+function LPF.aux_own_save(k, tr)
+  local own, p = VL.AUX.own[k], {}
+  if not (own and tr) then return end
+  for a = 1, LPF.aux_count() do p[a] = (own[a].on and "1" or "0") .. ":" .. string.format("%.4f", own[a].vol) end
+  reaper.GetSetMediaTrackInfo_String(tr, VL.AUX.KEY, table.concat(p, " "), true)
+end
+
+function LPF.aux_has_loop(i)
+  local L = S.loopers[i]
+  return L ~= nil and (reaper.gmem_read(100 + i - 1) or 0) > 0 and (L.length or 0) > 0
+end
+function LPF.aux_recording(i) local st = S.loopers[i] and S.loopers[i].state return st == 1 or st == 3 or st == 4 or st == 5 or st == 6 end
+
+-- sends qu'un looper impose a l'entree k (nil = aucun looper avec boucle ne l'alimente)
+function LPF.aux_imposed(k, tracks)
+  local cand = {}
+  local reach = LPF.reachable_loopers(k)
+  for i = 1, NLOOP do if reach[i] and LPF.aux_has_loop(i) and tracks.loopers[i] then cand[#cand + 1] = i end end
+  if #cand == 0 then return nil end
+  local pick
+  for _, i in ipairs(cand) do if LPF.aux_recording(i) then pick = i break end end
+  if not pick then for _, i in ipairs(cand) do if i == S.sel_looper then pick = i break end end end
+  local list = pick and { pick } or cand
+  local out = {}
+  for a = 1, LPF.aux_count() do
+    local aux, best = LPF.aux_track(a), nil
+    for _, i in ipairs(list) do
+      local o, v = false, nil
+      if aux then o, v = LPF.aux_get(tracks.loopers[i], aux) end
+      if o and (not best or v > best.vol) then best = { on = true, vol = v } end
+    end
+    out[a] = best or { on = false, vol = 1 }
+  end
+  return out
+end
+
+-- COPIE AU REC : le looper i prend les sends propres de ses entrees (plus grand niveau par aux) et les garde
+function VL.aux_copy_on_rec(i, tracks)
+  local ltr = tracks.loopers[i]
+  if not ltr then return end
+  local srcs = {}
+  for k = 1, NIN do if S.routing.in_l[k][i] and tracks.inputs[k] then srcs[#srcs + 1] = k end end
+  if #srcs == 0 then return end
+  local names = {}
+  for a = 1, LPF.aux_count() do
+    local aux, best = LPF.aux_track(a), nil
+    for _, k in ipairs(srcs) do
+      local o = LPF.aux_own(k, tracks.inputs[k])[a]
+      if o and o.on and (not best or o.vol > best) then best = o.vol end
+    end
+    if aux then
+      local _, cv = LPF.aux_get(ltr, aux)
+      LPF.aux_apply(ltr, aux, best ~= nil, best or cv or 1, "l" .. i .. ":" .. a)
+      if best then names[#names + 1] = "aux" .. a end
+    end
+  end
+  log("info", "L%d REC : sends des entrees copies (%s)", i, #names > 0 and table.concat(names, " ") or "aucun")
+end
+
+-- coeur : applique les regles a toutes les entrees (appele en continu par VL.tick et a chaque changement de routing)
 function VL.update_aux_follow()
   if VL.config.follow_aux_sends == false then return end
-  if not (reaper and reaper.CountTracks) then return end
-  local first = VL.config.aux_track_first or 20
-  local count = VL.config.aux_track_count or 4
+  if not (reaper and reaper.CountTracks) or VL.mirror_mode then return end
   local tracks = VL.resolve_tracks(false)
-  local R = S.routing.in_l
-  for a = first, first + count - 1 do
-    local aux = LPF.track_by_index_1based(a)
-    if aux then
-      -- reglages de reference : un looper qui envoie (non mute) vers cette piste d'effets
-      local ref = {}
-      for i = 1, NLOOP do
-        local ltr = tracks.loopers[i]
-        local idx = ltr and LPF.find_send(ltr, aux)
-        if idx and send_val(ltr, idx, "B_MUTE") == 0 then
-          ref[i] = { vol = send_val(ltr, idx, "D_VOL"), pan = send_val(ltr, idx, "D_PAN"), mode = send_val(ltr, idx, "I_SENDMODE") }
-        end
-      end
-      if VL.debug then
-        local who = {}
-        for i = 1, NLOOP do if ref[i] then who[#who + 1] = "L" .. i end end
-        local sig = a .. ":" .. table.concat(who, ",")
-        VL._auxdbg = VL._auxdbg or {}
-        if VL._auxdbg[a] ~= sig then
-          VL._auxdbg[a] = sig
-          local _, nm = reaper.GetTrackName(aux)
-          reaper.ShowConsoleMsg(string.format("[VL] piste %d '%s' : loopers qui envoient vers elle (send non mute) = {%s}\n", a, nm, table.concat(who, ",")))
-        end
-      end
-      for k = 1, NIN do
-        local src = tracks.inputs[k]
-        if src then
-          local best
-          local reach = LPF.reachable_loopers(k)
-          for i = 1, NLOOP do
-            if reach[i] and ref[i] and (not best or ref[i].vol > best.vol) then best = ref[i] end
+  local A = VL.AUX
+  -- 1) copie au REC (transition vers l'etat 1 = REC ; le 1er passage au demarrage ne compte pas)
+  for i = 1, NLOOP do
+    local st = S.loopers[i] and S.loopers[i].state
+    if st == 1 and A.prev[i] ~= nil and A.prev[i] ~= 1 then VL.aux_copy_on_rec(i, tracks) end
+    A.prev[i] = st
+  end
+  -- 2) entrees : in mute > impose par un looper avec boucle > sends propres
+  for k = 1, NIN do
+    local tr = tracks.inputs[k]
+    if tr then
+      local own = LPF.aux_own(k, tr)
+      local cut = reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND") == 0
+      local imp = LPF.aux_imposed(k, tracks)
+      for a = 1, LPF.aux_count() do
+        local aux = LPF.aux_track(a)
+        if aux then
+          local key = "in" .. k .. ":" .. a
+          local o, v = LPF.aux_get(tr, aux)
+          local w = A.w[key]
+          if not cut and not imp and not A.ramps[key] and w and (o ~= w.open or (o and v and math.abs(v - w.vol) > 1e-3)) then
+            own[a] = { on = o, vol = v or own[a].vol }   -- reglage manuel dans REAPER pendant que l'entree est libre : devient le sien
+            LPF.aux_own_save(k, tr)
           end
-          if best then
-            local idx = LPF.ensure_send(src, aux)
-            if idx then
-              local ch = set_send_val(src, idx, "B_MUTE", 0)
-              ch = set_send_val(src, idx, "D_VOL", best.vol) or ch
-              ch = set_send_val(src, idx, "D_PAN", best.pan) or ch
-              ch = set_send_val(src, idx, "I_SENDMODE", best.mode) or ch
-              if ch then log("info", "IN%d -> piste %d : send effet suit le looper", k, a) end
-            end
-          else
-            local idx = LPF.find_send(src, aux)
-            if idx and send_val(src, idx, "B_MUTE") == 0 then
-              reaper.SetTrackSendInfo_Value(src, 0, idx, "B_MUTE", 1)
-              log("info", "IN%d -> piste %d : send effet coupe", k, a)
-            end
+          local base = (imp and imp[a]) or own[a]
+          local want = cut and { on = false, vol = base.vol } or base   -- in mute : ferme, le niveau voulu reste pret pour la reouverture
+          local wvol = (want.on or cut) and want.vol or own[a].vol
+          if A.ramps[key] then
+            if w and (w.open ~= want.on or math.abs(w.vol - wvol) > 1e-4) then LPF.aux_apply(tr, aux, want.on, wvol, key) end
+          elseif o ~= want.on or (want.on and v and math.abs(v - want.vol) > 1e-4) then
+            LPF.aux_apply(tr, aux, want.on, wvol, key)   -- impose / in mute : un reglage manuel est remis en place
           end
+          A.w[key] = { open = want.on, vol = wvol }
         end
       end
     end
   end
+  -- 3) garde-fou : un envoi aux -> looper est coupe si ce looper envoie aussi vers cette aux (boucle de feedback)
+  for i = 1, NLOOP do
+    local ltr = tracks.loopers[i]
+    for a = 1, LPF.aux_count() do
+      local aux = ltr and LPF.aux_track(a)
+      if aux then
+        local rx = LPF.aux_get(aux, ltr)
+        if rx and LPF.aux_get(ltr, aux) then
+          LPF.aux_apply(aux, ltr, false, 1, "rx" .. i .. ":" .. a)
+          log("warn", "aux%d -> L%d coupe : L%d envoie aussi vers aux%d (boucle de feedback)", a, i, i, a)
+        end
+      end
+    end
+  end
+end
+
+-- commandes des rushes (ExtState NowUndo_VLcmd/q) :
+--   aux_l_<i>_<a>_<v>  : send du looper i vers l'aux a   | v = niveau en millièmes (500 = 0,5) ou on / off / tog
+--   aux_in_<k>_<a>_<v> : send PROPRE de l'entree k vers l'aux a (s'applique quand aucun looper ne l'impose)
+--   auxrx_<i>_<a>_<m>  : envoi de l'aux a vers le looper i (on / off / tog)
+function VL.aux_cmd(name)
+  if not (reaper and reaper.CountTracks) then return false end
+  local tracks = VL.resolve_tracks(false)
+  local kind, n, a, v = name:match("^aux_(%a+)_(%d+)_(%d+)_(%w+)$")
+  n, a = tonumber(n), tonumber(a)
+  if kind and a and a >= 1 and a <= LPF.aux_count() then
+    local aux = LPF.aux_track(a)
+    if not aux then log("warn", "piste aux%d (piste %d) introuvable", a, (VL.config.aux_track_first or 20) + a - 1) return true end
+    local lvl = tonumber(v)
+    if kind == "l" and n >= 1 and n <= NLOOP and tracks.loopers[n] then
+      local ltr = tracks.loopers[n]
+      local o, cv = LPF.aux_get(ltr, aux)
+      local open, vol = o, cv or 1
+      if lvl then vol = lvl / 1000; open = vol > 0; if vol <= 0 then vol = cv or 1 end
+      elseif v == "on" then open = true elseif v == "off" then open = false elseif v == "tog" then open = not o end
+      if open and LPF.aux_get(aux, ltr) then log("warn", "L%d -> aux%d refuse : aux%d envoie deja vers L%d (feedback)", n, a, a, n) return true end
+      LPF.aux_apply(ltr, aux, open, vol, "l" .. n .. ":" .. a)
+      log("info", "L%d -> aux%d : %s", n, a, open and string.format("%.2f", vol) or "ferme")
+    elseif kind == "in" and n >= 1 and n <= NIN and tracks.inputs[n] then
+      local own = LPF.aux_own(n, tracks.inputs[n])
+      local o = own[a]
+      if lvl then if lvl > 0 then o.vol = lvl / 1000; o.on = true else o.on = false end
+      elseif v == "on" then o.on = true elseif v == "off" then o.on = false elseif v == "tog" then o.on = not o.on end
+      LPF.aux_own_save(n, tracks.inputs[n])
+      log("info", "IN%d -> aux%d : %s%s", n, a, o.on and string.format("%.2f", o.vol) or "ferme",
+          LPF.aux_imposed(n, tracks) and " (impose par un looper pour l'instant)" or "")
+      VL.update_aux_follow()
+    end
+    return true
+  end
+  local ri, ra, rm = name:match("^auxrx_(%d+)_(%d+)_(%a+)$")
+  ri, ra = tonumber(ri), tonumber(ra)
+  if ri and ra and ri >= 1 and ri <= NLOOP and ra >= 1 and ra <= LPF.aux_count() then
+    local aux, ltr = LPF.aux_track(ra), tracks.loopers[ri]
+    if not (aux and ltr) then return true end
+    local o = LPF.aux_get(aux, ltr)
+    local open = (rm == "on") or (rm == "tog" and not o)
+    if open and LPF.aux_get(ltr, aux) then
+      log("warn", "aux%d -> L%d refuse : L%d envoie deja vers aux%d (boucle de feedback)", ra, ri, ri, ra)
+      return true
+    end
+    LPF.aux_apply(aux, ltr, open, 1, "rx" .. ri .. ":" .. ra)
+    log("info", "aux%d -> L%d : %s", ra, ri, open and "ouvert" or "ferme")
+    return true
+  end
+  return false
+end
+
+-- tick : fondus a chaque passage, regles 10 fois par seconde
+function VL.aux_tick(t)
+  if VL.mirror_mode or not (reaper and reaper.CountTracks) then return end
+  VL.aux_ramps(t)
+  if t - (VL.AUX.t or 0) < 0.1 then return end
+  VL.AUX.t = t
+  local ok, err = pcall(VL.update_aux_follow)
+  if not ok and VL._aux_err ~= err then VL._aux_err = err; log("error", "sends aux : %s", tostring(err)) end
 end
 
 function VL.update_input_mutes()
@@ -2692,6 +2911,7 @@ function VL.ext_cmd_poll()
       if lp and lp >= 1 and lp <= NPAGE and S.page ~= lp then VL.set_page(lp) end
       local pk = tonumber(name:match("^p4page_(%d+)$"))
       if pk and VL.set_layer("rp" .. pk) and S.page ~= 4 then VL.set_page(4) end
+      if name:match("^aux") then VL.aux_cmd(name) end                       -- 26 nov. : sends aux (rushes)
       local mk, mm = name:match("^inmute_(%d+)_(%a+)$")                    -- V3.27 : rush "in1 mute" / "in1 mute off"
       mk = tonumber(mk)
       if mk and mk >= 1 and mk <= NIN then VL.set_input_mute(mk, mm) end
@@ -3487,6 +3707,7 @@ function VL.tick(t)
   if VL._lp_owner then reaper.SetExtState("nowundo_vl", "lp_hb", tostring(reaper.time_precise()), false) end   -- verrou d'instance
   if VL.poll_looper_feedback then VL.poll_looper_feedback() end
   VL.rec_dub_tick(); VL.ext_cmd_poll()   -- [REC>DUB]
+  VL.aux_tick(t)                          -- sends vers les pistes aux (26 nov.)
   VL.drop_tick(t)                         -- drop de groupe (V3.24)
   VL.excl_poll(t)
   if VL.macros_poll then VL.macros_poll(t) end

@@ -362,6 +362,23 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - Conséquences : **Performance** (`NowUndo_Performance.lua`) doit aussi enregistrer les pistes aux 20-24 (sinon la reverb partagée manque dans
   l'enregistrement du concert) ; le **Drop** n'inclut toujours pas les aux (la reverb partagée continue par le send après la bascule).
 
+## 26 nov. : SENDS AUX = FAIT (branche `nowundo-sends`, non testé dans REAPER)
+
+- **Launchpad** (`virtuallaunchpad_main.lua`) : config `aux_track_first = 20`, `aux_track_count = 5`. Moteur `VL.AUX` (remplace l'ancien
+  `update_aux_follow`) : `LPF.aux_apply` (fondu 60 ms, fermer = rampe vers 0 puis `B_MUTE` et niveau remis), envois créés post-fader
+  (`I_SENDMODE` 0) MIDI coupé ; sends **propres** de chaque entrée mémorisés dans la piste (`P_EXT:nowundo_aux_own`, `on:vol` × 5) ;
+  `VL.update_aux_follow` toutes les 0,1 s (`VL.aux_tick` dans `VL.tick`) : (1) copie au REC (passage en état 1, plus grand niveau des
+  entrées routées `S.routing.in_l`), (2) entrées : in mute (`B_MAINSEND` 0) > imposé par un looper avec boucle (`LPF.aux_imposed` :
+  looper en REC / overdub, sinon sélectionné, sinon max) > propre ; réglage manuel dans REAPER d'une entrée libre = devient le sien,
+  d'une entrée imposée / coupée = remis en place ; (3) garde-fou feedback (aux → looper fermé si le looper envoie vers cette aux).
+  Les pistes aux manquantes ne sont **pas** créées automatiquement (à faire si besoin).
+- **Commandes** `NowUndo_VLcmd/q` : `aux_l_<i>_<a>_<v>`, `aux_in_<k>_<a>_<v>` (v = niveau en millièmes, `on` = dernier niveau, `off`,
+  `tog` ; 0 = fermer), `auxrx_<i>_<a>_<on|off|tog>` (aux → looper, refusé si feedback). `VL.aux_cmd`.
+- **Rushes** (`NowUndo_Scenario.lua`) : `aux1`..`aux5` [niveau | -6db | 50% | on | off] sur loopers / groupes / `all` / entrées
+  (`in1 aux2 -6db`) ; `l3 from aux2 [off]` = envoi aux → looper (loopers seulement). Toggle sans valeur = bascule ; gate / toggle relâché =
+  fermé. Palette « Sends aux ». Tests : `tools/taux.lua` (moteur, 24 contrôles) et `tools/taux_rush.lua` (mots → commandes).
+- **Reste** : réglage des sends au Twister / MIDI Learn / web ; `NowUndo_Performance.lua` doit enregistrer les pistes 20-24.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par

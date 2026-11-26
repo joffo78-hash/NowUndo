@@ -176,6 +176,25 @@ for slot = 1, 4 do
   end
 end
 
+-- 26 nov. : aux1..aux5 = sends vers les pistes AUX 20..24 (reverb, delay partages). "l1 aux2 0.5" (niveau 0..1, -6db, 50 %),
+-- "l1 aux2" / "on" = ouvre au dernier niveau, "off" = ferme ; "in1 aux2 0.5" = send propre de l'entree 1. Execute par le Launchpad.
+for a = 1, 5 do
+  H["aux" .. a] = function(v)
+    local mode
+    if v == nil then mode = tmode and "tog" or "on"
+    elseif not tostring(v):match("^[%-%.%d]") and onoff(v) ~= nil then mode = onoff(v) and "on" or "off"   -- "1" = niveau 1, pas "on"
+    else
+      local n, suf = num(v)
+      if not n then return nil, "niveau (0..1, -6db, 50%) ou on / off attendu" end
+      if suf == "db" then n = (n <= -150) and 0 or 10 ^ (n / 20) end
+      if n < 0 or n > 4 then return nil, "niveau entre 0 et 4 (ou en dB)" end
+      mode = tostring(math.floor(n * 1000 + 0.5))
+    end
+    if H._omode then mode = (mode == "off") and "on" or "off" end     -- GATE relache / TOGGLE eteint : on defait
+    return { { glob = "aux", a = a, mode = mode } }
+  end
+end
+
 H.clear     = cmdonly(2)
 H.clearfull = cmdonly(11)
 local function cmdall(cmd)                          -- CLEAR ALL : ignore la cible (et la selection d'une macro), vise les 8 loopers
@@ -458,6 +477,7 @@ local function compile(text, forced, toggle, gate_off)
     local sc = SYNC_WORDS[(act:lower():gsub("%s+", ""))]
     local gq, gerr = H._go(act:lower())                 -- V3.27 : go lp 2 | go 4c | go t3
     local tgs, tgn = act:lower():match("^(.-)%s*%f[%a]to%s+g%s*%(?%s*(%d+)%s*%)?$")   -- V3.27 : l3 to g2 (g0 = sans groupe)
+    local fxs, fxa, fxm = act:lower():match("^(.-)%s*%f[%a]from%s+aux%s*(%d)%s*(%a*)$")   -- 26 nov. : l3 from aux2 = aux2 -> looper 3
     if gq or gerr then
       if gerr then errs[#errs + 1] = "[" .. act .. "] " .. gerr
       elseif not H._omode then items[#items + 1] = { glob = "go", qname = gq } end
@@ -475,6 +495,23 @@ local function compile(text, forced, toggle, gate_off)
           if H._omode then qn = (tgn > 0) and string.format("grpoff_%d_%d", i, tgn) or nil   -- relachement / OFF : sort du groupe
           else qn = string.format("grp_%d_%d", i, tgn) end
           if qn then items[#items + 1] = { glob = "grp", qname = qn } end
+        end
+      end
+    elseif fxa then
+      fxa = tonumber(fxa)
+      local tt, te
+      if fxs == "" then tt = last_targets or forced; te = "cible manquante (l3 from aux2)"
+      else tt, te = parse_target((fxs:gsub("%s+", ""))) end
+      if fxa < 1 or fxa > 5 then errs[#errs + 1] = "[" .. act .. "] aux" .. fxa .. " inexistante (aux1-aux5 = pistes 20-24)"
+      elseif fxm ~= "" and onoff(fxm) == nil then errs[#errs + 1] = "[" .. act .. "] on / off attendu apres aux" .. fxa
+      elseif not tt then errs[#errs + 1] = "[" .. act .. "] " .. te
+      else
+        if fxs ~= "" then last_targets = tt end
+        local md = (fxm == "") and (tmode and "tog" or "on") or (onoff(fxm) and "on" or "off")
+        if H._omode then md = (md == "off") and "on" or "off" end
+        for _, i in ipairs(tt) do
+          if i > 100 then errs[#errs + 1] = "[" .. act .. "] from aux : seulement vers un looper (l1..l8)"; break end
+          items[#items + 1] = { i = i, glob = "auxrx", qname = string.format("auxrx_%d_%d_%s", i, fxa, md), key = "from#" .. fxa }
         end
       end
     elseif (sc or pk) and H._omode then
@@ -548,7 +585,12 @@ local function compile(text, forced, toggle, gate_off)
                   items[#items + 1] = { i = i, glob = "inmute", qname = string.format("inmute_%d_%s", i - 100, md), key = "mute" }
                   break
                 end
-                if i > 100 and op.glob ~= "fx" then errs[#errs + 1] = "[" .. act .. "] sur une entree (in" .. (i - 100) .. ") : seulement fx 1..4 et mute"; ok = false; break end
+                if op.glob == "aux" then                      -- 26 nov. : send vers une piste aux (looper ou entree), par le Launchpad
+                  items[#items + 1] = { i = i, glob = "aux", key = "aux#" .. op.a,
+                    qname = string.format("aux_%s_%d_%d_%s", i > 100 and "in" or "l", i > 100 and i - 100 or i, op.a, op.mode) }
+                  break
+                end
+                if i > 100 and op.glob ~= "fx" then errs[#errs + 1] = "[" .. act .. "] sur une entree (in" .. (i - 100) .. ") : seulement fx 1..4, mute et aux1..aux5"; ok = false; break end
                 if not op.all then items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, glob = op.glob, slot = op.slot, want = op.want, key = k .. (op.slot and ("#" .. op.slot) or "") } end
               end
             end
@@ -1943,7 +1985,7 @@ function ED.classic(text)
 end
 -- mots on / off (le bouton OFF leur ajoute "off")
 ED.ONOFF = { rec = 1, replace = 1, autorep = 1, multiply = 1, rev = 1, pp = 1, slicer = 1, cloud = 1, link = 1, auto = 1,
-             oneshot = 1, br = 1, e1 = 1, e2 = 1, e3 = 1, e4 = 1, play = 1 }
+             oneshot = 1, br = 1, e1 = 1, e2 = 1, e3 = 1, e4 = 1, play = 1, aux1 = 1, aux2 = 1, aux3 = 1, aux4 = 1, aux5 = 1 }
 -- { libelle de categorie, { mot, ... } } ; un mot suivi de "..." ouvre un menu de valeurs
 ED.CATS = {
   { "Derniere action", { "off", "*" } },          -- off : ajoute / retire "off" ; * : armee au point de synchro
@@ -1958,6 +2000,7 @@ ED.CATS = {
   { "Slicer",         { "ssteps...", "srate...", "sgrid...", "sdecay...", "sattack...", "spitch...", "smax..." } },
   { "Global",         { "clearall", "clearallfull", "sync", "unsync", "syncall", "unsyncall", "r(n)...", "g(n)..." } },
   { "Groupes / pages", { "to...", "go..." } },     -- V3.27 : l3 to g2 | go lp 1, go 4c, go t1
+  { "Sends aux",      { "aux1...", "aux2...", "aux3...", "aux4...", "aux5...", "from..." } },   -- 26 nov. : l1 aux2 0.5 | l3 from aux2
 }
 ED.VALS = {
   vol = { "0db", "-3db", "-6db", "-12db", "-24db", "50%", "reset" }, speed = { "0.5", "0.75", "1", "1.5", "2", "reset" },
@@ -1973,6 +2016,8 @@ ED.VALS = {
   scale = { "free", "demi", "ton", "penta", "maj", "mharm", "mmel", "dim", "aug", "oct" },
   sattack = { "0", "10", "50", "100", "reset" }, spitch = { "0", "25", "50", "100", "reset" }, smax = { "4", "8", "16", "32", "reset" },
   ["to"] = { "g1", "g2", "g3", "g4", "g0" },
+  aux1 = { "1", "0.5", "-6db", "-12db", "off" }, aux2 = { "1", "0.5", "-6db", "-12db", "off" }, aux3 = { "1", "0.5", "-6db", "-12db", "off" },
+  aux4 = { "1", "0.5", "-6db", "-12db", "off" }, aux5 = { "1", "0.5", "-6db", "-12db", "off" }, from = { "aux1", "aux2", "aux3", "aux4", "aux5" },
   ["go"] = { "lp 1", "lp 2", "lp 3", "4a", "4b", "4c", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t7b", "t7c", "t7d", "t8", "t9" },
   ["r(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" }, ["g(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" },
 }
