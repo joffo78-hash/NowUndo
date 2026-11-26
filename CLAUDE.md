@@ -326,6 +326,8 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - « Se voir » : commencer par liste des joueurs + super maître + longueur de boucle + repère du début de cycle ; état des loopers des autres plus tard.
 - L'utilisateur est **sur PC (Windows)** : Mac sans importance. **À faire d'abord** : installer reablink par ReaPack, essai avec Live et le script
   « ReaBlink Monitor » (pairs, tempo, phase).
+- **26 nov. après-midi : reablink INSTALLÉ et fonctionne** chez l'utilisateur. Il est dans le dépôt **ReaTeam Extensions** (Browse packages > « ReaBlink »),
+  pas besoin d'importer de dépôt (importer `https://github.com/ak5k/reablink` = erreur XML : page GitHub, pas un index). Reste : essai avec un autre appareil Link.
 
 ## 26 nov. : SENDS VERS LES PISTES AUX (spécification validée, rien de codé)
 
