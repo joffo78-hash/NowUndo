@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-manuel"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-preio"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -304,6 +304,17 @@ local function gmem_broadcast_cmd(cmd, arg)
   return n
 end
 
+-- 27 nov. : In / Out pre-reglables sur un looper VIDE : le JSFX publie une longueur fictive (112000 + (looper*3 + part)*20 + 4)
+-- et la fenetre pre-reglee (+5 In, +6 Width) ; NU_IO(b, 44|45|46) lit la vraie boucle, sinon ces valeurs fictives.
+function NU_IO(b, off)
+  local v = reaper.gmem_read(b + off) or 0
+  if (reaper.gmem_read(b + 46) or 0) > 0 then return v end
+  local x = 112000 + math.floor((b - 1000) / 200 + 0.5) * 20
+  local pl = reaper.gmem_read(x + 4) or 0
+  if pl <= 0 then return v end
+  if off == 46 then return pl elseif off == 44 then return reaper.gmem_read(x + 5) or 0 end
+  return reaper.gmem_read(x + 6) or pl
+end
 local function gmem_write_param(looper, param_id, value, part)
   if not (reaper and reaper.gmem_attach and reaper.gmem_write) then return false end
   local L = S.loopers[looper]
@@ -354,11 +365,15 @@ VL.backend = {
       -- value = fraction de la boucle (signe = sens). Utilise length / loop_start / loop_width du feedback.
       local L = S.loopers[looper]
       local len = L.length or 0
+      local start = L.loop_start or 0
+      local width = L.loop_width or len
+      if len <= 0 and reaper and reaper.gmem_read then                    -- 27 nov. : looper vide = fenetre fictive (In / Out pre-regles)
+        local bb = gmem_base(looper, L.part or 1)
+        len, start, width = NU_IO(bb, 46), NU_IO(bb, 44), NU_IO(bb, 45)
+      end
       if len <= 0 then log("debug", "loop step ignore: length inconnue L%d", looper) return end
       local frac = tonumber(value) or 0.01
       local delta = frac * len
-      local start = L.loop_start or 0
-      local width = L.loop_width or len
       local min_w = math.max(1, len * 0.01)
       if action == "loop_in_step" then
         local new_in = math.max(0, math.min(start + delta, len - min_w))

@@ -105,8 +105,20 @@ local function active_part(i)
   return math.floor(p + 0.5)
 end
 
+-- 27 nov. : In / Out pre-reglables sur un looper VIDE : le JSFX publie une longueur fictive (112000 + (looper*3 + part)*20 + 4)
+-- et la fenetre pre-reglee (+5 In, +6 Width) ; NU_IO(b, 44|45|46) lit la vraie boucle, sinon ces valeurs fictives.
+function NU_IO(b, off)
+  local v = reaper.gmem_read(b + off) or 0
+  if (reaper.gmem_read(b + 46) or 0) > 0 then return v end
+  local x = 112000 + math.floor((b - 1000) / 200 + 0.5) * 20
+  local pl = reaper.gmem_read(x + 4) or 0
+  if pl <= 0 then return v end
+  if off == 46 then return pl elseif off == 44 then return reaper.gmem_read(x + 5) or 0 end
+  return reaper.gmem_read(x + 6) or pl
+end
 local function read_fb(i, off)
   local b = gbase(i, active_part(i))
+  if off == 44 or off == 45 or off == 46 then return NU_IO(b, off) end   -- 27 nov. : looper vide = fenetre fictive
   return reaper.gmem_read(b + off) or 0
 end
 
@@ -1017,10 +1029,10 @@ function CU.p9_build()
     push = function() CU.fire("stop_play") end,
     disp = function() local v = st(); return v == 1 and "REC" or ((v >= 2 and v <= 6) and "PLAY" or (v >= 7 and "ATTENTE" or "STOP")) end }
   P["3,2"] = { label = "Clear", col = { R[1], R[2], R[3] }, twc = R[4],
-    get = function() return read_fb(sel_looper(), 46) > 0 and 1 or 0 end, set = function() end,
+    get = function() return (reaper.gmem_read(gbase(sel_looper(), active_part(sel_looper())) + 46) or 0) > 0 and 1 or 0 end, set = function() end,
     to_n = function(n) return n end, from_n = function(n) return n end,
     push = function() CU.fire("clear") end,
-    disp = function() return read_fb(sel_looper(), 46) > 0 and "boucle" or "vide" end }
+    disp = function() return (reaper.gmem_read(gbase(sel_looper(), active_part(sel_looper())) + 46) or 0) > 0 and "boucle" or "vide" end }
   return P
 end
 CU.P9 = CU.p9_build()
@@ -1869,10 +1881,10 @@ local function midi_apply_knob(idx, norm, page)
     local is_out = (idx % 2) == 1
     if not looper_alive(looper, now_t) then return end
     local b = gbase(looper, active_part(looper))
-    local len = reaper.gmem_read(b + 46) or 0
+    local len = NU_IO(b, 46)
     if len <= 0 then return end
-    local in_s = reaper.gmem_read(b + 44) or 0
-    local w_s = reaper.gmem_read(b + 45) or 0
+    local in_s = NU_IO(b, 44)
+    local w_s = NU_IO(b, 45)
     local is_width = (tw_mode_io[looper] == 1)
     -- snapshot du groupe pris AVANT toute ecriture (debut du geste)
     local g = gesture("p1:" .. idx, now_t, function()
@@ -1966,7 +1978,7 @@ local function midi_apply_btn(idx, page)
     else
       -- Push In : reset In/Out (boucle pleine) sur le looper ET les membres de son groupe
       local b = gbase(looper, active_part(looper))
-      local len = reaper.gmem_read(b + 46) or 0
+      local len = NU_IO(b, 46)
       if len > 0 then
         pending_reset[looper] = { gbase = b, len = len, step = 1 }
       end

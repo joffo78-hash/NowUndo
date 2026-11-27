@@ -477,6 +477,19 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   **D** = écriture 1:1 (hors Slicer), la boucle est relue transformée (en Link : plus aiguë ET plus rapide). Banc `tools/trecpitch.py . v327.jsfx <0|1 = A|D> <link>` :
   avant 1,99 s / 217 Hz, après 1,00 s / 442 Hz (A et D, Link off) ; A Link on inchangé (220 Hz, 1 s) ; D Link on = 0,5 s / 442 Hz. Non testé dans REAPER.
 
+## 27 nov. : In / Out pré-réglables sur un looper VIDE (JSFX V3.27 + scripts, non testé dans REAPER)
+
+- Demande : « une longueur fictive quand les loopers sont vides pour pré-caler des valeurs de In / Out ». Choix validé : **fractions** appliquées à la fin du 1er REC.
+- JSFX : `pre_s` / `pre_e` (fractions), longueur fictive `pre_L` = 1 000 000 ; looper vide (`length` 0, 1er REC compris) = les commandes d'édition +160
+  (1 In seul, 5 fenêtre décalée, 2 Out seul, 3 Width, 4 pleine) agissent sur la fenêtre fictive (**même règle In / Out / Width**) ; publiée en
+  `112000 + (looper*3 + part)*20` **+4** longueur fictive (0 dès qu'il y a une boucle), **+5** In, **+6** Width (unités fictives). **`+44/+45/+46` restent à 0**
+  (rien d'autre ne croit qu'il y a une boucle). Fin du 1er REC (`finish_rec`) : fenêtre appliquée à la boucle puis oubliée ; Full Loop (cmd 22 / edit 4) et
+  Clear d'un looper vide = remise à pleine boucle.
+- Scripts : fonction **globale `NU_IO(b, 44|45|46)`** (copiée dans Launchpad, Twister, MIDI Learn, Scenario, Twister_Web) = vraie boucle, sinon valeurs fictives.
+  Utilisée aux endroits qui écrivent / affichent In / Out : Twister (`read_fb` 44/45/46 ; l'anneau « Clear = boucle / vide » de la page 9 lit la vraie longueur),
+  MIDI Learn (`io_write`, page 1, reset), rushes `in` / `out` (`F.iolen/iost/iow`), Launchpad `loop_in_step`, pont web (`read_state`, `set_io`, reset).
+  8Waves : pas de forme d'onde à vide, rien changé. Test `tools/tpreio.py` (JSFX). `VL.BUILD = "27nov-preio"`.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par

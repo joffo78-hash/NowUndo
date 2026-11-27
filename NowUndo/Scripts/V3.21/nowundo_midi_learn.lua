@@ -876,13 +876,25 @@ end
 
 -- In / Out / Width d'un looper, valeur = fraction de la boucle. REGLE ABSOLUE : le MIDI Learn n'a pas de mode, donc
 -- In et Out sont AUTONOMES (In = commande 1 : Out reste ; Out = commande 2 : In reste ; Width = commande 3 : In reste).
+
+-- 27 nov. : In / Out pre-reglables sur un looper VIDE : le JSFX publie une longueur fictive (112000 + (looper*3 + part)*20 + 4)
+-- et la fenetre pre-reglee (+5 In, +6 Width) ; NU_IO(b, 44|45|46) lit la vraie boucle, sinon ces valeurs fictives.
+function NU_IO(b, off)
+  local v = reaper.gmem_read(b + off) or 0
+  if (reaper.gmem_read(b + 46) or 0) > 0 then return v end
+  local x = 112000 + math.floor((b - 1000) / 200 + 0.5) * 20
+  local pl = reaper.gmem_read(x + 4) or 0
+  if pl <= 0 then return v end
+  if off == 46 then return pl elseif off == 44 then return reaper.gmem_read(x + 5) or 0 end
+  return reaper.gmem_read(x + 6) or pl
+end
 local function io_write(i, which, n)
   reaper.gmem_attach(GMEM)
   local b = gbase(i, active_part(i))
-  local len = reaper.gmem_read(b + 46) or 0
+  local len = NU_IO(b, 46)
   if len <= 0 then return end
-  local in_s = reaper.gmem_read(b + 44) or 0
-  local w_s = reaper.gmem_read(b + 45) or 0
+  local in_s = NU_IO(b, 44)
+  local w_s = NU_IO(b, 45)
   if which == "in" then
     local new_in = math.max(0, math.min(math.min(len, in_s + w_s), n * len))
     reaper.gmem_write(b + 161, new_in); reaper.gmem_write(b + 160, 1)
@@ -1065,10 +1077,10 @@ local function tw_apply_knob(idx, norm)
     local is_out = (idx % 2) == 1
     if not alive(looper) then return end
     local b = gbase(looper, active_part(looper))
-    local len = reaper.gmem_read(b + 46) or 0
+    local len = NU_IO(b, 46)
     if len <= 0 then return end
-    local in_s = reaper.gmem_read(b + 44) or 0
-    local w_s = reaper.gmem_read(b + 45) or 0
+    local in_s = NU_IO(b, 44)
+    local w_s = NU_IO(b, 45)
     if is_out then
       local out = math.max(in_s, math.min(len, norm * len))
       reaper.gmem_write(b + 162, out)
@@ -1120,7 +1132,7 @@ local function tw_apply_btn(idx, down)
     local is_out = (idx % 2) == 1
     if not alive(looper) or is_out then return end
     local b = gbase(looper, active_part(looper))
-    local len = reaper.gmem_read(b + 46) or 0
+    local len = NU_IO(b, 46)
     if len > 0 then
       reaper.gmem_write(b + 161, 0); reaper.gmem_write(b + 160, 1)
       reaper.gmem_write(b + 162, len); reaper.gmem_write(b + 160, 2)

@@ -56,6 +56,17 @@ local function rd(a) return reaper.gmem_read(a) or 0 end
 local function wr(a, v) reaper.gmem_write(a, v) end
 local function base(i, part) return 1000 + (i - 1) * 600 + (part - 1) * 200 end
 
+-- 27 nov. : In / Out pre-reglables sur un looper VIDE : le JSFX publie une longueur fictive (112000 + (looper*3 + part)*20 + 4)
+-- et la fenetre pre-reglee (+5 In, +6 Width) ; NU_IO(b, 44|45|46) lit la vraie boucle, sinon ces valeurs fictives.
+function NU_IO(b, off)
+  local v = reaper.gmem_read(b + off) or 0
+  if (reaper.gmem_read(b + 46) or 0) > 0 then return v end
+  local x = 112000 + math.floor((b - 1000) / 200 + 0.5) * 20
+  local pl = reaper.gmem_read(x + 4) or 0
+  if pl <= 0 then return v end
+  if off == 46 then return pl elseif off == 44 then return reaper.gmem_read(x + 5) or 0 end
+  return reaper.gmem_read(x + 6) or pl
+end
 local function fb(i)
   local part = math.floor(rd(base(i, 1) + 42) + 0.5)
   if part < 1 or part > 3 then part = 1 end
@@ -71,6 +82,7 @@ local function fb(i)
     link = rd(b + 9) > 0.5, auto = rd(b + 43) > 0.5,
     br = rd(b + 189) > 0.5, mute = rd(b + 199) > 0.5, raw = rd(b + 159) > 0.5,
     len = rd(b + 46), lstart = rd(b + 44), lwidth = rd(b + 45),
+    iolen = NU_IO(b, 46), iost = NU_IO(b, 44), iow = NU_IO(b, 45),   -- 27 nov. : looper vide = fenetre fictive (In / Out pre-regles)
   }
 end
 
@@ -285,9 +297,9 @@ local function inout_h(which)
     if H._omode then v = "reset" end        -- GATE, relachement : In / Out reviennent en pleine boucle
     if v == "reset" then
       return { { ch = "edit", f = function(i)
-        local F = fb(i); if F.len <= 0 then return nil end
+        local F = fb(i); if F.iolen <= 0 then return nil end
         if which == "in" then return F.b, 1, 0, nil end
-        return F.b, 2, nil, F.len
+        return F.b, 2, nil, F.iolen
       end } }
     end
     local n, k = num(v)
@@ -295,12 +307,12 @@ local function inout_h(which)
     if n < 0 or n > 1 then return nil, "hors de 0..1 (ecris 0.25 ou 25%)" end
     local tg = tmode
     return { { ch = "edit", f = function(i)
-      local F = fb(i); if F.len <= 0 then return nil end
-      local cur = (which == "in") and (F.lstart / F.len) or ((F.lstart + F.lwidth) / F.len)
+      local F = fb(i); if F.iolen <= 0 then return nil end
+      local cur = (which == "in") and (F.iost / F.iolen) or ((F.iost + F.iow) / F.iolen)
       local val = n
       if tg and math.abs(cur - n) <= 0.004 then val = (which == "in") and 0 or 1 end   -- TOGGLE : valeur <-> defaut
-      if which == "in" then return F.b, 1, val * F.len, nil end
-      return F.b, 2, nil, val * F.len
+      if which == "in" then return F.b, 1, val * F.iolen, nil end
+      return F.b, 2, nil, val * F.iolen
     end } }
   end
 end

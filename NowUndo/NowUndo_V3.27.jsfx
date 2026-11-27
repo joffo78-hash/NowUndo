@@ -427,6 +427,7 @@ replace_fade = 0; replace_fade_coeff = 1.0 / (srate * 0.02); state_transition_fa
 // V3.26 : fondu d'entree / de sortie de l'OVERDUB (5 ms) : avant, l'entree s'ajoutait / s'arretait d'un coup = une marche
 // inscrite dans la boucle (clic a chaque tour, que le Cloud fait ensuite reentendre partout)
 rw_on = 0; rw_pos = 0; rw_a = 0; rw_b = 0; dub_rawm = 0; dub_rawm_prev = 0;
+pre_s = 0; pre_e = 1; pre_L = 1000000;   // 27 nov. : In / Out pre-regles sur un looper vide (fractions, longueur fictive pre_L publiee en 112000+..+4)
 dub_pf = 0; dub_g = 1; dub_pfk = 1.0 / max(1, srate * 0.005);
 rec_lag_pend = 0; rec_start_lag = 0; rec_stop_lag = 0; lat_samps = 0; wr_off = 0; ui_rec_t = 0; pf_max = 0; pf_tag = 0; pf_k = 0;
 prev_in0 = 0; prev_in1 = 0; grain_mix = 0; xfade_coeff = 1.0 / (srate * 0.01); init_done = 0;
@@ -902,6 +903,12 @@ function finish_rec(new_state) local(ms_off, k) (
   hist_len[active_history_idx] = length; dirty_len = max(dirty_len, length);
   loop_start = 0; loop_width = length; smooth_start = 0; smooth_width = length; pos = 0; master_pos = 0; clk_cyc = 0;
   active_part == 1 ? master_pos1 = 0 : active_part == 2 ? master_pos2 = 0 : master_pos3 = 0;
+  // 27 nov. : In / Out pre-regles pendant que le looper etait vide -> appliques a la nouvelle boucle, puis oublies
+  (pre_s > 0.0001 || pre_e < 0.9999) ? (
+    loop_start = floor(pre_s * length); loop_width = max(1, floor((pre_e - pre_s) * length)); loop_width = min(loop_width, length - loop_start);
+    smooth_start = loop_start; smooth_width = loop_width;
+  );
+  pre_s = 0; pre_e = 1;
   xfade_pos_active = 0; memset(delay_buf_l, 0, delay_len * 2); delay_idx = 0;
   state = new_state; start_analysis();
   sync_hard_resync = 1;
@@ -1473,6 +1480,7 @@ function reset_all_params() (
       (length > 0) ? ( loop_start = 0; loop_width = length; sync_hard_resync = 1; );
 );
 function do_clear(clear_type) local(ms_off, wipe_n, wipe1, wipe2, wipe3, hi) (
+  length <= 0 && state != 1 && state != 8 ? ( pre_s = 0; pre_e = 1; );   // 27 nov. : Clear d'un looper vide = oublie les In / Out pre-regles
   // Sauver tailles a zero AVANT de reset length/dirty_len
   wipe_n = max(dirty_len, length);
   wipe_n = min(max(wipe_n, 0), single_buf_len);
@@ -2588,7 +2596,7 @@ loop(3,
       pitch = sc_step(pitch, st); slider2 = pitch;   // V3.27 : suit la gamme du Scaler
     ) :
     cmd == 22 ? ( // Full Loop
-      length > 0 ? ( loop_start = 0; loop_width = length; sync_hard_resync = 1; );
+      length > 0 ? ( loop_start = 0; loop_width = length; sync_hard_resync = 1; ) : ( pre_s = 0; pre_e = 1; );
     ) :
     cmd == 23 ? ( // Quantise In/Out cycle
       loop_quant = (loop_quant >= 9 ? 0 : loop_quant + 1); slider24 = loop_quant;
@@ -2627,7 +2635,16 @@ loop(3,
   edit_cmd = gmem[gmem_base + 160];
   edit_cmd > 0 ? (
     p != (active_part - 1) ? switch_part(p + 1);
-    length > 0 ? (
+    length <= 0 ? (
+      // 27 nov. (demande) : looper VIDE = longueur fictive pre_L ; In / Out gardes en fraction, appliques a la fin du 1er REC.
+      // Meme regle que d'habitude : 1 = In seul (Out reste), 5 = fenetre decalee (ecart garde), 2 = Out seul, 3 = Width, 4 = pleine boucle.
+      pre_w = pre_e - pre_s;
+      edit_cmd == 1 ? pre_s = max(0, min(gmem[gmem_base + 161] / pre_L, pre_e - 0.01)) :
+      edit_cmd == 5 ? ( pre_s = max(0, min(gmem[gmem_base + 161] / pre_L, 1 - pre_w)); pre_e = pre_s + pre_w; ) :
+      edit_cmd == 2 ? pre_e = max(pre_s + 0.01, min(gmem[gmem_base + 162] / pre_L, 1)) :
+      edit_cmd == 3 ? pre_e = max(pre_s + 0.01, min(pre_s + gmem[gmem_base + 162] / pre_L, 1)) :
+      edit_cmd == 4 ? ( pre_s = 0; pre_e = 1; );
+    ) : (
       br_on && edit_cmd == 1 ? edit_cmd = 5;   // BR : la fraction (écart) ne change pas quand In bouge
       br_on && (edit_cmd == 2 || edit_cmd == 3) ? (
         // BR : Out / Width = choix de la fraction
@@ -2857,7 +2874,10 @@ loop(3,
     // V3.27 : zone de publication supplementaire (le bloc de 200 et les 60 parametres sont pleins) : 112000 + (looper*3 + part)*20
     //   +0 = lissage du LFO Random du Cloud (lu par le Twister)
     gmem[112000 + ((inst_idx * 3) + p) * 20 + 0] = cloud_lfo_smooth;
-    gmem[112000 + ((inst_idx * 3) + p) * 20 + 3] = pitch_scale;   // V3.27 : gamme du Scaler (+1 / +2 de la part 1 = mesure CPU)
+    gmem[112000 + ((inst_idx * 3) + p) * 20 + 3] = pitch_scale;
+    gmem[112000 + ((inst_idx * 3) + p) * 20 + 4] = length > 0 ? 0 : pre_L;              // 27 nov. : longueur fictive d'un looper vide (In / Out pre-reglables)
+    gmem[112000 + ((inst_idx * 3) + p) * 20 + 5] = length > 0 ? 0 : pre_s * pre_L;      //   In pre-regle (unites fictives)
+    gmem[112000 + ((inst_idx * 3) + p) * 20 + 6] = length > 0 ? 0 : (pre_e - pre_s) * pre_L;   //   Width pre-regle   // V3.27 : gamme du Scaler (+1 / +2 de la part 1 = mesure CPU)
     gmem[param_gmem_base + 0] = speed;
     gmem[param_gmem_base + 1] = pitch;
     gmem[param_gmem_base + 2] = mix;

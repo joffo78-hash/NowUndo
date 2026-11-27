@@ -25,6 +25,18 @@ local function clamp(v, a, b)
 end
 
 -- Lit l'état In/Out des 8 loopers
+
+-- 27 nov. : In / Out pre-reglables sur un looper VIDE : le JSFX publie une longueur fictive (112000 + (looper*3 + part)*20 + 4)
+-- et la fenetre pre-reglee (+5 In, +6 Width) ; NU_IO(b, 44|45|46) lit la vraie boucle, sinon ces valeurs fictives.
+function NU_IO(b, off)
+  local v = reaper.gmem_read(b + off) or 0
+  if (reaper.gmem_read(b + 46) or 0) > 0 then return v end
+  local x = 112000 + math.floor((b - 1000) / 200 + 0.5) * 20
+  local pl = reaper.gmem_read(x + 4) or 0
+  if pl <= 0 then return v end
+  if off == 46 then return pl elseif off == 44 then return reaper.gmem_read(x + 5) or 0 end
+  return reaper.gmem_read(x + 6) or pl
+end
 local function read_state()
   local parts = {}
   local now_t = reaper.time_precise()
@@ -35,9 +47,9 @@ local function read_state()
     local active_p = reaper.gmem_read(base0 + 42) or 1
     if active_p < 1 or active_p > 3 then active_p = 1 end
     local gbase = base0 + (active_p - 1) * 200
-    local len = reaper.gmem_read(gbase + 46) or 0
-    local in_s = reaper.gmem_read(gbase + 44) or 0
-    local w_s = reaper.gmem_read(gbase + 45) or 0
+    local len = NU_IO(gbase, 46)
+    local in_s = NU_IO(gbase, 44)
+    local w_s = NU_IO(gbase, 45)
     local in_n, out_n = 0, 1
     if len > 0 then
       in_n = clamp(in_s / len, 0, 1)
@@ -71,7 +83,7 @@ local function set_io(i, in_n, out_n)
   local active_p = reaper.gmem_read(base0 + 42) or 1
   if active_p < 1 or active_p > 3 then active_p = 1 end
   local gbase = base0 + (active_p - 1) * 200
-  local len = reaper.gmem_read(gbase + 46) or 0
+  local len = NU_IO(gbase, 46)
   if len <= 0 then return end
   in_n = clamp(in_n, 0, 1)
   out_n = clamp(out_n, in_n, 1)
@@ -91,7 +103,7 @@ local function reset_all()
     local active_p = reaper.gmem_read(base0 + 42) or 1
     if active_p < 1 or active_p > 3 then active_p = 1 end
     local gbase = base0 + (active_p - 1) * 200
-    local len = reaper.gmem_read(gbase + 46) or 0
+    local len = NU_IO(gbase, 46)
     if len > 0 then
       pending_reset[i] = { gbase = gbase, len = len, step = 1 }
     end
