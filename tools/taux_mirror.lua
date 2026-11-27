@@ -20,8 +20,8 @@ for _, k in ipairs({ 'mouse_wheel', 'mouse_hwheel', 'x', 'y', 'r', 'g', 'b', 'a'
 local lines = { "NOWUNDO_MACROS 1", "P\t1\tRushes",
   "M\t1\t0\tA1\taux1 0.5\t1\t0\t0\t",          -- rush toggle sur la selection
   "M\t2\t0\tA2\tl2 aux2\t0\t0\t0\t",           -- rush normal, pose en TOGGLE sur la case 5
-  "M\t3\t0\tRX\tl3 from aux4\t1\t0\t0\t",
-  "L\t1\t1", "L\t5\t2\tt", "L\t6\t3" }
+  "M\t3\t0\tRX\tl3 from aux4\t1\t0\t0\t", "M\t4\t0\tMSG\tl4 slicer\t0\t0\t0\t",
+  "L\t1\t1", "L\t5\t2\tt", "L\t6\t3", "L\t7\t4\tt", "L\t8\t4\tt" }
 EXT["NowUndo_Macros/set"] = table.concat(lines, "\n")
 EXT["NowUndo_Macros/fx_page"] = "1"
 EXT["nowundo_vl/sel_looper"] = "1"
@@ -70,4 +70,8 @@ GM[6228 + 2 * 8 + 3] = 1
 check("pad RX allume", on():match("%f[%d]3%f[%D]") and "allume" or "eteint", "allume")
 check("re-appui RX : ferme", fire(3), "auxrx_3_4_off ")
 check("ancien format du Launchpad (sans mode) : toggle du rush", fire(1), "aux_l_1_1_500 ")
+-- meme rush (non miroir) sur deux pads toggle : chacun son etat
+fire(4, "t", 7); GM[1000 + 3 * 600 + 8] = 1
+local o = on()
+check("pad 7 allume, pad 8 eteint (meme rush)", (o:find("4@7", 1, true) and "7on" or "7off") .. "/" .. (o:find("4@8", 1, true) and "8on" or "8off"), "7on/8off")
 print(fails == 0 and "TOUT OK" or (fails .. " ECHEC(S)"))

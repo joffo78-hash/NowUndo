@@ -405,7 +405,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   `VL.cell_band` ; web : `band=1,2g.1,3t` dans `web_meta`, classes CSS `band-t` / `band-g`) ; le vrai Launchpad n'affiche qu'une couleur.
   `mcr` (Launchpad → Scenario) = `id\tcibles\ttemps\tgst\tmode\tcase` ; Scenario : `H._as(m, mode)` (le rush vu avec le mode de la case, proxy),
   `H._cmode`, `H._lmode` (lu / écrit avec la disposition, suit la suppression d'une page) ; liste `on` = rushes toggle OU posés en toggle sur une case.
-  Limite : l'état toggle est par rush (pile `H._live` par id) : un même rush en toggle sur deux cases partage son état.
+  **Un même rush sur plusieurs pads (27 nov., demandé)** : déposer un rush depuis le Scenario = **un pad de plus** (`VL.macro_drop` ne le retire plus de
+  ses autres pads ; occupant d'une case visée → 1re case libre de la sous-page). **Un état par pad** : le proxy `H._as(m, mode, case)` porte `lid = id@case`,
+  la pile `H._live` est indexée par `lid` (sinon id = déclenchement MIDI / scénario) ; liste `on` = jetons `id@case` (pads) et `id` (rush) ; le Launchpad
+  allume un pad toggle si `on[id@case]` ou `on[id]`. Scenario : « LP c1.3+2 » (1re case + nombre d'autres pads), vérification du dépôt = un pad de plus.
 - **Toggles des sends = miroir** (demandé : « si j'active l'aux 1 dans L1 par un rush et que je vais sur L2 le rush est toujours actif ») : `H._mirror`
   inclut `aux1..aux4`, `from auxN`, `in auxN` ; `mac_active` lit l'état réel publié par le Launchpad (6100.. loopers, 6164.. entrées, 6228.. aux → looper)
   sur la cible du moment (sélection) : pad allumé seulement si le send du looper sélectionné est ouvert ; un appui inverse l'état réel.

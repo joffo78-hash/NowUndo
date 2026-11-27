@@ -75,4 +75,19 @@ check("pas de barre c4 (normal)", tostring(VL.cell_band(4, 1, 4)), "nil")
 check("pas de barre hors page 4", tostring(VL.cell_band(1, 1, 2)), "nil")
 VL.web_publish(CLOCK + 10)
 check("page web : band dans web_meta", tostring((EXT["nowundo_vl/web_meta"] or ""):match("band=([^;]*)")), "1,2g.1,3t")
+-- deposer depuis le Scenario = un pad de plus (le rush reste sur ses autres pads)
+VL.macro_drop({ 5 }, 20)
+check("rush 5 depose en c20 : toujours en c2 (gate)", tostring(VL.macros.layout[2]) .. "/" .. tostring(VL.cell_mode(2)), "5/g")
+check("... et en c20 (mode du rush)", tostring(VL.macros.layout[20]) .. "/" .. tostring(VL.cell_mode(20)), "5/n")
+VL.macro_drop({ 6 }, 20)
+check("rush 6 depose sur c20 occupee : c20 = 6", tostring(VL.macros.layout[20]), "6")
+local moved; for c = 1, 64 do if VL.macros.layout[c] == 5 and c ~= 2 and c ~= 3 and c ~= 9 then moved = c end end
+check("... l'occupant (5) est parti dans une case libre", tostring(moved ~= nil), "true")
+-- etat toggle propre a chaque pad
+EXT["NowUndo_Macros/on"] = "5@3"; CLOCK = CLOCK + 1; VL.macros_poll(CLOCK)
+VL.S.page = 4; VL.S.p4_layer = "rp1"
+local L = VL.layers and nil
+check("pad c3 (toggle) allume", VL.macro_cell_def(3).state(), "on")
+VL.set_cell_mode(9, "t"); CLOCK = CLOCK + 1; VL.macros_poll(CLOCK)
+check("pad c9 (meme rush, toggle) eteint", VL.macro_cell_def(9).state(), "idle")
 print(fails == 0 and "TOUT OK" or (fails .. " ECHEC(S)"))

@@ -1757,11 +1757,12 @@ H._cmode = function(cell, m)                       -- mode effectif d'une case :
   if x then return x end
   return (m and m.gate) and "g" or ((m and m.toggle) and "t" or "n")
 end
-H._as = function(m, mode)                          -- le rush vu avec le mode d'une case (n / t / g) : meme rush, autre comportement
-  if not mode or mode == "" then return m end
-  local tg, gt = mode == "t", mode == "g"
-  if (m.toggle and true or false) == tg and (m.gate and true or false) == gt then return m end
-  return setmetatable({ toggle = tg, gate = gt }, { __index = m })
+H._as = function(m, mode, cell)                    -- le rush vu depuis une case : son mode (n / t / g) et son propre etat (lid = id@case)
+  if (not mode or mode == "") and not cell then return m end
+  local tg, gt = m.toggle and true or false, m.gate and true or false
+  if mode == "n" or mode == "t" or mode == "g" then tg, gt = mode == "t", mode == "g" end
+  if not cell and tg == (m.toggle and true or false) and gt == (m.gate and true or false) then return m end
+  return setmetatable({ toggle = tg, gate = gt, lid = cell and (m.id .. "@" .. cell) or nil }, { __index = m })
 end
 local function mac_deserialize(txt)
   local list, lay, seen, pages = {}, {}, {}, nil
@@ -1959,7 +1960,11 @@ local function sel_ids()
 end
 local function sel_count() local n = 0; for _ in pairs(msel) do n = n + 1 end; return n end
 local function lp_count() local n = 0; for _ in pairs(layout) do n = n + 1 end; return n end
-local function lp_cell_of(id) for c, i in pairs(layout) do if i == id then return c end end end
+local function lp_cell_of(id)                        -- 1re case (la plus petite) du rush ; 2e valeur = nombre de pads (27 nov. : plusieurs)
+  local best, n = nil, 0
+  for c, i in pairs(layout) do if i == id then n = n + 1; if not best or c < best then best = c end end end
+  return best, n
+end
 local function lp_name(c) local k = (c - 1) % 64; return string.format("%s%d.%d", string.char(96 + math.ceil(c / 64)), k // 8 + 1, k % 8 + 1) end
 
 local function lp_remove(ms)
@@ -2446,14 +2451,14 @@ end
 -- un 2e beat repeat ne coupe pas le 1er, la fraction devient la sienne, rien ne s'additionne). Desactiver = pour chaque
 -- action (looper + mot), remettre la valeur du rush actif le plus recent qui la porte encore, sinon la defaire (defaut).
 H._live = {}
-H._live_find = function(mid)
-  for n, e in ipairs(H._live) do if e.mid == mid then return n, e end end
+H._live_find = function(key)                       -- 27 nov. : cle = id du rush, ou id@case quand il vient d'un pad (un etat par pad)
+  for n, e in ipairs(H._live) do if (e.lid or e.mid) == key then return n, e end end
 end
 H._rush_live = function(m, targets, on)
-  local n = H._live_find(m.id)
+  local n = H._live_find(m.lid or m.id)
   if n then table.remove(H._live, n) end
   if on then
-    H._live[#H._live + 1] = { mid = m.id, targets = targets }
+    H._live[#H._live + 1] = { mid = m.id, lid = m.lid, targets = targets }
     return compile(m.text, targets, false, false)
   end
   local out = {}
@@ -2484,7 +2489,7 @@ local function run_macro(m, targets, gst, press_t)   -- gst : "on" / "off" pour 
     items = H._rush_live(m, targets, gst == "on")          -- GATE : appui = tel qu'ecrit, relachement = defait (dernier actif gagne)
   elseif m.toggle and not m.err then
     -- TOGGLE : allume -> eteint selon la pile ; si l'etat a ete change ailleurs (ex. BR coupe a la main), on rallume
-    local _, e = H._live_find(m.id)
+    local _, e = H._live_find(m.lid or m.id)
     local on = not e
     if e and H._probe_ok and H._probe_ok(m) and not H._mac_active(m, e.targets) then on = true end
     if H._mirror and H._mirror(m) then on = not H._mac_active(m, targets) end   -- V3.27 : effet / groupe : suit l'etat reel
@@ -2652,17 +2657,19 @@ local function mac_poll()
   if t - mac_on_t > 0.12 then                                      -- pads toggle du Launchpad : ON = plein feu, OFF = attenue
     mac_on_t = t
     local tg, ids = sel_targets(), {}
-    local tcell, byid = {}, {}                                     -- 27 nov. : rushes poses en TOGGLE sur au moins une case
+    local byid = {}                                                 -- 27 nov. : un etat par pad (jetons id@case) + par rush (id, MIDI)
     for _, m in ipairs(macros) do byid[m.id] = m end
-    for c, id in pairs(layout) do if byid[id] and H._cmode(c, byid[id]) == "t" then tcell[id] = true end end
-    for _, m0 in ipairs(macros) do
-      local m = (not m0.toggle and tcell[m0.id]) and H._as(m0, "t") or m0
-      if m.toggle then
-        local _, e = H._live_find(m.id)
-        if H._mirror(m) then if mac_active(m, tg) then ids[#ids + 1] = m.id end
-        elseif e and (not H._probe_ok(m) or mac_active(m, e.targets)) then ids[#ids + 1] = m.id end
-      end
+    local function lit(m, key, tok)
+      local _, e = H._live_find(key)
+      if H._mirror(m) then if mac_active(m, tg) then ids[#ids + 1] = tok end
+      elseif e and (not H._probe_ok(m) or mac_active(m, e.targets)) then ids[#ids + 1] = tok end
     end
+    for c, id in pairs(layout) do
+      local m0 = byid[id]
+      if m0 and H._cmode(c, m0) == "t" then local m = H._as(m0, "t", c); lit(m, m.lid, m.lid) end
+    end
+    for _, m in ipairs(macros) do if m.toggle then lit(m, m.id, tostring(m.id)) end end
+    table.sort(ids, function(a, b) return tostring(a) < tostring(b) end)
     local s = table.concat(ids, ",")
     if s ~= mac_on_s then mac_on_s = s; reaper.SetExtState(MAC_EXT, "on", s, false) end
     -- macros dont une action armee (*) attend le point de synchro : leur pad clignote sur le Launchpad
@@ -2698,10 +2705,11 @@ local function mac_poll()
   reaper.SetExtState(CAPEXT, "mcr", "", false)
   for line in q:gmatch("[^\n]+") do
     local id, tg, ts, gst = line:match("^(%d+)\t([%d,]*)\t([%d%.]+)\t?(%a*)")
-    local cmode = line:match("^%d+\t[%d,]*\t[%d%.]+\t%a*\t([ntg])")   -- 27 nov. : mode de la case du Launchpad (n / t / g)
+    local cmode, ccell = line:match("^%d+\t[%d,]*\t[%d%.]+\t%a*\t([ntg]?)\t(%d+)")   -- 27 nov. : mode + case du pad du Launchpad
+    ccell = tonumber(ccell); if ccell == 0 then ccell = nil end
     if id and t - tonumber(ts) < 2 then
       local m = mac_find(tonumber(id))
-      if m and cmode then m = H._as(m, cmode) end
+      if m and (cmode or ccell) then m = H._as(m, cmode, ccell) end
       if m then
         local targets = {}
         for n in tg:gmatch("%d+") do
@@ -2893,7 +2901,8 @@ local function mac_drop_outside(d)
   local x, y = reaper.GetMousePosition()
   reaper.SetExtState(MAC_EXT, "drop", string.format("%s\t%d\t%d\t%.3f", table.concat(ids, ","), x, y, reaper.time_precise()), false)
   msg = #ms .. " rush(es) envoye(s) au Launchpad..."; msg_err = false
-  H._dropchk = { id = ms[1].id, t = reaper.time_precise() }        -- verifie 1,5 s plus tard que le Launchpad l'a bien pose
+  local nb = 0; for _, i in pairs(layout) do if i == ms[1].id then nb = nb + 1 end end
+  H._dropchk = { id = ms[1].id, t = reaper.time_precise(), n = nb }   -- verifie 1,5 s plus tard que le Launchpad l'a bien pose (un pad de plus)
 end
 
 local function mac_key(c)
@@ -3057,8 +3066,10 @@ local function mac_draw(W, Hh, down)
   -- EDIT) ; au milieu : la liste ; en bas, sous titres : rush selectionne | fichier, puis la page 4 du Launchpad.
   local LY = LIST_Y + 30
   if H._dropchk and reaper.time_precise() - H._dropchk.t > 1.5 then
-    local c = lp_cell_of(H._dropchk.id); H._dropchk = nil
-    if c then msg = "Rush pose sur le Launchpad en " .. lp_name(c) .. "."; msg_err = false
+    local nb, c = 0, nil
+    for cc, i in pairs(layout) do if i == H._dropchk.id then nb = nb + 1; if not c or cc > c then c = cc end end end
+    local ok = nb > (H._dropchk.n or 0); H._dropchk = nil
+    if ok then msg = "Rush pose sur le Launchpad" .. (nb > 1 and (" (" .. nb .. " pads)") or "") .. "."; msg_err = false
     else msg = "Le Launchpad n'a pas pris le rush : relache-le sur sa fenetre (page 4, sous-page non pleine)."; msg_err = true end
   end
   local list_h = Hh - LY - (capturing and 162 or 140)
@@ -3224,14 +3235,14 @@ local function mac_draw(W, Hh, down)
           gfx.drawstr("MIDI")
         end
         -- case de destination sur le Launchpad (ex. 3.5) a la place de l'ancien label secondaire
-        local lc = lp_cell_of(m.id)
+        local lc, lcn = lp_cell_of(m.id)
         local lph = lc and mx >= x0 + cw - 84 and mx < x0 + cw - 22 and my >= y and my < y + RH
         if lc then                                                     -- V3.27 : clic = affiche cette page sur le Launchpad
           gfx.setfont(2, "Arial", 11, 'b')
           if lph then gfx.set(0.2, 0.45, 0.55, 1); gfx.rect(x0 + cw - 84, y + 3, 62, RH - 6) end
           gfx.set(0.4, 0.9, 1, 1)
           gfx.x, gfx.y = x0 + cw - 82, y + 6
-          gfx.drawstr("LP " .. lp_name(lc))
+          gfx.drawstr("LP " .. lp_name(lc) .. ((lcn or 1) > 1 and ("+" .. (lcn - 1)) or ""))
         end
         -- suppression de cette macro
         local dx = x0 + cw - 20

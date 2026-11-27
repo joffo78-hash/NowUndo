@@ -3293,7 +3293,7 @@ function VL.macros_poll(t)
   local on_s = reaper.GetExtState(MACRO_EXT, "on")             -- macros TOGGLE actuellement actives (publie par NowUndo_Scenario)
   if on_s ~= M.on_s then
     M.on_s, M.on = on_s, {}
-    for n in on_s:gmatch("%d+") do M.on[tonumber(n)] = true end
+    for tok in on_s:gmatch("[^,%s]+") do M.on[tok] = true end      -- 27 nov. : "id" (rush) ou "id@case" (etat propre a un pad)
   end
   local pend_s = reaper.GetExtState(MACRO_EXT, "pend")          -- macros avec une action armee (*) en attente de synchro
   if pend_s ~= M.pend_s then
@@ -3357,27 +3357,23 @@ end
 -- Depose des macros (ids) sur une case : la 1re sur la case visee, les suivantes dans les cases libres qui suivent.
 -- Case occupee : echange si la macro deposee etait deja sur le Launchpad, sinon l'occupant va dans la 1re case libre.
 function VL.macro_drop(ids, cell)
+  -- 27 nov. : deposer un rush depuis le Scenario = un pad DE PLUS (le meme rush peut etre sur plusieurs pads, chacun avec son mode) ;
+  -- on ne le retire plus de ses autres pads. Case occupee par un autre rush : l'occupant part dans la 1re case libre de la sous-page.
   VL.macros_layout_edit(function(lay, lm)
-    local function cell_of(id) for c, i in pairs(lay) do if i == id then return c end end end
     local p0 = ((cell - 1) // 64) * 64                 -- V3.27 : on reste dans la sous-page visee
     local function free_from(c) while c <= p0 + 64 and lay[c] do c = c + 1 end; return c end
     local nextc = cell
     for n, id in ipairs(ids) do
-      local old = cell_of(id)
-      local om = old and lm[old]                     -- 27 nov. : le mode de la case suit le rush deplace
       if n == 1 then
         local occ, ocm = lay[cell], lm[cell]
-        if old then lay[old] = nil; lm[old] = nil end
-        if occ and occ ~= id then
-          if old then lay[old] = occ; lm[old] = ocm
-          else local c = free_from(p0 + 1); if c <= p0 + 64 then lay[c] = occ; lm[c] = ocm end end
+        if occ ~= id then
+          lay[cell] = id; lm[cell] = nil
+          if occ then local c = free_from(p0 + 1); if c <= p0 + 64 then lay[c] = occ; lm[c] = ocm end end
         end
-        lay[cell] = id; lm[cell] = om
       else
-        if old then lay[old] = nil; lm[old] = nil end
         local c = free_from(nextc + 1)
         if c > p0 + 64 then c = free_from(p0 + 1) end
-        if c <= p0 + 64 then lay[c] = id; lm[c] = om; nextc = c end
+        if c <= p0 + 64 then lay[c] = id; lm[c] = nil; nextc = c end
       end
     end
   end)
@@ -3458,7 +3454,7 @@ function VL.macro_cell_def(cell)
       local mm = VL.macro_at(cell)
       if VL.macros.pend and VL.macros.pend[mm.id] then return "armed" end   -- action(s) en attente du point de synchro : clignote
       local md = VL.cell_mode(cell)
-      if md == "t" then return VL.macros.on[mm.id] and "on" or "idle" end
+      if md == "t" then return (VL.macros.on[mm.id .. "@" .. cell] or VL.macros.on[tostring(mm.id)]) and "on" or "idle" end
       if md == "g" then return (VL.macros.gate_tg and VL.macros.gate_tg[cell]) and "on" or "idle" end   -- gate : allume tant qu'on tient
       return "on"
     end,
