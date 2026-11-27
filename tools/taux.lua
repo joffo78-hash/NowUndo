@@ -80,7 +80,7 @@ check("REC L1 : L1 -> aux3 ferme (IN1 aux3 ferme)", st(LP(1), 3), "-")
 lstate(1, 2, 96000); run(0.2)
 -- 4) le looper avec boucle impose ses sends a IN1 : on change le send propre de IN1, L1 l'impose toujours
 cmd("aux_in_1_2_200"); run(0.3)
-check("IN1 impose par L1 : aux2 reste a 0.5 (son propre = 0.2)", st(IN(1), 2), "OUV0.50")
+check("IN1 regle a la main (0.2) : passe avant l imposition de L1", st(IN(1), 2), "OUV0.20")
 cmd("aux_l_1_2_800"); run(0.3)
 check("l1 aux2 0.8 : L1 change -> IN1 suit (0.8)", st(IN(1), 2), "OUV0.80")
 -- 5) reglage manuel de l'entree pendant qu'elle est imposee : remis en place
