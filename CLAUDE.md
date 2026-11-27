@@ -490,6 +490,15 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   MIDI Learn (`io_write`, page 1, reset), rushes `in` / `out` (`F.iolen/iost/iow`), Launchpad `loop_in_step`, pont web (`read_state`, `set_io`, reset).
   8Waves (signalé : « le réglage ne se reporte pas ») : une ligne vide affiche et fait glisser la fenêtre fictive (`NU_IO` dans le dessin, poignées et cadre comme une boucle). Tests `tools/tpreio.py` (JSFX), `tools/t8waves_preio.lua`. `VL.BUILD = "27nov-preio"`.
 
+## 27 nov. : AUTO-REPLACE qui écrase la boucle sans jouer (JSFX V3.27, corrigé)
+
+- Signalé (« auto replace écrase tout même quand aucun signal ne rentre ») : reproduit au banc (`tools/tautorep.py . <variante> <bruit> <seuil>`) avec un **souffle
+  d'entrée à -34 dB** (carte Realtek, micro ouvert) et un **Auto Thresh bas** (0,01) : dans les passages calmes de la boucle, le souffle dépassait le seuil ET la
+  boucle → la porte s'ouvrait et remplaçait (écart 0,43). Silence parfait : aucun problème (toutes variantes : base, pitch, D, link, speed, slicer, rev).
+- Correction : **plancher de bruit de l'entrée** suivi en continu (`ar_ne` enveloppe, `ar_nf` plancher : descend en 50 ms, remonte en 2 s près du plancher, en
+  30 s quand on joue ; départ 0,01) ; ouverture seulement si l'entrée dépasse aussi **le plancher + 10 dB** (`ar_nf * 3.16`), fermeture sous plancher + 6 dB.
+  Banc : souffle 0,02 / seuil 0,01 → plus rien d'écrasé ; une note jouée remplace toujours (écart 0,8) ; seuil 0,15 et silence inchangés. Non testé dans REAPER.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par
