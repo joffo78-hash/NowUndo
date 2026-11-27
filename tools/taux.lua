@@ -108,7 +108,7 @@ cmd("aux_in_1_2_700"); lstate(2, 0, 0); run(0.3)
 check("Clear : L2 suit de nouveau IN1 (0.7)", st(LP(2), 2), "OUV0.70")
 -- 7) un looper route vers un looper vide compte comme source
 lstate(4, 0, 0); S.routing.l_l[1][4] = true; run(0.3)
-check("L1 -> L4 (vide) : L4 prend le send de L1 (0.8)", st(LP(4), 2), "OUV0.80")
+check("L1 -> L4 (vide) : un looper source ne compte plus (27 nov. 18h)", st(LP(4), 2), "-")
 -- 11) aux -> looper, et garde-fou du feedback
 cmd("auxrx_3_4_on"); run(0.3)
 check("l3 from aux4 : aux4 -> L3 ouvert", (function() local s = snd(AUX(4), LP(3)) return s and (s.B_MUTE == 0 and "OUV" or "fer") or "-" end)(), "OUV")
@@ -154,4 +154,13 @@ cmd("aux_in_4_1_700"); run(0.3); VL.select_looper(2); run(0.2); VL.select_looper
 check("reselection de L6 (pas d'aux1) : aux1 de IN4 enleve", st(IN(4), 1):sub(1,3), "fer")
 cmd("aux_in_4_1_on"); run(0.3)
 check("... et remettable a la main", st(IN(4), 1), "OUV0.70")
+-- 27 nov. 18h : cas de l'utilisateur. L8 vide alimente par IN1 et par L1 (boucle, aux1 ouvert) ; IN1 ferme son aux1
+cmd("aux_l_1_1_on"); run(0.2); S.routing.in_l[1][8] = true; S.routing.l_l[1][8] = true; cmd("aux_in_1_1_off"); run(0.3)
+check("L8 vide : un looper source ne compte pas, IN1 ferme -> L8 sans aux1", st(LP(8), 1):sub(1,3) ~= "OUV" and "ok" or "OUV", "ok")
+cmd("aux_l_8_1_on"); run(0.5)
+check("l'utilisateur ouvre L8 aux1 a la main : garde", st(LP(8), 1):sub(1,3), "OUV")
+cmd("aux_l_8_1_off"); run(0.5)
+check("... et le referme : garde", st(LP(8), 1):sub(1,3), "fer")
+cmd("aux_in_1_1_on"); run(0.3)
+check("IN1 rouvre son aux1 : L8 (vide) suit", st(LP(8), 1):sub(1,3), "OUV")
 print(fails == 0 and "TOUT OK" or (fails .. " ECHEC(S)"))

@@ -443,11 +443,14 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   **Dès le 1er REC lancé (état 7, 1 ou 8) et jusqu'au Clear : on ne touche plus à rien** (réglage à la main libre, fermer compris).
   **Clear** (passage boucle → vide, `VL.AUX.empty`) : tout est enlevé puis le looper suit de nouveau ses sources. Plus d'imposition looper → entrée,
   plus de copie au REC (`VL.aux_copy_on_rec` / `LPF.aux_imposed` inutilisés). Les essais intermédiaires du 27 nov. ont été retirés.
+- **Correction du 27 nov. 18h (retour de l'utilisateur : « interdit de m'empêcher de faire quoi que ce soit, l'utilisateur est toujours prioritaire »)** :
+  `VL.aux_follow_src` ne compte plus que les **entrées** routées (plus les loopers routés vers lui) et n'agit **que quand le réglage de ces entrées change**
+  (signature `VL.AUX.fsig`) ou au Clear : un réglage fait à la main sur un looper vide n'est plus jamais écrasé.
 - **Le looper SÉLECTIONNÉ donne ses sends à ses entrées (27 nov., corrigé par l'utilisateur : « c'est pas à l'affectation, c'est le looper
   sélectionné qui donne son niveau d'aux »)** : `VL.aux_sel_give` : si le looper sélectionné a une boucle (ou un REC lancé), les entrées routées
   vers lui prennent EXACTEMENT ses sends (ouvert / fermé + niveau ; les aux que le looper n’a pas sont enlevées, réouvrables à la main) **au moment de la sélection et chaque fois que ses sends changent**
   (signature `VL.AUX.give`) ; entre deux, les entrées restent réglables librement. (L'essai « à l'affectation » `aux_route_pickup` est retiré.)
-- `VL.BUILD = "27nov-15h20"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+- `VL.BUILD = "27nov-18h"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
