@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-18h"         -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-18h05"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -887,25 +887,36 @@ end
 -- ouverte = ferme). Sources : entrees routees (reglage propre, le « in mute » ne compte pas) et loopers routes vers lui (send reel).
 -- Sans aucune source : on ne touche a rien (reglage a la main garde).
 function VL.aux_follow_src(i, tracks, cleared)
-  -- 27 nov. 18h : seules les ENTREES routees comptent (plus les loopers) ; on n'agit que quand le reglage des entrees CHANGE
+  -- 27 nov. 18h : sources = entrees ET loopers routes vers lui ; on n'agit que quand le reglage des sources CHANGE
   -- (ou au Clear) : un reglage fait a la main sur le looper n'est jamais ecrase (l'utilisateur est toujours prioritaire).
   local A = VL.AUX
   A.fsig = A.fsig or {}
   local ltr = tracks.loopers[i]
   local ins = {}
   for k = 1, NIN do if S.routing.in_l[k][i] and tracks.inputs[k] then ins[#ins + 1] = k end end
-  if #ins == 0 and not cleared then A.fsig[i] = nil return end
+  local lps = {}
+  for j = 1, NLOOP do if j ~= i and S.routing.l_l[j] and S.routing.l_l[j][i] and tracks.loopers[j] then lps[#lps + 1] = j end end
+  if #ins == 0 and #lps == 0 and not cleared then A.fsig[i] = nil return end
   local want, sig = {}, {}
   for a = 1, LPF.aux_count() do
     local best
     for _, k in ipairs(ins) do
       local o = LPF.aux_own(k, tracks.inputs[k])[a]
       if o and o.on and (not best or o.vol > best) then best = o.vol end
+      sig[#sig + 1] = (o and o.on) and string.format("%.3f", o.vol) or "-"    -- signature = etat de CHAQUE source
+    end
+    local aux = LPF.aux_track(a)
+    for _, j in ipairs(lps) do
+      local w = A.w["l" .. j .. ":" .. a]
+      local o, v = false, nil
+      if aux then o, v = LPF.aux_get(tracks.loopers[j], aux) end
+      if w then o, v = w.open, w.vol end
+      if o and v and (not best or v > best) then best = v end
+      sig[#sig + 1] = (o and v) and string.format("%.3f", v) or "-"
     end
     want[a] = best
-    sig[#sig + 1] = best and string.format("%.3f", best) or "-"
   end
-  sig = table.concat(sig, ",") .. "|" .. table.concat(ins, ",")
+  sig = table.concat(sig, ",") .. "|" .. table.concat(ins, ",") .. "|" .. table.concat(lps, ",")
   if A.fsig[i] == sig and not cleared then return end
   A.fsig[i] = sig
   for a = 1, LPF.aux_count() do
