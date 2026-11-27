@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-15h10"         -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-15h15"         -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -917,41 +917,37 @@ function VL.aux_follow_src(i, tracks, cleared)
   end
 end
 
--- 27 nov. (demande) : une entree ou un looper qu'on ROUTE vers un looper qui a deja une boucle (ou un REC lance) recupere les sends
--- ouverts de ce looper (meme niveau) : ses pads de sends s'allument. Seulement au moment ou la route apparait ; ensuite tout est libre.
-function VL.aux_route_pickup(tracks)
+-- 27 nov. (demande) : le LOOPER SELECTIONNE (avec une boucle ou un REC lance) donne ses sends aux entrees qui lui sont routees
+-- (ouvert / ferme et niveau, a l'identique) : au moment ou il est selectionne, et chaque fois que ses sends changent.
+-- Entre deux, les entrees restent reglables librement.
+function VL.aux_sel_give(tracks)
   local A = VL.AUX
-  local first = A.rt == nil
-  A.rt = A.rt or {}
-  for i = 1, NLOOP do
-    local ltr = tracks.loopers[i]
-    local st = S.loopers[i] and S.loopers[i].state
-    local busy = st == 1 or st == 7 or st == 8 or LPF.aux_has_loop(i)
-    for k = 1, NIN + NLOOP do
-      local on, src
-      if k <= NIN then on, src = S.routing.in_l[k][i], tracks.inputs[k]
-      else local j = k - NIN; on = j ~= i and S.routing.l_l[j] and S.routing.l_l[j][i]; src = tracks.loopers[j] end
-      local key = k .. ">" .. i
-      if on and not A.rt[key] and not first and busy and ltr and src then
-        for a = 1, LPF.aux_count() do
-          local aux = LPF.aux_track(a)
-          local w = A.w["l" .. i .. ":" .. a]
-          local o, v = false, nil
-          if aux then o, v = LPF.aux_get(ltr, aux) end
-          if w then o, v = w.open, w.vol end
-          if aux and o and v then
-            if k <= NIN then
-              local own = LPF.aux_own(k, src)
-              own[a] = { on = true, vol = v }
-              LPF.aux_own_save(k, src)
-            elseif not LPF.aux_get(aux, src) then
-              LPF.aux_apply(src, aux, true, v, "l" .. (k - NIN) .. ":" .. a)
-            end
-          end
-        end
-        log("info", "%s -> L%d : sends du looper recuperes", k <= NIN and ("IN" .. k) or ("L" .. (k - NIN)), i)
+  local i = S.sel_looper
+  local ltr = i and tracks.loopers[i]
+  local st = i and S.loopers[i] and S.loopers[i].state
+  if not ltr or not (st == 1 or st == 7 or st == 8 or LPF.aux_has_loop(i)) then A.give = nil return end
+  local sig, vals = { tostring(i) }, {}
+  for a = 1, LPF.aux_count() do
+    local aux = LPF.aux_track(a)
+    local o, v = false, nil
+    if aux then o, v = LPF.aux_get(ltr, aux) end
+    local w = A.w["l" .. i .. ":" .. a]
+    if w then o, v = w.open, w.vol end
+    vals[a] = { on = o and true or false, vol = v }
+    sig[#sig + 1] = (o and "1" or "0") .. string.format("%.3f", v or 0)
+  end
+  sig = table.concat(sig, ",")
+  if A.give == sig then return end
+  A.give = sig
+  for k = 1, NIN do
+    local itr = tracks.inputs[k]
+    if S.routing.in_l[k][i] and itr then
+      local own = LPF.aux_own(k, itr)
+      for a = 1, LPF.aux_count() do
+        local x = vals[a]
+        if x.vol or x.on then own[a] = { on = x.on, vol = x.vol or own[a].vol } end
       end
-      A.rt[key] = on and true or nil
+      LPF.aux_own_save(k, itr)
     end
   end
 end
@@ -965,7 +961,7 @@ function VL.update_aux_follow()
   -- 1) 27 nov. (demande de l'utilisateur) : tant que le 1er REC n'est pas sorti (looper vide, attente, 1er REC), les sends du
   --    looper vers les aux SUIVENT ses sources A LA LETTRE (entrees et loopers routes vers lui ; aucune source ouverte = ferme).
   --    Des que le 1er REC est LANCE (attente 7, REC 1, sortie 8) et jusqu'au Clear : on ne touche plus a rien (reglage a la main libre).
-  VL.aux_route_pickup(tracks)
+  VL.aux_sel_give(tracks)
   for i = 1, NLOOP do
     local st = S.loopers[i] and S.loopers[i].state
     local empty = st ~= 1 and st ~= 7 and st ~= 8 and not LPF.aux_has_loop(i)
