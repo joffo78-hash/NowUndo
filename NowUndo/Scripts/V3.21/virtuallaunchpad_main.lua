@@ -44,6 +44,7 @@
 ]]
 
 local VL = {}
+VL.BUILD = "27nov-12h"           -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 VL.BUILD = "0.9.24-op-mute-parent+macros+RGES" -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -4845,7 +4846,7 @@ function VL.status()
   local arm = {}
   for _, a in ipairs(S.armed) do arm[#arm + 1] = a.key end
   local hg = held_group()
-  return string.format("page %d | looper %d | group %d | launch %s | armed [%s] | fighter p%d%s",
+  return string.format("[" .. VL.BUILD .. "] page %d | looper %d | group %d | launch %s | armed [%s] | fighter p%d%s",
     S.page, S.sel_looper, S.sel_group, S.launch and "ON" or "off", table.concat(arm, " ; "), S.fighter_page,
     hg and (" | EDIT GROUP " .. hg) or "") .. (S.page == 4 and (" | layer " .. cur_layer().name) or "")
     .. ((VL.DROP.run and " | DROP en cours...") or ((VL.DROP.msg and now() - VL.DROP.msg_t < 8) and (" | DROP : " .. VL.DROP.msg)) or "")
@@ -5683,7 +5684,7 @@ function VL.reset()
   LPF.init_presets()
   VL.last = {}
   for k in pairs(down) do down[k] = nil end
-  log("info", "Virtual Launchpad %s initialise", VL.VERSION)
+  log("info", "Virtual Launchpad %s (build %s) initialise depuis %s", VL.VERSION, VL.BUILD, tostring(({ reaper.get_action_context() })[2]))
 end
 VL.reset()
 VL.model_load()      -- routing / effets / groupes / presets du dernier modele sauve (fichier a cote du script)
