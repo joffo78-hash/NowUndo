@@ -439,7 +439,8 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Send d'une entrée recopié sur ses loopers (27 nov., demandé : « pas de décalage entre ma pré-écoute et la restitution du looper »)** :
   ouvrir / fermer / régler un send d'entrée (pad C5-C8 en mode IN, rush `in aux2`, `aux_in_…`) fait la même chose sur les loopers qui
   reçoivent cette entrée (`S.routing.in_l`, dans `VL.aux_cmd`), sauf si l'aux revient déjà dans ce looper (feedback). L'imposition
-  looper → entrée reste (elle retombe alors sur le même réglage).
+  looper → entrée reste (elle retombe alors sur le même réglage). **Looper avec une boucle qui tourne (demandé : « sinon je perds l'effet »)** :
+  l'entrée peut seulement OUVRIR son send ou le MONTER (plus grand des deux niveaux), jamais le fermer ni le baisser ; looper vide ou en 1er REC = suit tout.
 - `VL.BUILD = "27nov-B1in"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 

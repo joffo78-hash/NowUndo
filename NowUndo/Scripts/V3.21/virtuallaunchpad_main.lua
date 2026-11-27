@@ -1003,7 +1003,12 @@ function VL.aux_cmd(name)
       for i = 1, NLOOP do
         local ltr = tracks.loopers[i]
         if S.routing.in_l[n][i] and ltr and not LPF.aux_get(aux, ltr) then
-          LPF.aux_apply(ltr, aux, o.on, o.vol, "l" .. i .. ":" .. a)
+          if not LPF.aux_has_loop(i) or LPF.aux_recording(i) and (S.loopers[i].state == 1) then
+            LPF.aux_apply(ltr, aux, o.on, o.vol, "l" .. i .. ":" .. a)       -- looper vide / 1er REC : il suit l'entree
+          elseif o.on then                                                   -- boucle qui tourne : on peut ouvrir, jamais fermer
+            local lo, lv = LPF.aux_get(ltr, aux)
+            LPF.aux_apply(ltr, aux, true, (lo and lv) and math.max(lv, o.vol) or o.vol, "l" .. i .. ":" .. a)
+          end
         end
       end
       log("info", "IN%d -> aux%d : %s%s", n, a, o.on and string.format("%.2f", o.vol) or "ferme",
