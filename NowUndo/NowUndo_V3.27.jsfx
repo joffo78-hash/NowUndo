@@ -401,10 +401,6 @@ dens_seg = 0; dens_T = 0; dens_Ton = 0; dens_next_on = 1; dens_first = 1; dens_m
 // ===== V3.20 : AUTO-REPLACE par comparaison de niveau entree / boucle =====
 ar_in = 0; ar_lp = 0; ar_cnt = 0; rp_tail_on = 0; ar_att = 1 - exp(-1 / (srate * 0.0005)); ar_rel = 1 - exp(-1 / (srate * 0.04));
 ar_hold = floor(srate * 0.03); ar_up = 1.0 / (srate * 0.003); ar_dn = 1.0 / (srate * 0.025);
-// 27 nov. : plancher de bruit de l'entree (Auto-Replace ne doit jamais s'ouvrir sur du souffle / un ronflement : cas d'une carte Realtek,
-// d'un micro ouvert ou d'un Auto Thresh bas). ar_ne = enveloppe de l'entree, ar_nf = plancher suivi en continu : descend vite (50 ms),
-// remonte en 2 s quand l'entree reste pres du plancher, en 30 s quand on joue (le jeu ne fait pas monter le plancher).
-ar_ne = 0; ar_nf = 0.01; ar_nf_dn = 1 - exp(-1 / (srate * 0.05)); ar_nf_up = 1 - exp(-1 / (srate * 2)); ar_nf_upp = 1 - exp(-1 / (srate * 30));
 // ===================== V3.21 : CLOUD v2 =====================
 // Inspire des granulateurs de reference (Mutable Instruments Clouds / Beads, Granulator II, C. Roads "Microsound") :
 //  Size      = taille du grain (1..1000 ms, log). Sous ~15 ms le grain devient un clic : volontaire, cas extreme.
@@ -3069,8 +3065,6 @@ ck_on3 ? ( ck_pos3 += 1; ck_pos3 >= ck_len3 ? ( ck_pos3 -= ck_len3; ck_cyc3 = (c
   (gmem[20] == 1 && (gmem[21] == instance_id || gmem[21] == instance_alias)) ? ( gmem[22] = ck_len3; gmem[23] = ck_pos3; gmem[24] = ck_cyc3; ) : ck_on3 = 0; );
 
 curr_peak = max(abs(in0), abs(in1));
-ar_ne += (curr_peak > ar_ne ? ar_att : ar_rel) * (curr_peak - ar_ne);
-ar_nf += (ar_ne < ar_nf ? ar_nf_dn : (ar_ne < ar_nf * 3 + 0.0005 ? ar_nf_up : ar_nf_upp)) * (ar_ne - ar_nf);
 ih_n += 1; ih_n >= 1073741824 ? ih_wrap(); ih_l[ih_n & ih_mask] = in0; ih_r[ih_n & ih_mask] = in1;
 curr_peak >= trans_sens ? ( input_signal_active = 1; hold_samples_left = srate * (trans_hold_ms * 0.001); ) : ( hold_samples_left > 0 ? ( hold_samples_left -= 1; input_signal_active = 1; ) : ( input_signal_active = 0; ); );
 init_done == 0 ? ( sm_pitch = pitch; sm_speed = speed; init_done = 1; );
@@ -3605,20 +3599,17 @@ state == 0 ? ( wet_s0 = 0; wet_s1 = 0; replace_fade = max(0, replace_fade - repl
       wet_s0 = s0; wet_s1 = s1;
     ) : state == 5 ? (
       dub_pf = 0;
-      // V3.20 : AUTO-REPLACE par comparaison de niveau. On remplace la ou l'entree est AU MOINS aussi forte que la boucle
-      // a cet endroit (et au-dessus du seuil Auto Thresh). Plus de long hold : une hysteresis (-3 dB) + 30 ms de
+      // AUTO-REPLACE (27 nov. : simple porte sur le seuil Auto Thresh, voir plus bas ; avant : comparaison avec le niveau de la boucle).
+      // Pas de long hold : une hysteresis (-3 dB) + 30 ms de
       // confirmation a la fermeture evitent que le gate "tousse". Ouverture en 3 ms, fermeture en 25 ms, et l'ecriture
       // continue pendant la fermeture -> la couche se raccorde en fondu, sans marche dans le buffer.
       ar_in += (curr_peak > ar_in ? ar_att : ar_rel) * (curr_peak - ar_in);
-      ar_k = (sl_rec && sw_on ? sw_pos : pos) + wr_off; ar_k < eff_start ? ( ar_k += eff_len; ) : ( ar_k >= eff_end ? ( ar_k -= eff_len; ); );
-      ar_k = floor(max(0, min(length - 1, ar_k)));
-      ar_x = max(abs(left_buf[ar_k]), abs(right_buf[ar_k]));
-      ar_lp += (ar_x > ar_lp ? ar_att : ar_rel) * (ar_x - ar_lp);
       auto_rep_active ? (
-        (ar_in < trans_sens * 0.7 || ar_in < ar_lp * 0.7 || ar_in < ar_nf * 2) ? ( ar_cnt += 1; ar_cnt >= ar_hold ? ( auto_rep_active = 0; ar_cnt = 0; ); ) : ar_cnt = 0;
+        // 27 nov. (demande de l'utilisateur : « on reste basique, signal detecte = on ecrase ») : plus de comparaison avec le niveau de
+        // la boucle ni de plancher de bruit (il fallait jouer de plus en plus fort). Seul le seuil Auto Thresh compte (hysteresis -3 dB, 30 ms).
+        ar_in < trans_sens * 0.7 ? ( ar_cnt += 1; ar_cnt >= ar_hold ? ( auto_rep_active = 0; ar_cnt = 0; ); ) : ar_cnt = 0;
       ) : (
-        // 27 nov. : il faut aussi depasser le plancher de bruit de l'entree de +10 dB (ar_nf) : le souffle seul n'ouvre jamais
-        (ar_in >= trans_sens && ar_in >= ar_lp && ar_in >= ar_nf * 3.16) ? ( auto_rep_active = 1; ar_cnt = 0; dub_pan = rand(2.0) - 1.0; );
+        ar_in >= trans_sens ? ( auto_rep_active = 1; ar_cnt = 0; dub_pan = rand(2.0) - 1.0; );
       );
       dub_gran && wrapped ? ( dub_commit_begin(!(rev_on != (pingpong_on && ping_pong_dir < 0))); rw_on = 0; );
       replace_fade = auto_rep_active ? min(1.0, replace_fade + ar_up) : max(0, replace_fade - ar_dn);

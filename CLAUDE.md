@@ -501,6 +501,9 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Suite (19h15, demandé : « quand Auto est activé le Replace n'opère pas tant qu'aucun signal est détecté, comme avant »)** : la commande **9 (Replace)** venue du
   Launchpad / MIDI Learn / rushes passe maintenant en **Auto-Replace (état 5) si Auto est actif** (comme le bouton du JSFX « A-Rep ») ; re-appui (état 4 ou 5) = Play.
   Launchpad `L.replace` = état 4 ou 5 ; rush `replace` (`H.replace`, miroir) = état 4 ou 5. Banc `tautorep.py . auto` OK. Confirmé « ça marche » par l'utilisateur (19h19).
+- **19h20 : porte d'Auto-Replace = BASIQUE (demandé : « remplacer par un signal plus grand ne marche pas, au bout d'un moment je dois rentrer de plus en plus fort ;
+  signal détecté = on écrase »)** : ouverture dès que l'entrée dépasse **Auto Thresh** (`trans_sens`), fermeture sous -3 dB pendant 30 ms. **Retirés** : comparaison
+  avec le niveau de la boucle (`ar_lp`, V3.20) et plancher de bruit (`ar_nf`, 19h05). Le souffle est géré par le réglage Auto Thresh. Ne pas remettre de comparaison.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
