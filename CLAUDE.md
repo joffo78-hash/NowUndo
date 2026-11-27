@@ -387,6 +387,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   **8Waves** : une pastille par aux en bas à gauche de chaque ligne (nom de la piste aux, 8 lettres, + niveau ; turquoise = ouvert, gris = fermé,
   cadre orange + `<` = l'aux revient dans ce looper) ; **clic = ouvrir / fermer, glisser gauche / droite = niveau (200 px = 100 %), clic droit = aux → looper**.
   Tests `tools/taux.lua`, `tools/taux_rush.lua`, `tools/t8waves_aux.lua` (hook `W8_TEST`). **Règle** : pas de message qui interrompt le jeu (live).
+- **27 nov. : bug Ctrl+D (dupliquer un rush) corrigé** : `ED.mpaste` retirait les DERNIERS rushes de la liste pour replacer les copies, mais `mac_add`
+  → `mac_save` → `H._msort` avait déjà retrié la liste (perso avant usine) : la copie restait deux fois (même objet, même id → impossible de la
+  sélectionner seule) et un rush d'usine disparaissait. Maintenant les copies sont retirées par identité ; au chargement, un id en double reçoit un id
+  neuf (`mac_apply`). Test `tools/tdup.lua` (ancienne version : 6 échecs, nouvelle : OK).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 

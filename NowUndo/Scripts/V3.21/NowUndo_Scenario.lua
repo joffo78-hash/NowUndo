@@ -1787,6 +1787,11 @@ local function mac_apply(list, lay, pages)
     if m.id >= mac_next_id then mac_next_id = m.id + 1 end
     mac_check(m)
   end
+  local seen = {}                                     -- 27 nov. : rushes en double (meme id, bug du Ctrl+D) : la copie recoit un id neuf
+  for _, m in ipairs(macros) do
+    if seen[m.id] then m.id = mac_next_id; mac_next_id = mac_next_id + 1 end
+    seen[m.id] = true
+  end
   if H._rom_fix then H._rom_fix() end
   msel, mcur, manchor = {}, 0, 0
 end
@@ -2347,7 +2352,9 @@ function ED.mpaste(src)
     mac_check(m); made[#made + 1] = m
   end
   if #made == 0 then return end
-  for _ = 1, #made do table.remove(macros) end                           -- mac_add les a mises a la fin : on les replace
+  local isnew = {}; for _, m in ipairs(made) do isnew[m] = true end      -- 27 nov. : on retire LES COPIES (mac_save a retrie la liste :
+  local keep = {}; for _, m in ipairs(macros) do if not isnew[m] then keep[#keep + 1] = m end end   -- elles ne sont plus forcement a la fin)
+  macros = keep
   for k, m in ipairs(made) do table.insert(macros, math.min(after + k, #macros + 1), m) end
   msel = {}; for _, m in ipairs(made) do msel[m.id] = true end
   mcur = made[1].id; manchor = mcur; mwant = true
