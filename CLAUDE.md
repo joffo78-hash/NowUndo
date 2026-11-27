@@ -377,7 +377,16 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Rushes** (`NowUndo_Scenario.lua`) : `aux1`..`aux5` [niveau | -6db | 50% | on | off] sur loopers / groupes / `all` / entrées
   (`in1 aux2 -6db`) ; `l3 from aux2 [off]` = envoi aux → looper (loopers seulement). Toggle sans valeur = bascule ; gate / toggle relâché =
   fermé. Palette « Sends aux ». Tests : `tools/taux.lua` (moteur, 24 contrôles) et `tools/taux_rush.lua` (mots → commandes).
-- **Reste** : réglage des sends au Twister / MIDI Learn / web ; `NowUndo_Performance.lua` doit enregistrer les pistes 20-24.
+- **Reste** : réglage des sends au Twister / MIDI Learn / web ; `NowUndo_Performance.lua` doit enregistrer les pistes 21-24.
+- **27 nov. (retours de l'utilisateur)** : aux = **pistes 21 à 24** (4 aux, `aux_track_first = 21`, `aux_track_count = 4`) ; mots `aux1`..`aux4`.
+  **Entrée sélectionnée** = dernière entrée choisie comme source FX (page 2 du Launchpad / FX Router, `S.sel_input`, `VL.sel_in()`, publiée en
+  gmem **6062**) ; elle reste quand on sélectionne un looper. Rushes `in aux2 0.5`, `in fx 2`, `in mute` (le mot `in` seul suivi de aux / fx / mute ;
+  `in 0.25` reste le point In) → cible 100 → commandes `aux_in_0_…`, `fxin_0_…`, `inmute_0_…` (0 = entrée sélectionnée).
+  **Tableau de bord des sends** (`VL.aux_publish`) : gmem `6098` = 1re piste aux, `6099` = nombre, `6100 + (L-1)*8 + (a-1)` send du looper
+  (> 0 ouvert, < 0 fermé avec son niveau, 0 = pas d'envoi), `6164 + (k-1)*8 + (a-1)` send réel de l'entrée k, `6228 + (L-1)*8 + (a-1)` = 1 si aux → looper.
+  **8Waves** : une pastille par aux en bas à gauche de chaque ligne (nom de la piste aux, 8 lettres, + niveau ; turquoise = ouvert, gris = fermé,
+  cadre orange + `<` = l'aux revient dans ce looper) ; **clic = ouvrir / fermer, glisser gauche / droite = niveau (200 px = 100 %), clic droit = aux → looper**.
+  Tests `tools/taux.lua`, `tools/taux_rush.lua`, `tools/t8waves_aux.lua` (hook `W8_TEST`). **Règle** : pas de message qui interrompt le jeu (live).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 

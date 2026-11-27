@@ -499,7 +499,7 @@ VL.config = {
   -- Reglages propres a ce script (hors S.cfg : la synchro avec le miroir / la remote web ecrase S.cfg)
   unrouted_mode = "parent",        -- "parent" : coupe l'envoi au parent (B_MAINSEND) | "mute" : mute de piste (B_MUTE)
   follow_aux_sends = true,         -- les sources d'un looper suivent ses sends vers les pistes d'effets auxiliaires
-  aux_track_first = 20, aux_track_count = 5,   -- pistes d'effets auxiliaires : numeros REAPER 20 a 24 (26 nov. : 5 aux)
+  aux_track_first = 21, aux_track_count = 4,   -- pistes d'effets auxiliaires : numeros REAPER 21 a 24 (27 nov. : 4 aux)
   aux_follow_chain = true,         -- inclut les sources qui atteignent le looper via des routes looper -> looper
   sync_fx_patterns = { "master sync", "master_synchro", "central timebase" },   -- nom du JSFX Master Sync (minuscules)
   sync_inbox = 96,                 -- gmem[96..98] : boite de commandes du JSFX Master Sync (Main / Chorus / Bridge)
@@ -736,8 +736,8 @@ VL.AUX = VL.AUX or { w = {}, ramps = {}, prev = {}, t = 0, own = {}, own_t = {} 
 VL.AUX.KEY = "P_EXT:nowundo_aux_own"
 VL.AUX.FADE = 0.06
 
-function LPF.aux_count() return math.max(0, math.min(8, VL.config.aux_track_count or 5)) end
-function LPF.aux_track(a) return LPF.track_by_index_1based((VL.config.aux_track_first or 20) + a - 1) end
+function LPF.aux_count() return math.max(0, math.min(8, VL.config.aux_track_count or 4)) end
+function LPF.aux_track(a) return LPF.track_by_index_1based((VL.config.aux_track_first or 21) + a - 1) end
 
 -- etat REEL d'un envoi : ouvert ?, volume (amplitude), index
 function LPF.aux_get(src, dst)
@@ -935,6 +935,35 @@ function VL.update_aux_follow()
       end
     end
   end
+  VL.aux_publish(tracks)
+end
+
+-- 27 nov. : tableau de bord des sends (lu par 8Waves, plus tard le web) : gmem 6098 = 1re piste aux, 6099 = nombre ;
+-- 6100 + (i-1)*8 + (a-1) = send du looper i vers l'aux a, 6164 + (k-1)*8 + (a-1) = send REEL de l'entree k
+-- (niveau > 0 = ouvert, -niveau = ferme avec ce niveau en memoire, 0 = pas d'envoi) ; 6228 + (i-1)*8 + (a-1) = 1 si aux a -> looper i
+function VL.aux_publish(tracks)
+  if not reaper.gmem_write then return end
+  local A = VL.AUX
+  local function enc(src, dst, key)
+    local w = A.w[key]
+    if w then return w.open and math.max(1e-4, w.vol) or -math.max(1e-4, w.vol) end
+    local o, v = LPF.aux_get(src, dst)
+    if v == nil then return 0 end
+    return o and math.max(1e-4, v) or -math.max(1e-4, v)
+  end
+  reaper.gmem_write(6098, VL.config.aux_track_first or 21); reaper.gmem_write(6099, LPF.aux_count())
+  for a = 1, 8 do
+    local aux = (a <= LPF.aux_count()) and LPF.aux_track(a) or nil
+    for i = 1, NLOOP do
+      local ltr = tracks.loopers[i]
+      reaper.gmem_write(6100 + (i - 1) * 8 + (a - 1), (aux and ltr) and enc(ltr, aux, "l" .. i .. ":" .. a) or 0)
+      reaper.gmem_write(6228 + (i - 1) * 8 + (a - 1), (aux and ltr and LPF.aux_get(aux, ltr)) and 1 or 0)
+    end
+    for k = 1, NIN do
+      local itr = tracks.inputs[k]
+      reaper.gmem_write(6164 + (k - 1) * 8 + (a - 1), (aux and itr) and enc(itr, aux, "in" .. k .. ":" .. a) or 0)
+    end
+  end
 end
 
 -- commandes des rushes (ExtState NowUndo_VLcmd/q) :
@@ -946,9 +975,10 @@ function VL.aux_cmd(name)
   local tracks = VL.resolve_tracks(false)
   local kind, n, a, v = name:match("^aux_(%a+)_(%d+)_(%d+)_(%w+)$")
   n, a = tonumber(n), tonumber(a)
+  if kind == "in" and n == 0 then n = VL.sel_in() end            -- 27 nov. : in0 = entree selectionnee
   if kind and a and a >= 1 and a <= LPF.aux_count() then
     local aux = LPF.aux_track(a)
-    if not aux then log("warn", "piste aux%d (piste %d) introuvable", a, (VL.config.aux_track_first or 20) + a - 1) return true end
+    if not aux then log("warn", "piste aux%d (piste %d) introuvable", a, (VL.config.aux_track_first or 21) + a - 1) return true end
     local lvl = tonumber(v)
     if kind == "l" and n >= 1 and n <= NLOOP and tracks.loopers[n] then
       local ltr = tracks.loopers[n]
@@ -1229,7 +1259,11 @@ function VL.publish_fx_source()
   if not (reaper and reaper.SetExtState) then return end
   local source = clamp(S.fx_source or (NIN + clamp(S.sel_looper or 1, 1, NLOOP)), 1, NIN + NLOOP)
   reaper.SetExtState("nowundo_vl", "fx_source", tostring(source), false)
+  if source <= NIN then S.sel_input = source end            -- 27 nov. : derniere entree choisie = ENTREE SELECTIONNEE
+  if reaper.gmem_write and not VL.mirror_mode then reaper.gmem_write(6062, VL.sel_in()) end
 end
+-- entree selectionnee (rushes "in aux2 0.5", "in fx 2", "in mute" : n = 0 dans les commandes) ; publiee en gmem 6062
+function VL.sel_in() return clamp(S.sel_input or 1, 1, NIN) end
 
 --------------------------------------------------------------------------
 -- Selection looper / groupe / page
@@ -2913,7 +2947,7 @@ function VL.ext_cmd_poll()
       if pk and VL.set_layer("rp" .. pk) and S.page ~= 4 then VL.set_page(4) end
       if name:match("^aux") then VL.aux_cmd(name) end                       -- 26 nov. : sends aux (rushes)
       local mk, mm = name:match("^inmute_(%d+)_(%a+)$")                    -- V3.27 : rush "in1 mute" / "in1 mute off"
-      mk = tonumber(mk)
+      mk = tonumber(mk); if mk == 0 then mk = VL.sel_in() end
       if mk and mk >= 1 and mk <= NIN then VL.set_input_mute(mk, mm) end
       local tw, tws = name:match("^twpage_(%d+)_?(%d*)$")                  -- twpage_7_2 = page 7, sous-page b (rush "go t7b")
       tw = tonumber(tw)
@@ -2941,7 +2975,7 @@ function VL.ext_cmd_poll()
     -- fxin_<n>_<slot>_<on|off|tog> : effet d'une ENTREE (page web Twister / Effets)
     local ii, is_, ia = (name or ""):match("^fxin_(%d+)_(%d+)_(%a+)$")
     if ii and ts and t - tonumber(ts) < 2 then
-      ii, is_ = tonumber(ii), tonumber(is_)
+      ii, is_ = tonumber(ii), tonumber(is_); if ii == 0 then ii = VL.sel_in() end
       if ii >= 1 and ii <= NIN and is_ >= 1 and is_ <= NSLOT then
         if ia == "on" then VL.set_fx("input", ii, is_, true)
         elseif ia == "off" then VL.set_fx("input", ii, is_, false)

@@ -3,7 +3,7 @@
 VL_TEST = true
 EXT = {}; GM = {}; CLOCK = 100
 local TR = {}
-for n = 1, 24 do TR[n] = { n = n, sends = {}, info = { B_MAINSEND = 1, B_MUTE = 0 }, str = {} } end
+for n = 1, 25 do TR[n] = { n = n, sends = {}, info = { B_MAINSEND = 1, B_MUTE = 0 }, str = {} } end
 local SKEYS = { B_MUTE = 0, D_VOL = 1, D_PAN = 0, I_SENDMODE = 0, I_SRCCHAN = 0, I_DSTCHAN = 0, I_MIDIFLAGS = 0 }
 reaper = setmetatable({
   time_precise = function() return CLOCK end,
@@ -12,7 +12,7 @@ reaper = setmetatable({
   gmem_read = function(a) return GM[a] or 0 end, gmem_write = function(a, v) GM[a] = v end, gmem_attach = function() end,
   GetResourcePath = function() return "/nonexistent" end, GetOS = function() return "Win64" end,
   get_action_context = function() return false, "/nonexistent/x.lua" end,
-  CountTracks = function() return 24 end, GetTrack = function(_, i) return TR[i + 1] end,
+  CountTracks = function() return 25 end, GetTrack = function(_, i) return TR[i + 1] end,
   GetTrackName = function(tr) return true, "T" .. tr.n end,
   GetTrackNumSends = function(tr, cat) return #tr.sends end,
   GetTrackSendInfo_Value = function(tr, cat, i, k)
@@ -37,7 +37,7 @@ local VL = dofile(arg_path)
 local S = VL.S
 local function IN(k) return TR[1 + k] end          -- entrees = pistes 2..9
 local function LP(i) return TR[10 + i] end         -- loopers = pistes 11..18
-local function AUX(a) return TR[19 + a] end        -- aux = pistes 20..24
+local function AUX(a) return TR[20 + a] end        -- aux = pistes 21..24
 local function snd(src, dst)
   for _, s in ipairs(src.sends) do if s.dst == dst then return s end end
 end
@@ -123,4 +123,19 @@ cmd("aux_l_5_1_tog"); run(0.3)
 check("l5 aux1 (tog, pas de send) : ouvert a 1", st(LP(5), 1), "OUV1.00")
 cmd("aux_l_5_1_250"); run(0.2); cmd("aux_l_5_1_off"); run(0.3); cmd("aux_l_5_1_on"); run(0.3)
 check("l5 aux1 0.25 puis off puis on : rouvert a 0.25", st(LP(5), 1), "OUV0.25")
+-- 13) entree selectionnee (in0) : derniere entree choisie comme source FX
+VL.S.fx_source = 3; VL.publish_fx_source(); cmd("aux_in_0_4_700"); run(0.3)
+check("in aux4 0.7 (entree selectionnee = IN3)", st(IN(3), 4), "OUV0.70")
+VL.S.fx_source = 8 + 2; VL.publish_fx_source()                 -- on selectionne un looper : l'entree selectionnee reste IN3
+check("selection d'un looper : entree selectionnee gardee (gmem 6062)", tostring(GM[6062]), "3")
+-- 14) publication pour 8Waves
+check("gmem 6098/6099 = 1re piste aux / nombre", GM[6098] .. "/" .. GM[6099], "21/4")
+check("gmem : L5 -> aux1 ouvert 0.25", string.format("%.2f", GM[6100 + 4 * 8 + 0]), "0.25")
+cmd("aux_l_5_1_off"); run(0.3)
+check("gmem : L5 -> aux1 ferme (niveau garde, negatif)", string.format("%.2f", GM[6100 + 4 * 8 + 0]), "-0.25")
+check("gmem : aux4 -> L3 ouvert", tostring(GM[6228 + 2 * 8 + 3]), "1")
+check("gmem : IN3 -> aux4 reel 0.7", string.format("%.2f", GM[6164 + 2 * 8 + 3]), "0.70")
+check("aux5 n'existe plus (piste 25 non touchee)", tostring(#TR[25].sends), "0")
+cmd("aux_l_1_5_1000"); run(0.2)
+check("... meme par un rush aux5", tostring(snd(LP(1), TR[25]) == nil), "true")
 print(fails == 0 and "TOUT OK" or (fails .. " ECHEC(S)"))

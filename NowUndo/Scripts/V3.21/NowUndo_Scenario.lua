@@ -176,9 +176,9 @@ for slot = 1, 4 do
   end
 end
 
--- 26 nov. : aux1..aux5 = sends vers les pistes AUX 20..24 (reverb, delay partages). "l1 aux2 0.5" (niveau 0..1, -6db, 50 %),
+-- 26 nov. : aux1..aux4 = sends vers les pistes AUX 21..24 (27 nov.) (reverb, delay partages). "l1 aux2 0.5" (niveau 0..1, -6db, 50 %),
 -- "l1 aux2" / "on" = ouvre au dernier niveau, "off" = ferme ; "in1 aux2 0.5" = send propre de l'entree 1. Execute par le Launchpad.
-for a = 1, 5 do
+for a = 1, 8 do
   H["aux" .. a] = function(v)
     local mode
     if v == nil then mode = tmode and "tog" or "on"
@@ -392,6 +392,7 @@ H._norm = function(text)                  -- e(2) = e2 ; V3.27 : fx 2 / fx(2) = 
   return text
 end
 local function parse_target(s)
+  if s == "_insel" then return { 100 } end   -- entree selectionnee (le Launchpad la resout : in0)
   if s == "all" or s == "tous" or s == "*" then
     local t = {}; for i = 1, NLOOP do t[i] = i end; return t
   end
@@ -420,7 +421,7 @@ local function parse_target(s)
   end
   if #t == 0 and not grp then return nil, "cible manquante" end
   for _, i in ipairs(t) do
-    if (i < 1 or i > NLOOP) and i <= 100 then return nil, "looper " .. i .. " inexistant (1-" .. NLOOP .. ")" end
+    if (i < 1 or i > NLOOP) and i < 100 then return nil, "looper " .. i .. " inexistant (1-" .. NLOOP .. ")" end
   end
   return t
 end
@@ -502,7 +503,7 @@ local function compile(text, forced, toggle, gate_off)
       local tt, te
       if fxs == "" then tt = last_targets or forced; te = "cible manquante (l3 from aux2)"
       else tt, te = parse_target((fxs:gsub("%s+", ""))) end
-      if fxa < 1 or fxa > 5 then errs[#errs + 1] = "[" .. act .. "] aux" .. fxa .. " inexistante (aux1-aux5 = pistes 20-24)"
+      if fxa < 1 or fxa > 8 then errs[#errs + 1] = "[" .. act .. "] aux" .. fxa .. " inexistante (aux1-aux4 = pistes 21-24)"
       elseif fxm ~= "" and onoff(fxm) == nil then errs[#errs + 1] = "[" .. act .. "] on / off attendu apres aux" .. fxa
       elseif not tt then errs[#errs + 1] = "[" .. act .. "] " .. te
       else
@@ -510,7 +511,7 @@ local function compile(text, forced, toggle, gate_off)
         local md = (fxm == "") and (tmode and "tog" or "on") or (onoff(fxm) and "on" or "off")
         if H._omode then md = (md == "off") and "on" or "off" end
         for _, i in ipairs(tt) do
-          if i > 100 then errs[#errs + 1] = "[" .. act .. "] from aux : seulement vers un looper (l1..l8)"; break end
+          if i >= 100 then errs[#errs + 1] = "[" .. act .. "] from aux : seulement vers un looper (l1..l8)"; break end
           items[#items + 1] = { i = i, glob = "auxrx", qname = string.format("auxrx_%d_%d_%s", i, fxa, md), key = "from#" .. fxa }
         end
       end
@@ -538,6 +539,9 @@ local function compile(text, forced, toggle, gate_off)
       local first = t[1] or ""
       local targets, terr
       local is_target = is_tgt(first)
+      if first == "in" and t[2] and (t[2]:match("^aux%d") or t[2]:match("^e%d") or t[2] == "mute") then
+        is_target = true; first = "_insel"      -- 27 nov. : "in aux2 0.5" / "in fx 2" / "in mute" = ENTREE SELECTIONNEE (codee 100)
+      end
       if not is_target and last_targets and split_key(first:match("[^/]+") or "") then
         targets = last_targets                -- pas de cible : on garde celle de l'action precedente
         table.insert(t, 1, "_")
@@ -576,7 +580,7 @@ local function compile(text, forced, toggle, gate_off)
             if not ops then errs[#errs + 1] = "[" .. act .. "] " .. k .. " : " .. err; ok = false; break end
             for _, i in ipairs(targets) do
               for _, op in ipairs(ops) do
-                if i > 100 and k == "mute" then             -- V3.27 : mute d'une ENTREE = sortie du parent (page 2, par le Launchpad)
+                if i >= 100 and k == "mute" then             -- V3.27 : mute d'une ENTREE = sortie du parent (page 2, par le Launchpad)
                   local w = true
                   local vv = inline[n] or val
                   if vv ~= nil then w = onoff(vv) end
@@ -587,10 +591,10 @@ local function compile(text, forced, toggle, gate_off)
                 end
                 if op.glob == "aux" then                      -- 26 nov. : send vers une piste aux (looper ou entree), par le Launchpad
                   items[#items + 1] = { i = i, glob = "aux", key = "aux#" .. op.a,
-                    qname = string.format("aux_%s_%d_%d_%s", i > 100 and "in" or "l", i > 100 and i - 100 or i, op.a, op.mode) }
+                    qname = string.format("aux_%s_%d_%d_%s", i >= 100 and "in" or "l", i >= 100 and i - 100 or i, op.a, op.mode) }
                   break
                 end
-                if i > 100 and op.glob ~= "fx" then errs[#errs + 1] = "[" .. act .. "] sur une entree (in" .. (i - 100) .. ") : seulement fx 1..4, mute et aux1..aux5"; ok = false; break end
+                if i >= 100 and op.glob ~= "fx" then errs[#errs + 1] = "[" .. act .. "] sur une entree (in" .. (i - 100) .. ") : seulement fx 1..4, mute et aux1..aux4"; ok = false; break end
                 if not op.all then items[#items + 1] = { i = i, ch = op.ch, f = op.f, sync = sync, glob = op.glob, slot = op.slot, want = op.want, key = k .. (op.slot and ("#" .. op.slot) or "") } end
               end
             end
@@ -795,7 +799,7 @@ end
 local function fire_glob(it)
   local name
   if it.glob == "fx" then
-    name = string.format(it.i > 100 and "fxin_%d_%d_%s" or "fx_%d_%d_%s", it.i > 100 and it.i - 100 or it.i, it.slot, it.want == nil and "tog" or (it.want and "on" or "off"))
+    name = string.format(it.i >= 100 and "fxin_%d_%d_%s" or "fx_%d_%d_%s", it.i >= 100 and it.i - 100 or it.i, it.slot, it.want == nil and "tog" or (it.want and "on" or "off"))
   elseif it.glob == "sync" then
     name = "sync_" .. (it.parts_all and "all_" or "") .. (it.on and "on" or "off")
   elseif it.qname then
@@ -2000,7 +2004,7 @@ ED.CATS = {
   { "Slicer",         { "ssteps...", "srate...", "sgrid...", "sdecay...", "sattack...", "spitch...", "smax..." } },
   { "Global",         { "clearall", "clearallfull", "sync", "unsync", "syncall", "unsyncall", "r(n)...", "g(n)..." } },
   { "Groupes / pages", { "to...", "go..." } },     -- V3.27 : l3 to g2 | go lp 1, go 4c, go t1
-  { "Sends aux",      { "aux1...", "aux2...", "aux3...", "aux4...", "aux5...", "from..." } },   -- 26 nov. : l1 aux2 0.5 | l3 from aux2
+  { "Sends aux",      { "aux1...", "aux2...", "aux3...", "aux4...", "from..." } },   -- 26 nov. : l1 aux2 0.5 | l3 from aux2
 }
 ED.VALS = {
   vol = { "0db", "-3db", "-6db", "-12db", "-24db", "50%", "reset" }, speed = { "0.5", "0.75", "1", "1.5", "2", "reset" },
@@ -2017,7 +2021,7 @@ ED.VALS = {
   sattack = { "0", "10", "50", "100", "reset" }, spitch = { "0", "25", "50", "100", "reset" }, smax = { "4", "8", "16", "32", "reset" },
   ["to"] = { "g1", "g2", "g3", "g4", "g0" },
   aux1 = { "1", "0.5", "-6db", "-12db", "off" }, aux2 = { "1", "0.5", "-6db", "-12db", "off" }, aux3 = { "1", "0.5", "-6db", "-12db", "off" },
-  aux4 = { "1", "0.5", "-6db", "-12db", "off" }, aux5 = { "1", "0.5", "-6db", "-12db", "off" }, from = { "aux1", "aux2", "aux3", "aux4", "aux5" },
+  aux4 = { "1", "0.5", "-6db", "-12db", "off" }, from = { "aux1", "aux2", "aux3", "aux4" },
   ["go"] = { "lp 1", "lp 2", "lp 3", "4a", "4b", "4c", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t7b", "t7c", "t7d", "t8", "t9" },
   ["r(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" }, ["g(n)"] = { "1", "2", "3", "4", "5", "6", "7", "8" },
 }
@@ -2478,7 +2482,7 @@ local function run_macro(m, targets, gst, press_t)   -- gst : "on" / "off" pour 
   end
   local tl_, tseen = {}, {}
   for _, it in ipairs(items) do if it.i and not tseen[it.i] then tseen[it.i] = true; tl_[#tl_ + 1] = it.i end end   -- V3.27 : cibles reelles
-  table.sort(tl_); for n, i in ipairs(tl_) do tl_[n] = i > 100 and ("IN" .. (i - 100)) or ("L" .. i) end
+  table.sort(tl_); for n, i in ipairs(tl_) do tl_[n] = i >= 100 and (i == 100 and "IN sel" or ("IN" .. (i - 100))) or ("L" .. i) end
   msg = "Rush '" .. mac_label(m) .. "' -> " .. (m.all and "ALL" or table.concat(tl_, ",")) .. (m.toggle and " [toggle]" or "") .. (m.gate and " [gate]" or "")
         .. (#dead > 0 and ("  (looper absent : " .. table.concat(dead, ",") .. ")") or "")
         .. (nsync > 0 and ("  -  " .. nsync .. " action(s) * en attente du point de synchro") or "")
@@ -2521,7 +2525,9 @@ local function mac_active(m, targets)
   local t = {}
   for w in act:gmatch("%S+") do t[#t + 1] = (w:gsub("%*[%d%./]*$", "")) end
   if #t == 0 then return false end
-  if is_tgt(t[1]) and #t > 1 then                    -- V3.27 : cible ecrite dans le rush (l2, g1, all...) : c'est elle qu'on verifie
+  if t[1] == "in" and #t > 1 and (t[2]:match("^e%d") or t[2] == "mute") then   -- 27 nov. : entree selectionnee (gmem 6062)
+    targets = { 100 + math.max(1, math.floor(rd(6062) + .5)) }; table.remove(t, 1)
+  elseif is_tgt(t[1]) and #t > 1 then                -- V3.27 : cible ecrite dans le rush (l2, g1, all...) : c'est elle qu'on verifie
     local tt = parse_target(t[1]); if not tt then return false end
     targets = tt; table.remove(t, 1)
   end

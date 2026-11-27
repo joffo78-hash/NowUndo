@@ -17,7 +17,7 @@ gfx.getchar = function() return 0 end
 gfx.measurestr = function(t) return 8 * #tostring(t), 12 end
 gfx.texth = 12
 for _, k in ipairs({ 'mouse_wheel', 'mouse_hwheel', 'x', 'y', 'r', 'g', 'b', 'a', 'a2', 'mode', 'clear', 'dest', 'ext_retina' }) do gfx[k] = 0 end
-local R = { "l1 aux2 0.5", "in1 aux2 -6db", "aux2 off", "g1 aux3 50%", "all aux1 on", "in1-2 aux5 1", "l3 from aux2", "l3 from aux2 off", "g2 from aux4", "aux2", "aux2 0.8", "l3 from aux2", "in1 fx 2, aux1 0.3", "l1 aux9 1" }
+local R = { "l1 aux2 0.5", "in1 aux2 -6db", "aux2 off", "g1 aux3 50%", "all aux1 on", "in1-2 aux5 1", "l3 from aux2", "l3 from aux2 off", "g2 from aux4", "aux2", "aux2 0.8", "l3 from aux2", "in1 fx 2, aux1 0.3", "l1 aux9 1", "in aux2 0.5", "in fx 2", "in mute", "in 0.25", "l1 in 0.25 out 0.5" }
 local TG = { [10] = "t", [11] = "g", [12] = "t" }
 local lines = { "NOWUNDO_MACROS 1" }
 for n, t in ipairs(R) do lines[#lines + 1] = table.concat({ "M", n, 0, "R" .. n, t, TG[n] == "t" and 1 or 0, 0, TG[n] == "g" and 1 or 0 }, "\t") end

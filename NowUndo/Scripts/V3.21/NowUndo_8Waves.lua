@@ -69,6 +69,53 @@ local function text(x, y, str, size, r, g, b, bold)
   setfont(math.max(7, math.floor(size)), bold); setc_hi(r, g, b, 1); gfx.x = x; gfx.y = y; gfx.drawstr(tostring(str))
 end
 
+-- 27 nov. : SENDS VERS LES AUX, publies par le Launchpad (gmem 6098 = 1re piste aux, 6099 = nombre,
+-- 6100 + (L-1)*8 + (a-1) = send du looper : > 0 ouvert, < 0 ferme (niveau garde), 0 = pas d'envoi ; 6228 + ... = aux -> looper).
+-- Une pastille par aux en bas a gauche de la forme d'onde : nom de la piste aux + niveau ; < devant le nom (cadre orange) = l'aux revient dans ce looper.
+-- Souris : clic = ouvrir / fermer, glisser a gauche / a droite = niveau, clic droit = aux -> ce looper (on / off).
+VIS.AUXN = { t = -10, n = {} }
+function VIS.aux_names(now_t)
+  local A = VIS.AUXN
+  if now_t - A.t < 1 then return A.n end
+  A.t = now_t
+  local first, cnt = math.floor(read(6098, 0) + .5), math.floor(read(6099, 0) + .5)
+  for a = 1, 8 do A.n[a] = nil end
+  for a = 1, math.min(8, cnt) do
+    local tr = first > 0 and reaper.GetTrack(0, first + a - 2)
+    local nm = ""
+    if tr then local _, n = reaper.GetTrackName(tr); nm = n or "" end
+    nm = nm:gsub("^%s+", ""):gsub("%s+$", "")
+    if nm == "" or nm:match("^Track %d+$") or nm:match("^Piste %d+$") then nm = "aux" .. a end
+    A.n[a] = (#nm > 8) and nm:sub(1, 8) or nm
+  end
+  return A.n
+end
+function VIS.aux_badges(i, ds, wx, wy, ww, wh, fs)
+  local names = VIS.aux_names(reaper.time_precise())
+  local R = VIS.R[i]; R.ab = {}
+  if #names == 0 or wh < fs * 2.6 then return end
+  local bf = math.max(9, math.floor(fs * .82))
+  setfont(bf, false)
+  local vs = VIS.s; VIS.s = 1                                     -- les pastilles gardent leur couleur (Out Vol baisse = grise ailleurs)
+  local bx, bh = wx + 4, bf + 5
+  local by = wy + wh - bh - 3
+  for a = 1, #names do
+    local v = read(6100 + (ds - 1) * 8 + (a - 1), 0)
+    local rx = read(6228 + (ds - 1) * 8 + (a - 1), 0) > .5
+    local lvl = math.abs(v)
+    local txt = (rx and "<" or "") .. names[a] .. " " .. ((v == 0) and "-" or string.format("%d%%", math.floor(lvl * 100 + .5)))
+    local tw = gfx.measurestr(txt) + 10
+    if bx + tw > wx + ww * .7 then break end
+    if v > 0 then rect(bx, by, tw, bh, .10, .42, .48, .92, 1); rect(bx, by + bh - 3, (tw) * math.min(1, lvl), 3, .35, .95, 1, 1, 1)
+    else rect(bx, by, tw, bh, .12, .12, .14, .80, 1) end
+    if rx then rect(bx, by, tw, bh, .98, .70, .25, 1, 0) end
+    text(bx + 5, by + 2, txt, bf, v > 0 and .90 or .55, v > 0 and 1 or .57, v > 0 and 1 or .62, false)
+    R.ab[#R.ab + 1] = { x = bx, y = by, w = tw, h = bh, a = a, v = v }
+    bx = bx + tw + 4
+  end
+  VIS.s = vs
+end
+
 -- Fenetre : position / taille / dock memorises (comme le 8 Looper Panel)
 local DOCK = {t = 0, sig = ""}
 local function win_init()
@@ -267,6 +314,8 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local tx = wx + 6
   for _, pt in ipairs(parts) do text(tx, wy + 4, pt[1], fs, pt[2], pt[3], pt[4], true); tx = tx + pt.w + gapw end
 
+  VIS.aux_badges(i, ds_i, wx, wy, ww, wh, fs)                     -- 27 nov. : sends vers les aux (en bas a gauche)
+
   -- tout a droite : M (maitre), S (esclave) ou F (libre), meme logique que le 8 Panel
   do
     local sy_master = read(gb, 187) > .5
@@ -332,7 +381,13 @@ end
 local function zdist(R, smp, c, wl)
   local d = smp - c; d = d - math.floor(d / wl + .5) * wl; return d
 end
+function UI.badge(R, mx, my)                                         -- 27 nov. : pastille d'un send aux sous la souris
+  for _, b in ipairs(R.ab or {}) do
+    if mx >= b.x and mx < b.x + b.w and my >= b.y and my < b.y + b.h then return b end
+  end
+end
 function UI.hit(R, mx, my)
+  if UI.badge(R, mx, my) then return "aux" end
   if R.tag and mx >= R.wx and mx < R.wx + R.tag and my >= R.wy and my < R.wy + R.wh * .35 then return "tag" end
   if mx < R.wx or mx >= R.wx + R.ww then return "tag" end              -- VU / marges : selection seule
   if R.len <= 0 or R.lw <= 0 then return "row" end
@@ -350,7 +405,7 @@ function UI.hit(R, mx, my)
   if mx > ix and mx < ox then return "win" end
   return "row"
 end
-local CURSOR = { ["in"] = 32644, out = 32644, zedge = 32644, win = 32646, zmove = 32646 }   -- <-> / deplacement
+local CURSOR = { aux = 32644, ["in"] = 32644, out = 32644, zedge = 32644, win = 32646, zmove = 32646 }   -- <-> / deplacement
 function UI.param(gb, box, id, v) reaper.gmem_write(gb + box + 1, v); reaper.gmem_write(gb + box, id) end
 function UI.tick(ch)
   local mx, my, cap = gfx.mouse_x, gfx.mouse_y, gfx.mouse_cap
@@ -377,6 +432,7 @@ function UI.tick(ch)
         D = { i = i, ds = R.ds, kind = kind, x0 = mx, t0 = reaper.time_precise(), moved = false, gb = R.gb, len = R.len,
               ls = R.ls, lw = R.lw }
         if kind == "zmove" or kind == "zedge" then D.zc, D.zh, D.zw = UI.zone(R) end
+        if kind == "aux" then local b = UI.badge(R, mx, my); D.a = b.a; D.v0 = math.abs(b.v); D.last = D.v0 end
         if R.ds ~= SEL_LOOPER then UI.lp("sel_" .. R.ds); SEL_LOOPER = R.ds end
         UI.drag = D
       end
@@ -384,7 +440,14 @@ function UI.tick(ch)
   elseif down and D then                                              -- glisser
     local R = VIS.R[D.i]
     if R and math.abs(mx - D.x0) > 4 then D.moved = true end
-    if R and D.moved and D.len > 0 and (D.lx ~= mx) then
+    if R and D.moved and D.kind == "aux" then                        -- send aux : glisser a gauche / a droite = niveau (0..100 %)
+      local lvl = math.max(0, math.min(1, D.v0 + (mx - D.x0) / 200))
+      local now = reaper.time_precise()
+      if math.abs(lvl - D.last) >= .01 and now - (D.st or 0) > .03 or (lvl == 0 and D.last > 0) or (lvl == 1 and D.last < 1) then
+        D.last, D.st = lvl, now
+        UI.lp(string.format("aux_l_%d_%d_%d", D.ds, D.a, math.floor(lvl * 1000 + .5)))
+      end
+    elseif R and D.moved and D.len > 0 and (D.lx ~= mx) then
       D.lx = mx
       local s = smp_at(R, mx)
       local ds = (mx - D.x0) / R.ww * D.len
@@ -404,7 +467,8 @@ function UI.tick(ch)
       end
     end
   elseif not down and UI.down and D then                              -- relachement : clic rapide = tap de statut
-    if not D.moved and D.kind ~= "tag" and reaper.time_precise() - D.t0 < .4 then UI.lp("stap_" .. D.ds) end
+    if not D.moved and D.kind == "aux" then UI.lp(string.format("aux_l_%d_%d_tog", D.ds, D.a))   -- clic = ouvrir / fermer
+    elseif not D.moved and D.kind ~= "tag" and reaper.time_precise() - D.t0 < .4 then UI.lp("stap_" .. D.ds) end
     UI.drag = nil
   end
   if not down then UI.drag = nil end
@@ -587,7 +651,9 @@ function IMP.tick(now_t, w, h)
   local rd = (gfx.mouse_cap & 2) == 2
   if rd and not IMP.rdown then
     local i, R = UI.row_at(mx, my)
-    if R then
+    local b = R and UI.badge(R, mx, my)
+    if b then UI.lp(string.format("auxrx_%d_%d_tog", R.ds, b.a))   -- 27 nov. : clic droit sur un send = l'aux revient dans ce looper (on / off)
+    elseif R then
       -- pas de separateur ni de ligne grisee : la numerotation de gfx.showmenu reste 1, 2, 3, 4
       local items = { "Charger un fichier audio dans le looper " .. (i + 1) .. "...",
                       "Si une boucle tourne deja : ADAPTER la longueur (multiple du maitre)",
@@ -640,4 +706,5 @@ end
 
 reaper.gmem_attach("nowundo_sync")
 win_init(); gfx.clear = 0x0D0D11
+if W8_TEST then W8_TEST.VIS = VIS end                                -- tests (tools/t8waves_aux.lua)
 reaper.defer(main)
