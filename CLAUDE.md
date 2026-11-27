@@ -488,7 +488,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - Scripts : fonction **globale `NU_IO(b, 44|45|46)`** (copiée dans Launchpad, Twister, MIDI Learn, Scenario, Twister_Web) = vraie boucle, sinon valeurs fictives.
   Utilisée aux endroits qui écrivent / affichent In / Out : Twister (`read_fb` 44/45/46 ; l'anneau « Clear = boucle / vide » de la page 9 lit la vraie longueur),
   MIDI Learn (`io_write`, page 1, reset), rushes `in` / `out` (`F.iolen/iost/iow`), Launchpad `loop_in_step`, pont web (`read_state`, `set_io`, reset).
-  8Waves : pas de forme d'onde à vide, rien changé. Test `tools/tpreio.py` (JSFX). `VL.BUILD = "27nov-preio"`.
+  8Waves (signalé : « le réglage ne se reporte pas ») : une ligne vide affiche et fait glisser la fenêtre fictive (`NU_IO` dans le dessin, poignées et cadre comme une boucle). Tests `tools/tpreio.py` (JSFX), `tools/t8waves_preio.lua`. `VL.BUILD = "27nov-preio"`.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 

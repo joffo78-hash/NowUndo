@@ -189,6 +189,7 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local length, ls, lw = read(gb, 46), read(gb, 44), read(gb, 45)
   local sy_pos, sy_id, sy_len, sy_live = read(gb, 182), math.floor(read(gb, 183) + .5), read(gb, 184), read(gb, 185) > .5
   if length <= 0 then sy_pos = -1 end
+  if length <= 0 then length, ls, lw = NU_IO(gb, 46), NU_IO(gb, 44), NU_IO(gb, 45) end   -- 27 nov. : looper vide = In / Out pre-regles (fenetre fictive)
   local st_col = STATE_COL[state] or {.035, .035, .04}
   local is_stop = STATE_COL[state] == nil
   local muted = read(gb, 199) > .5                                 -- mute du looper
@@ -387,6 +388,17 @@ end
 -- rangee du haut du Launchpad), fleches haut / bas = selection, glisser : bords In / Out, milieu = deplacer la fenetre,
 -- zone des grains du Cloud (milieu = position, bords = largeur). Commandes vers le Launchpad : NowUndo_VLcmd/q.
 -- ============================================================================================================
+-- 27 nov. : In / Out pre-reglables sur un looper VIDE : le JSFX publie une longueur fictive (112000 + (looper*3 + part)*20 + 4)
+-- et la fenetre pre-reglee (+5 In, +6 Width) ; NU_IO(b, 44|45|46) lit la vraie boucle, sinon ces valeurs fictives.
+function NU_IO(b, off)
+  local v = reaper.gmem_read(b + off) or 0
+  if (reaper.gmem_read(b + 46) or 0) > 0 then return v end
+  local x = 112000 + math.floor((b - 1000) / 200 + 0.5) * 20
+  local pl = reaper.gmem_read(x + 4) or 0
+  if pl <= 0 then return v end
+  if off == 46 then return pl elseif off == 44 then return reaper.gmem_read(x + 5) or 0 end
+  return reaper.gmem_read(x + 6) or pl
+end
 local UI = { down = false, drag = nil, ctrl_sess = false }
 function UI.lp(cmd)
   local q = reaper.GetExtState("NowUndo_VLcmd", "q")
