@@ -444,7 +444,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   **Plus d'imposition looper → entrée** (`LPF.aux_imposed` n'est plus appelé) et plus de copie au passage en REC (`VL.aux_copy_on_rec` inutilisé) :
   chaque entrée garde ses propres sends (in mute les coupe toujours). Les essais intermédiaires du 27 nov. (réglage explicite prioritaire,
   recopie entrée → looper) ont été retirés.
-- `VL.BUILD = "27nov-B1in"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+- `VL.BUILD = "27nov-15h"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
