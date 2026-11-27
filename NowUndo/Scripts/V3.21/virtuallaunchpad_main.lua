@@ -999,6 +999,13 @@ function VL.aux_cmd(name)
       if lvl then if lvl > 0 then o.vol = lvl / 1000; o.on = true else o.on = false end
       elseif v == "on" then o.on = true elseif v == "off" then o.on = false elseif v == "tog" then o.on = not o.on end
       LPF.aux_own_save(n, tracks.inputs[n])
+      -- 27 nov. : le send d'une entree est recopie sur les loopers qui recoivent cette entree (pre-ecoute = restitution du looper)
+      for i = 1, NLOOP do
+        local ltr = tracks.loopers[i]
+        if S.routing.in_l[n][i] and ltr and not LPF.aux_get(aux, ltr) then
+          LPF.aux_apply(ltr, aux, o.on, o.vol, "l" .. i .. ":" .. a)
+        end
+      end
       log("info", "IN%d -> aux%d : %s%s", n, a, o.on and string.format("%.2f", o.vol) or "ferme",
           LPF.aux_imposed(n, tracks) and " (impose par un looper pour l'instant)" or "")
       VL.update_aux_follow()

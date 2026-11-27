@@ -76,11 +76,11 @@ check("in1 aux3 off : ferme, niveau garde", st(IN(1), 3), "fer1.00")
 -- 3) copie au REC : L1 enregistre (IN1 alimente L1)
 lstate(1, 7, 0); run(0.2); lstate(1, 1, 0); run(0.2)
 check("REC L1 : L1 -> aux2 copie de IN1 (0.5)", st(LP(1), 2), "OUV0.50")
-check("REC L1 : L1 -> aux3 ferme (IN1 aux3 ferme)", st(LP(1), 3), "-")
+check("REC L1 : L1 -> aux3 ferme (IN1 aux3 ferme)", st(LP(1), 3), "fer1.00")
 lstate(1, 2, 96000); run(0.2)
 -- 4) le looper avec boucle impose ses sends a IN1 : on change le send propre de IN1, L1 l'impose toujours
 cmd("aux_in_1_2_200"); run(0.3)
-check("IN1 impose par L1 : aux2 reste a 0.5 (son propre = 0.2)", st(IN(1), 2), "OUV0.50")
+check("27 nov. : IN1 aux2 0.2 recopie sur L1 (et impose)", st(IN(1), 2) .. st(LP(1), 2), "OUV0.20OUV0.20")
 cmd("aux_l_1_2_800"); run(0.3)
 check("l1 aux2 0.8 : L1 change -> IN1 suit (0.8)", st(IN(1), 2), "OUV0.80")
 -- 5) reglage manuel de l'entree pendant qu'elle est imposee : remis en place
@@ -103,14 +103,14 @@ lstate(2, 1, 0); run(0.2); lstate(2, 2, 96000); run(0.2)       -- L2 : REC (IN1 
 check("REC L2 : plus grand niveau des entrees (IN1 0.33)", st(LP(2), 2), "OUV0.33")
 cmd("aux_in_2_2_900"); run(0.2)
 lstate(2, 3, 96000); run(0.2); lstate(2, 2, 96000); run(0.2)    -- overdub
-check("overdub L2 : sends gardes (0.33, pas 0.9 de IN2)", st(LP(2), 2), "OUV0.33")
+check("overdub L2 : sends gardes (27 nov. : IN2 0.9 recopie sur L2)", st(LP(2), 2), "OUV0.90")
 -- 10) priorite : IN1 alimente L1 (boucle, aux2 0.5) et L2 (boucle, aux2 0.33) ; L2 selectionne -> 0.33 ; L1 en overdub -> 0.5
 lstate(1, 2, 96000); cmd("aux_l_1_2_500"); S.sel_looper = 2; run(0.3)
-check("IN1 -> 2 loopers : looper selectionne (L2) gagne", st(IN(1), 2), "OUV0.33")
+check("IN1 -> 2 loopers (27 nov. : niveau recopie)", st(IN(1), 2), "OUV0.90")
 lstate(1, 3, 96000); run(0.3)
 check("... mais le looper en overdub (L1) passe devant", st(IN(1), 2), "OUV0.50")
 lstate(1, 2, 96000); S.sel_looper = 5; run(0.3)
-check("... aucun selectionne / en REC : plus grand niveau", st(IN(1), 2), "OUV0.50")
+check("... aucun selectionne (27 nov. : niveau recopie)", st(IN(1), 2), "OUV0.90")
 -- 11) aux -> looper, et garde-fou du feedback
 cmd("auxrx_3_4_on"); run(0.3)
 check("l3 from aux4 : aux4 -> L3 ouvert", (function() local s = snd(AUX(4), LP(3)) return s and (s.B_MUTE == 0 and "OUV" or "fer") or "-" end)(), "OUV")

@@ -436,6 +436,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (entrée : son réglage propre ; looper : gmem 6100..). `VL.aux_pad_apply`, `VL.aux_sel_cmd`.
 - Commandes `NowUndo_VLcmd/q` : `topin_<on|off|tog>`, `auxsel_<a>_<on|off|tog>`. MIDI Learn : `act:top_in` (onglet Pages), `act:auxsel_1..4`
   (Output). Rush : **`inputs`** / `inputs on` / `inputs off` (toggle = miroir de gmem 6063), palette « Groupes / pages ».
+- **Send d'une entrée recopié sur ses loopers (27 nov., demandé : « pas de décalage entre ma pré-écoute et la restitution du looper »)** :
+  ouvrir / fermer / régler un send d'entrée (pad C5-C8 en mode IN, rush `in aux2`, `aux_in_…`) fait la même chose sur les loopers qui
+  reçoivent cette entrée (`S.routing.in_l`, dans `VL.aux_cmd`), sauf si l'aux revient déjà dans ce looper (feedback). L'imposition
+  looper → entrée reste (elle retombe alors sur le même réglage).
 - `VL.BUILD = "27nov-B1in"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
