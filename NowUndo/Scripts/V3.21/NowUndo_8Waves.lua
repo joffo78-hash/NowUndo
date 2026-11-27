@@ -336,12 +336,7 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local spd, pch = read(gb, 3), read(gb, 4)                       -- vitesse / pitch publies par le looper (+3 / +4)
   if spd > 0 and math.abs(spd - 1) > .005 then parts[#parts + 1] = {string.format("SP x%.2f", spd), .95, .55, .82} end
   if math.abs(pch) > .05 then parts[#parts + 1] = {string.format("PS %+.1f", pch), .95, .55, .82} end
-  local fxm = math.floor(read(DASH_BASE, 30 + ds_i) + .5)       -- slots FX actifs (publie par le Launchpad)
-  if fxm > 0 then
-    local l = {}
-    for sl = 1, 8 do if (fxm >> (sl - 1)) & 1 == 1 then l[#l + 1] = tostring(sl) end end
-    parts[#parts + 1] = {"FX " .. table.concat(l, " "), .98, .45, .78}
-  end
+  -- 27 nov. : plus de « FX n » dans l'etiquette : les FX d'insert ont leur colonne (carres FX1..FX4 a droite)
   local tw, gapw = 0, fs * .9
   for k, pt in ipairs(parts) do pt.w = gfx.measurestr(pt[1]); tw = tw + pt.w + (k > 1 and gapw or 0) end
   rect(wx + 2, wy + 2, tw + 10, fs + 6, 0, 0, 0, .55, 1)
