@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-18h05"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-18h30"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -835,6 +835,10 @@ function LPF.aux_has_loop(i)
   local L = S.loopers[i]
   return L ~= nil and (reaper.gmem_read(100 + i - 1) or 0) > 0 and (L.length or 0) > 0
 end
+function LPF.aux_any_len(i)
+  for p = 0, 2 do if (reaper.gmem_read(1000 + (i - 1) * 600 + p * 200 + 46) or 0) > 0 then return true end end
+  return false
+end
 function LPF.aux_recording(i) local st = S.loopers[i] and S.loopers[i].state return st == 1 or st == 3 or st == 4 or st == 5 or st == 6 end
 
 -- sends qu'un looper impose a l'entree k (nil = aucun looper avec boucle ne l'alimente)
@@ -981,7 +985,13 @@ function VL.update_aux_follow()
   VL.aux_sel_give(tracks)
   for i = 1, NLOOP do
     local st = S.loopers[i] and S.loopers[i].state
-    local empty = st ~= 1 and st ~= 7 and st ~= 8 and not LPF.aux_has_loop(i)
+    -- 27 nov. 18h30 (signale : couper l'aux de IN1 le coupait aussi dans L1 qui tournait) : un looper qui joue, enregistre,
+    -- attend ou a quelque chose en memoire (une des 3 parts) n'est PLUS vide, et le reste (drapeau collant A.busy) jusqu'au
+    -- vrai Clear (etat 0 et plus aucune longueur sur les 3 parts, looper vivant).
+    A.busy = A.busy or {}
+    if (st and st >= 1 and st <= 8) or LPF.aux_has_loop(i) or LPF.aux_any_len(i) then A.busy[i] = true
+    elseif (st == 0 or st == nil) and (reaper.gmem_read(100 + i - 1) or 0) > 0 and not LPF.aux_any_len(i) then A.busy[i] = false end
+    local empty = not A.busy[i]
     if tracks.loopers[i] and empty then VL.aux_follow_src(i, tracks, A.empty[i] == false) end   -- Clear (boucle -> vide) : on enleve tout
     A.empty[i] = empty
     A.prev[i] = st

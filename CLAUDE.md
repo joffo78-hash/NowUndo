@@ -450,7 +450,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   sélectionné qui donne son niveau d'aux »)** : `VL.aux_sel_give` : si le looper sélectionné a une boucle (ou un REC lancé), les entrées routées
   vers lui prennent EXACTEMENT ses sends (ouvert / fermé + niveau ; les aux que le looper n’a pas sont enlevées, réouvrables à la main) **au moment de la sélection et chaque fois que ses sends changent**
   (signature `VL.AUX.give`) ; entre deux, les entrées restent réglables librement. (L'essai « à l'affectation » `aux_route_pickup` est retiré.)
-- `VL.BUILD = "27nov-18h05"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+- **Correction du 27 nov. 18h30** (signalé : couper l'aux de IN1 le coupait aussi dans L1 qui tournait) : « vide » = drapeau collant `VL.AUX.busy[i]`,
+  mis dès que l'état est 1..8 ou qu'une des 3 parts a une longueur (`LPF.aux_any_len`), retiré seulement au vrai Clear (état 0, plus aucune longueur,
+  looper vivant). Avant : le test exigeait le battement `100+i` → un looper qui joue pouvait être vu vide et suivre ses entrées.
+- `VL.BUILD = "27nov-18h30"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
