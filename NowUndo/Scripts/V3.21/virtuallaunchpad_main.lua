@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-18h30"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-18h40"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -989,8 +989,11 @@ function VL.update_aux_follow()
     -- attend ou a quelque chose en memoire (une des 3 parts) n'est PLUS vide, et le reste (drapeau collant A.busy) jusqu'au
     -- vrai Clear (etat 0 et plus aucune longueur sur les 3 parts, looper vivant).
     A.busy = A.busy or {}
-    if (st and st >= 1 and st <= 8) or LPF.aux_has_loop(i) or LPF.aux_any_len(i) then A.busy[i] = true
-    elseif (st == 0 or st == nil) and (reaper.gmem_read(100 + i - 1) or 0) > 0 and not LPF.aux_any_len(i) then A.busy[i] = false end
+    -- 27 nov. 18h40 : un looper vide a l'arret ou en lecture « a vide » (etat 2..6 sans longueur) reste vide ; le REC lance (1, 7, 8)
+    -- ou une longueur sur une part = occupe ; retour a vide des qu'il n'y a plus ni REC ni longueur (sans exiger le battement).
+    local anylen = LPF.aux_any_len(i) or ((S.loopers[i] and S.loopers[i].length or 0) > 0)
+    if st == 1 or st == 7 or st == 8 or anylen then A.busy[i] = true
+    else A.busy[i] = false end
     local empty = not A.busy[i]
     if tracks.loopers[i] and empty then VL.aux_follow_src(i, tracks, A.empty[i] == false) end   -- Clear (boucle -> vide) : on enleve tout
     A.empty[i] = empty

@@ -453,7 +453,8 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - **Correction du 27 nov. 18h30** (signalé : couper l'aux de IN1 le coupait aussi dans L1 qui tournait) : « vide » = drapeau collant `VL.AUX.busy[i]`,
   mis dès que l'état est 1..8 ou qu'une des 3 parts a une longueur (`LPF.aux_any_len`), retiré seulement au vrai Clear (état 0, plus aucune longueur,
   looper vivant). Avant : le test exigeait le battement `100+i` → un looper qui joue pouvait être vu vide et suivre ses entrées.
-- `VL.BUILD = "27nov-18h30"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+  18h40 : « vide » = ni REC lancé (1, 7, 8) ni longueur sur une part (un état 2..6 à vide reste vide), retour à vide sans exiger le battement.
+- `VL.BUILD = "27nov-18h40"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
