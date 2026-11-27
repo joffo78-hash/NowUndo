@@ -458,7 +458,15 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (`LPF.aux_routed`, routing fait à la main) ; doublons d'envois vers une même aux : `LPF.aux_get` = ouvert si l'un l'est, fermer les ferme tous
   (`LPF.aux_mute_dups`) ; diagnostic sans message `Dripsody_aux_diag.txt` (dossier de REAPER, écrit à chaque commande de send d'une entrée : état, longueur,
   busy, sources, sends de chaque looper, sends propres des entrées). Si le bug reste : demander ce fichier.
-- `VL.BUILD = "27nov-diag1"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+- **27 nov. 18h15 : SENDS AUX 100 % MANUELS (décision finale de l'utilisateur** : « une entrée qui va aussi dans L1 se retrouve avec l'effet de L1 et contamine L2,
+  ça ne pourra jamais marcher ; on laisse l'utilisateur gérer ses affectations, sans rien automatiser »). Config `VL.config.aux_auto = false` (défaut) :
+  plus de suivi des sources par un looper vide, plus de don du looper sélectionné aux entrées, plus de coupure des sends au in mute, plus de fermeture auto
+  aux → looper (le refus d'ouvrir un envoi qui ferait une boucle de feedback reste dans `VL.aux_cmd`). Restent : pads C5-C8, rushes, MIDI Learn, 8Waves,
+  fondus, publication 6100.., réglage fait dans REAPER adopté. `aux_auto = true` = ancien comportement (bancs `taux.lua`, `tinmode.lua`) ; banc du mode manuel
+  `tools/tauxman.lua`. **Ne plus rien automatiser sur les sends sans demande explicite.**
+- **Effet d'insert activé par une commande** (rush de la page 4 / scénario `fx_` / `fxin_`, web et 8Waves `fxg_`) : Twister → page Effets sur cet effet comme le pad
+  (`VL.fx_nav_on`, sauf pages verrouillées `tw_lock`) ; désactiver par une commande ne change pas de page.
+- `VL.BUILD = "27nov-manuel"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)

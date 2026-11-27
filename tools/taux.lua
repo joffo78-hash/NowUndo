@@ -35,6 +35,7 @@ gfx = setmetatable({ w = 800, h = 600 }, { __index = function() return function(
 for i = 0, 7 do local b = 1000 + i * 600; GM[100 + i] = 1; GM[130 + i] = 99; GM[b + 42] = 1; GM[b + 2] = 0; GM[b + 46] = 0 end
 local VL = dofile(arg_path)
 local S = VL.S
+VL.config.aux_auto = true   -- 27 nov. : ce banc teste l ancien mode automatique (desactive par defaut)
 local function IN(k) return TR[1 + k] end          -- entrees = pistes 2..9
 local function LP(i) return TR[10 + i] end         -- loopers = pistes 11..18
 local function AUX(a) return TR[20 + a] end        -- aux = pistes 21..24

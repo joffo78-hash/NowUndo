@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-diag1"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-manuel"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -503,6 +503,7 @@ VL.config = {
   -- Reglages propres a ce script (hors S.cfg : la synchro avec le miroir / la remote web ecrase S.cfg)
   unrouted_mode = "parent",        -- "parent" : coupe l'envoi au parent (B_MAINSEND) | "mute" : mute de piste (B_MUTE)
   follow_aux_sends = true,         -- les sources d'un looper suivent ses sends vers les pistes d'effets auxiliaires
+  aux_auto = false,                              -- 27 nov. : sends aux 100 % manuels (true = ancien suivi automatique)
   aux_track_first = 21, aux_track_count = 4,   -- pistes d'effets auxiliaires : numeros REAPER 21 a 24 (27 nov. : 4 aux)
   aux_follow_chain = true,         -- inclut les sources qui atteignent le looper via des routes looper -> looper
   sync_fx_patterns = { "master sync", "master_synchro", "central timebase" },   -- nom du JSFX Master Sync (minuscules)
@@ -1010,8 +1011,11 @@ function VL.update_aux_follow()
   -- 1) 27 nov. (demande de l'utilisateur) : tant que le 1er REC n'est pas sorti (looper vide, attente, 1er REC), les sends du
   --    looper vers les aux SUIVENT ses sources A LA LETTRE (entrees et loopers routes vers lui ; aucune source ouverte = ferme).
   --    Des que le 1er REC est LANCE (attente 7, REC 1, sortie 8) et jusqu'au Clear : on ne touche plus a rien (reglage a la main libre).
-  VL.aux_sel_give(tracks)
-  for i = 1, NLOOP do
+  -- 27 nov. 18h15 (decision de l'utilisateur : « on laisse l'utilisateur gerer ses affectations, sans rien automatiser ») :
+  -- plus de suivi des sources, plus de don du looper selectionne, plus de coupure des sends au in mute, plus de fermeture auto.
+  -- Restent : les commandes (pads C5-C8, rushes, MIDI Learn, 8Waves), les fondus et la publication.
+  if VL.config.aux_auto then VL.aux_sel_give(tracks) end
+  for i = 1, VL.config.aux_auto and NLOOP or 0 do
     local st = S.loopers[i] and S.loopers[i].state
     -- 27 nov. 18h30 (signale : couper l'aux de IN1 le coupait aussi dans L1 qui tournait) : un looper qui joue, enregistre,
     -- attend ou a quelque chose en memoire (une des 3 parts) n'est PLUS vide, et le reste (drapeau collant A.busy) jusqu'au
@@ -1032,7 +1036,7 @@ function VL.update_aux_follow()
     local tr = tracks.inputs[k]
     if tr then
       local own = LPF.aux_own(k, tr)
-      local cut = reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND") == 0
+      local cut = VL.config.aux_auto and reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND") == 0
       local imp = nil                                   -- 27 nov. : plus d'imposition looper -> entree (chaque entree garde ses sends)
       for a = 1, LPF.aux_count() do
         local aux = LPF.aux_track(a)
@@ -1058,7 +1062,7 @@ function VL.update_aux_follow()
     end
   end
   -- 3) garde-fou : un envoi aux -> looper est coupe si ce looper envoie aussi vers cette aux (boucle de feedback)
-  for i = 1, NLOOP do
+  for i = 1, VL.config.aux_auto and NLOOP or 0 do
     local ltr = tracks.loopers[i]
     for a = 1, LPF.aux_count() do
       local aux = ltr and LPF.aux_track(a)
@@ -2612,6 +2616,13 @@ function VL.fx_nav(kind, id, slot)
   end
 end
 
+-- 27 nov. (demande) : effet d'insert ACTIVE par une commande (rush de la page 4, scenario, web, MIDI Learn) -> Twister page Effets
+-- sur cet effet, comme le pad d'effet (sauf pages verrouillees). Desactiver par une commande ne change pas de page.
+function VL.fx_nav_on(kind, id, slot)
+  if VL.mirror_mode or not (S.fx[kind] and S.fx[kind][id] and S.fx[kind][id][slot]) then return end
+  VL.fx_nav(kind, id, slot)
+end
+
 function VL.set_fx_present(kind, id, slot, present)     -- feedback backend : un slot vide ne peut pas etre actif
   S.fx_present[kind][id][slot] = present and true or false
   if not present then S.fx[kind][id][slot] = false end
@@ -3224,6 +3235,7 @@ function VL.ext_cmd_poll()
           if #m > 0 then list = m end
         end
         for _, li in ipairs(list) do VL.set_fx("looper", li, gs, value) end
+        VL.fx_nav_on("looper", gi, gs)
       end
     end
     -- R(n) / G(n) du script Scenario : meme geste qu'un appui sur le pad du slot n, mais RAPPEL seulement (slot vide : rien)
@@ -3250,6 +3262,7 @@ function VL.ext_cmd_poll()
         elseif fa == "off" then VL.set_fx("looper", fi, fs, false)
         elseif fa == "tog" then VL.toggle_fx("looper", fi, fs) end
         VL._scn_quiet = false
+        VL.fx_nav_on("looper", fi, fs)
       end
     end
     -- V3.27 (rushes) : grp_<l>_<g> = looper l dans le groupe g (0 = sans groupe) ; grpoff_<l>_<g> = sort du groupe g s'il y est
@@ -3303,6 +3316,7 @@ function VL.ext_cmd_poll()
         if ia == "on" then VL.set_fx("input", ii, is_, true)
         elseif ia == "off" then VL.set_fx("input", ii, is_, false)
         elseif ia == "tog" then VL.toggle_fx("input", ii, is_) end
+        VL.fx_nav_on("input", ii, is_)
       end
     end
   end
