@@ -394,6 +394,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   → `mac_save` → `H._msort` avait déjà retrié la liste (perso avant usine) : la copie restait deux fois (même objet, même id → impossible de la
   sélectionner seule) et un rush d'usine disparaissait. Maintenant les copies sont retirées par identité ; au chargement, un id en double reçoit un id
   neuf (`mac_apply`). Test `tools/tdup.lua` (ancienne version : 6 échecs, nouvelle : OK).
+  **Séquelle (signalée le 27 nov. : pads L7 FX4 / L8 FX4 de la page Effets toujours vides)** : les rushes d'usine perdus par ce bug étaient recréés par
+  `H._rom_fix` mais **hors du Launchpad**. Maintenant un rush d'usine recréé est reposé sur sa case de la page « RC-505 » / « Effets » si elle est vide
+  (mode toggle si l'usine est toggle) ; réparation **une fois** (ExtState persistant `NowUndo_Macros/rom_repair1`) des rushes d'usine restés hors du
+  Launchpad. Test `tools/tromrepair.lua`.
 
 ## 27 nov. : MODE PAR CASE du Launchpad (normal / toggle / gate) + toggles des sends = miroir de l'état réel
 

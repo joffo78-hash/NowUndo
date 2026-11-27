@@ -1873,8 +1873,31 @@ H._rom_fix = function()
     local x = key[(m.name or "") .. "\t" .. (m.text or "")]
     if x and not have[x.k] then m.rom = true; m.fk = x.k; have[x.k] = true else m.rom = false end
   end
+  local made = {}
   if reaper.GetExtState(MAC_EXT, "fx_page") == "1" then         -- migration deja faite : l'usine est complete
-    for _, x in ipairs(H._fdefs()) do if not have[x.k] and #macros < MAC_MAX then H._fnew(x).fk = x.k end end
+    for _, x in ipairs(H._fdefs()) do if not have[x.k] and #macros < MAC_MAX then local m = H._fnew(x); m.fk = x.k; made[#made + 1] = { m = m, x = x } end end
+  end
+  -- 27 nov. : un rush d'usine recree (perdu par l'ancien bug du Ctrl+D) est repose sur SA case de la page RC-505 / Effets si elle est vide ;
+  -- une fois (rom_repair1) : meme chose pour les rushes d'usine deja recrees mais restes hors du Launchpad (pads L7 / L8 FX4 vides)
+  if reaper.GetExtState(MAC_EXT, "rom_repair1") ~= "1" then
+    local placed = {}
+    for _, id in pairs(layout) do placed[id] = true end
+    for _, m in ipairs(macros) do if m.rom and m.fk and not placed[m.id] then made[#made + 1] = { m = m, x = H._fdefs()[m.fk] } end end
+    reaper.SetExtState(MAC_EXT, "rom_repair1", "1", true)
+  end
+  for _, e in ipairs(made) do
+    local want = (e.x.pg == "fx") and "Effets" or "RC-505"
+    for k, nm in ipairs(H._pages or {}) do
+      if nm == want then
+        local c = (k - 1) * 64 + e.x.cell
+        if not layout[c] then
+          layout[c] = e.m.id
+          if e.x.toggle then H._lmode = H._lmode or {}; H._lmode[c] = "t" end
+          H._rom_put = true
+        end
+        break
+      end
+    end
   end
   H._msort()
 end
@@ -1943,6 +1966,7 @@ do                                                  -- chargement au demarrage
   end
   if reaper.GetExtState(MAC_EXT, "fx_page") ~= "1" then H._fxpage(); reaper.SetExtState(MAC_EXT, "fx_page", "1", true) end
   H._lmode_mig()
+  if H._rom_put then H._rom_put = nil; mac_save() end
   mac_save()                                        -- publie tout de suite pour le Launchpad
 end
 H._msave = mac_save
