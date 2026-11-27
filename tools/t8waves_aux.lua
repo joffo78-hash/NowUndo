@@ -17,7 +17,8 @@ W8_TEST = {}
 reaper.GetTrack = function(_, n) return { n = n + 1 } end
 reaper.GetTrackName = function(tr) local N = { [21] = "Reverb Hall", [22] = "Delay", [23] = "", [24] = "Track 24" } return true, N[tr.n] or "" end
 M[6098] = 21; M[6099] = 4
-M[6100] = 0.5; M[6101] = -0.3; M[6228 + 3] = 1                 -- L1 : aux1 ouvert 50 %, aux2 ferme (30 % garde), aux4 -> L1
+M[6100] = 0.5; M[6101] = -0.3; M[6031] = 5;   -- L1 : FX1 et FX3 actifs
+ M[6228 + 3] = 1                 -- L1 : aux1 ouvert 50 %, aux2 ferme (30 % garde), aux4 -> L1
 dofile(arg_path)
 local function frame(mx, my, cap) gfx.mouse_x, gfx.mouse_y, gfx.mouse_cap = mx, my, cap or 0; CLOCK = CLOCK + .033; G.f() end
 local function q() local s = EXT["NowUndo_VLcmd/q"] or ""; EXT["NowUndo_VLcmd/q"] = ""; return (s:gsub("\t[%d%.]+\n", " ")) end
@@ -35,5 +36,12 @@ print("glisser aux2 +100 px :", q())
 frame(b1.x + 5, cy, 1); for k = 1, 8 do frame(b1.x + 5 - k * 20, cy, 1) end; frame(b1.x - 155, cy, 0)
 print("glisser aux1 vers 0  :", q())
 frame(b1.x + 5, cy, 2); frame(b1.x + 5, cy, 0); print("clic droit aux1  :", q())
+local f = {}
+for _, b in ipairs(R.fb or {}) do f[#f + 1] = string.format("FX%d x=%d y=%d %dpx", b.slot, b.x, b.y, b.w) end
+print("carres FX L1 :", #(R.fb or {}), table.concat(f, " | "))
+check_x = R.fb[1].x + R.fb[1].w < R.ab[1].x and "avant les sends" or "PAS avant les sends"
+print("position :", check_x)
+local fb3 = R.fb[3]
+frame(fb3.x + 3, fb3.y + 3, 1); frame(fb3.x + 3, fb3.y + 3, 0); print("clic FX3 de L1     :", q())
 local R2 = W8_TEST.VIS.R[1]
 print("L2 (aucun send) :", #R2.ab, R2.ab[1] and R2.ab[1].v)

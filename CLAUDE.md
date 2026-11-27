@@ -387,6 +387,9 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   **8Waves** : une pastille par aux dans une **colonne à droite de chaque ligne, après le VU de sortie, les unes au-dessus des autres** (27 nov., demandé ; nom de la piste aux + niveau ; turquoise = ouvert, gris = fermé,
   cadre orange + `<` = l'aux revient dans ce looper) ; **clic = ouvrir / fermer, glisser gauche / droite = niveau (200 px = 100 %), clic droit = aux → looper**.
   Tests `tools/taux.lua`, `tools/taux_rush.lua`, `tools/t8waves_aux.lua` (hook `W8_TEST`). **Règle** : pas de message qui interrompt le jeu (live).
+  **27 nov. (suite, demandé : « effets prête à confusion »)** : les pastilles s'appellent **« Send n »** (plus le nom de la piste aux) ; **juste avant**,
+  une colonne de **petits carrés « FX1..FX4 » = FX d'insert** du looper (masque gmem `6030+L`, rose = actif ; clic = `fxg_<L>_<slot>_tog`, le groupe suit
+  comme le pad d'effet ; `VIS.ins_badges`, `UI.fxbadge`, kind `fxi`).
 - **27 nov. : bug Ctrl+D (dupliquer un rush) corrigé** : `ED.mpaste` retirait les DERNIERS rushes de la liste pour replacer les copies, mais `mac_add`
   → `mac_save` → `H._msort` avait déjà retrié la liste (perso avant usine) : la copie restait deux fois (même objet, même id → impossible de la
   sélectionner seule) et un rush d'usine disparaissait. Maintenant les copies sont retirées par identité ; au chargement, un id en double reçoit un id

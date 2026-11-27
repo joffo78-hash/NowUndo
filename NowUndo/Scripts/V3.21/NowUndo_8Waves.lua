@@ -107,7 +107,7 @@ function VIS.aux_badges(i, ds, bx, by0, bw, bht)
     local lvl = math.abs(v)
     local by = by0 + (a - 1) * (bh + gap)
     local pct = (v == 0) and "-" or string.format("%d%%", math.floor(lvl * 100 + .5))
-    local nm = (rx and "<" or "") .. names[a]
+    local nm = (rx and "<" or "") .. "Send " .. a
     while #nm > 1 and gfx.measurestr(nm .. " " .. pct) > bw - 8 do nm = nm:sub(1, -2) end
     if v > 0 then rect(bx, by, bw, bh, .10, .42, .48, .92, 1); rect(bx, by + bh - 3, bw * math.min(1, lvl), 3, .35, .95, 1, 1, 1)
     else rect(bx, by, bw, bh, .12, .12, .14, .80, 1) end
@@ -118,6 +118,33 @@ function VIS.aux_badges(i, ds, bx, by0, bw, bht)
     text(bx + 4, ty, nm, bf, cr, cg, cb, false)
     text(bx + bw - 4 - gfx.measurestr(pct), ty, pct, bf, cr, cg, cb, false)
     R.ab[#R.ab + 1] = { x = bx, y = by, w = bw, h = bh, a = a, v = v }
+  end
+  VIS.s = vs
+end
+-- 27 nov. : FX D'INSERT du looper (slots 1..4 des containers, masque gmem 6030+L publie par le Launchpad) : petits carres
+-- « FX n » empiles, roses = actif ; clic = active / coupe le slot (commande fxg_ : le groupe du looper suit, comme le pad d'effet).
+function VIS.ins_badges(i, ds, bx, by0, bw, bht)
+  local R = VIS.R[i]; R.fb = {}
+  local n, gap = 4, 2
+  local bh = math.floor((bht - gap * (n - 1)) / n)
+  if bh < 6 or bw <= 0 then return end
+  local sq = math.min(bh, bw)
+  local bf = math.max(7, math.min(12, sq - 4))
+  local mask = math.floor(read(DASH_BASE, 30 + ds) + .5)
+  local vs = VIS.s; VIS.s = 1
+  setfont(bf, false)
+  for k = 1, n do
+    local on = (mask >> (k - 1)) & 1 == 1
+    local by = by0 + (k - 1) * (bh + gap) + math.floor((bh - sq) / 2)
+    local x0 = bx + math.floor((bw - sq) / 2)
+    if on then rect(x0, by, sq, sq, .98, .45, .78, .95, 1) else rect(x0, by, sq, sq, .14, .12, .15, .85, 1); rect(x0, by, sq, sq, .45, .32, .42, 1, 0) end
+    local lb, f2 = "FX" .. k, bf
+    setfont(f2, false)
+    while f2 > 7 and gfx.measurestr(lb) > sq - 3 do f2 = f2 - 1; setfont(f2, false) end
+    if gfx.measurestr(lb) > sq - 2 then lb = tostring(k) end              -- carre trop petit : juste le numero
+    local tw, th = gfx.measurestr(lb)
+    text(x0 + math.floor((sq - tw) / 2), by + math.floor((sq - th) / 2), lb, f2, on and .12 or .70, on and .05 or .55, on and .10 or .66, false)
+    R.fb[#R.fb + 1] = { x = x0, y = by, w = sq, h = sq, slot = k }
   end
   VIS.s = vs
 end
@@ -178,8 +205,9 @@ local function draw_row(i, x, y, w, h, now_t, s)
   if is_stop then rect(x, y, w, h, .07 + hc[1] * .07, .07 + hc[2] * .07, .08 + hc[3] * .07, 1, 1)
   else rect(x, y, w, h, .075 + hc[1] * .13, .075 + hc[2] * .13, .085 + hc[3] * .13, 1, 1) end
   local VW = math.max(4, math.min(8, math.floor(h * .07)))       -- VU d'entree (avant) / de sortie (apres)
-  local AW = (read(6099, 0) >= 1) and math.floor(math.max(70, math.min(120, w * .085))) or 0   -- 27 nov. : colonne des sends aux, a droite
-  local wx, wy, ww, wh = x + 6 + VW, y + 3, w - 12 - 2 * VW - (AW > 0 and AW + 4 or 0), h - 6
+  local AW = (read(6099, 0) >= 1) and math.floor(math.max(62, math.min(96, w * .07))) or 0   -- 27 nov. : colonne des SENDS (aux), a droite
+  local FW = math.floor(math.max(30, math.min(42, w * .03)))                                  -- 27 nov. : colonne des FX d'insert, juste avant
+  local wx, wy, ww, wh = x + 6 + VW, y + 3, w - 12 - 2 * VW - (AW > 0 and AW + 4 or 0) - FW - 4, h - 6
   local vs = VIS.s; VIS.s = 1; VIS.vmeter(x + 5, wy, VW, wh, read(gb, 172)); VIS.s = vs; VIS.vmeter(wx + ww + 4, wy, VW, wh, read(gb, 173))
   -- fond de la forme d'onde teinte de la couleur du looper : a l'arret, et un peu plus sombre en lecture (la forme d'onde ressort)
   local wbg = is_stop and {.05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10} or {.035 + hc[1] * .11, .035 + hc[2] * .11, .042 + hc[3] * .11}
@@ -321,6 +349,7 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local tx = wx + 6
   for _, pt in ipairs(parts) do text(tx, wy + 4, pt[1], fs, pt[2], pt[3], pt[4], true); tx = tx + pt.w + gapw end
 
+  VIS.ins_badges(i, ds_i, x + w - AW - 2 - (AW > 0 and 4 or 0) - FW, wy, FW, wh)   -- 27 nov. : FX d'insert 1..4 (petits carres)
   VIS.aux_badges(i, ds_i, x + w - AW - 2, wy, AW, wh)              -- 27 nov. : sends vers les aux (colonne a droite, apres le VU de sortie)
 
   -- tout a droite : M (maitre), S (esclave) ou F (libre), meme logique que le 8 Panel
@@ -393,8 +422,14 @@ function UI.badge(R, mx, my)                                         -- 27 nov. 
     if mx >= b.x and mx < b.x + b.w and my >= b.y and my < b.y + b.h then return b end
   end
 end
+function UI.fxbadge(R, mx, my)                                       -- 27 nov. : carre FX d'insert sous la souris
+  for _, b in ipairs(R.fb or {}) do
+    if mx >= b.x and mx < b.x + b.w and my >= b.y and my < b.y + b.h then return b end
+  end
+end
 function UI.hit(R, mx, my)
   if UI.badge(R, mx, my) then return "aux" end
+  if UI.fxbadge(R, mx, my) then return "fxi" end
   if R.tag and mx >= R.wx and mx < R.wx + R.tag and my >= R.wy and my < R.wy + R.wh * .35 then return "tag" end
   if mx < R.wx or mx >= R.wx + R.ww then return "tag" end              -- VU / marges : selection seule
   if R.len <= 0 or R.lw <= 0 then return "row" end
@@ -440,6 +475,7 @@ function UI.tick(ch)
               ls = R.ls, lw = R.lw }
         if kind == "zmove" or kind == "zedge" then D.zc, D.zh, D.zw = UI.zone(R) end
         if kind == "aux" then local b = UI.badge(R, mx, my); D.a = b.a; D.v0 = math.abs(b.v); D.last = D.v0 end
+        if kind == "fxi" then D.slot = UI.fxbadge(R, mx, my).slot end
         if R.ds ~= SEL_LOOPER then UI.lp("sel_" .. R.ds); SEL_LOOPER = R.ds end
         UI.drag = D
       end
@@ -475,6 +511,7 @@ function UI.tick(ch)
     end
   elseif not down and UI.down and D then                              -- relachement : clic rapide = tap de statut
     if not D.moved and D.kind == "aux" then UI.lp(string.format("aux_l_%d_%d_tog", D.ds, D.a))   -- clic = ouvrir / fermer
+    elseif D.kind == "fxi" then UI.lp(string.format("fxg_%d_%d_tog", D.ds, D.slot))           -- clic = FX d'insert on / off
     elseif not D.moved and D.kind ~= "tag" and reaper.time_precise() - D.t0 < .4 then UI.lp("stap_" .. D.ds) end
     UI.drag = nil
   end
