@@ -3046,9 +3046,14 @@ ih_n += 1; ih_n >= 1073741824 ? ih_wrap(); ih_l[ih_n & ih_mask] = in0; ih_r[ih_n
 curr_peak >= trans_sens ? ( input_signal_active = 1; hold_samples_left = srate * (trans_hold_ms * 0.001); ) : ( hold_samples_left > 0 ? ( hold_samples_left -= 1; input_signal_active = 1; ) : ( input_signal_active = 0; ); );
 init_done == 0 ? ( sm_pitch = pitch; sm_speed = speed; init_done = 1; );
 sm_pitch += (pitch - sm_pitch) * 0.005; sm_speed += (speed - sm_speed) * 0.005;
-pitch_ratio = 2 ^ (sm_pitch / 12); varispeed = sm_speed * pitch_ratio; rec_speed = varispeed;
+pitch_ratio = 2 ^ (sm_pitch / 12); varispeed = sm_speed * pitch_ratio;
 // V3.7: en Slicer et Cloud le moteur granulaire pitch/speed est inactif -> vari-speed applique meme si Link est Off
 link_eff = (link_on || play_mode == 1 || cloud_on);
+// 27 nov. (signale : 1er REC avec Pitch +X = son ralenti, pas pitche, meme en D) : le 1er REC s'ecrivait toujours a la
+// vitesse vari-speed (pitch compris). En granulaire (Link off) la lecture ne lit qu'a Speed -> boucle etiree par le pitch.
+// A (bande) : vitesse d'ecriture = vitesse de lecture (varispeed en Link / Slicer / Cloud, Speed seul en granulaire).
+// D (brut) : ecriture 1:1, la boucle est relue transformee comme un overdub D (hors Slicer, comme dub_rawm).
+rec_speed = (dub_raw > 0.5 && play_mode != 1) ? 1 : (link_eff ? varispeed : sm_speed);
 is_one_shot_mode = (play_mode == 2);
 slice_att_eff_ms = slice_decay_ms > 1950 ? slice_attack_ms : min(slice_attack_ms, slice_decay_ms);
 

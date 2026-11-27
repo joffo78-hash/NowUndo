@@ -469,6 +469,14 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - `VL.BUILD = "27nov-manuel"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
+## 27 nov. : 1er REC avec Pitch ≠ 0 = boucle ralentie (JSFX V3.27, corrigé)
+
+- Signalé : 1er enregistrement avec Pitch +X → restitué ralenti, pas pitché, même en D. Cause : le 1er REC s'écrivait toujours à `rec_speed = varispeed`
+  (pitch compris) ; en granulaire (Link off) la lecture n'avance qu'à Speed → boucle étirée (×2 pour +12) et pitch annulé. Maintenant :
+  **A** = vitesse d'écriture = vitesse de lecture (varispeed en Link / Slicer / Cloud = son tel que joué ; Speed seul en granulaire = son pitché, tempo juste) ;
+  **D** = écriture 1:1 (hors Slicer), la boucle est relue transformée (en Link : plus aiguë ET plus rapide). Banc `tools/trecpitch.py . v327.jsfx <0|1 = A|D> <link>` :
+  avant 1,99 s / 217 Hz, après 1,00 s / 442 Hz (A et D, Link off) ; A Link on inchangé (220 Hz, 1 s) ; D Link on = 0,5 s / 442 Hz. Non testé dans REAPER.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par
