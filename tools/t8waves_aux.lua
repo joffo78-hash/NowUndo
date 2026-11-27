@@ -24,12 +24,13 @@ local function q() local s = EXT["NowUndo_VLcmd/q"] or ""; EXT["NowUndo_VLcmd/q"
 frame(0, 0); frame(0, 0)
 local R = W8_TEST.VIS.R[0]
 local t = {}
-for _, b in ipairs(R.ab) do t[#t + 1] = string.format("aux%d v=%.2f x=%d w=%d", b.a, b.v, b.x, b.w) end
+for _, b in ipairs(R.ab) do t[#t + 1] = string.format("aux%d v=%.2f x=%d y=%d w=%d h=%d", b.a, b.v, b.x, b.y, b.w, b.h) end
 print("pastilles L1 :", #R.ab, table.concat(t, " | "))
 local b1, b2 = R.ab[1], R.ab[2]
 local cy = b1.y + b1.h / 2
+local cy2 = b2.y + b2.h / 2
 frame(b1.x + 5, cy, 1); frame(b1.x + 5, cy, 0); print("clic aux1        :", q())
-frame(b2.x + 5, cy, 1); for k = 1, 10 do frame(b2.x + 5 + k * 10, cy, 1) end; frame(b2.x + 105, cy, 0)
+frame(b2.x + 5, cy2, 1); for k = 1, 10 do frame(b2.x + 5 + k * 10, cy2, 1) end; frame(b2.x + 105, cy2, 0)
 print("glisser aux2 +100 px :", q())
 frame(b1.x + 5, cy, 1); for k = 1, 8 do frame(b1.x + 5 - k * 20, cy, 1) end; frame(b1.x - 155, cy, 0)
 print("glisser aux1 vers 0  :", q())

@@ -384,7 +384,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   `in 0.25` reste le point In) → cible 100 → commandes `aux_in_0_…`, `fxin_0_…`, `inmute_0_…` (0 = entrée sélectionnée).
   **Tableau de bord des sends** (`VL.aux_publish`) : gmem `6098` = 1re piste aux, `6099` = nombre, `6100 + (L-1)*8 + (a-1)` send du looper
   (> 0 ouvert, < 0 fermé avec son niveau, 0 = pas d'envoi), `6164 + (k-1)*8 + (a-1)` send réel de l'entrée k, `6228 + (L-1)*8 + (a-1)` = 1 si aux → looper.
-  **8Waves** : une pastille par aux en bas à gauche de chaque ligne (nom de la piste aux, 8 lettres, + niveau ; turquoise = ouvert, gris = fermé,
+  **8Waves** : une pastille par aux dans une **colonne à droite de chaque ligne, après le VU de sortie, les unes au-dessus des autres** (27 nov., demandé ; nom de la piste aux + niveau ; turquoise = ouvert, gris = fermé,
   cadre orange + `<` = l'aux revient dans ce looper) ; **clic = ouvrir / fermer, glisser gauche / droite = niveau (200 px = 100 %), clic droit = aux → looper**.
   Tests `tools/taux.lua`, `tools/taux_rush.lua`, `tools/t8waves_aux.lua` (hook `W8_TEST`). **Règle** : pas de message qui interrompt le jeu (live).
 - **27 nov. : bug Ctrl+D (dupliquer un rush) corrigé** : `ED.mpaste` retirait les DERNIERS rushes de la liste pour replacer les copies, mais `mac_add`

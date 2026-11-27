@@ -71,7 +71,7 @@ end
 
 -- 27 nov. : SENDS VERS LES AUX, publies par le Launchpad (gmem 6098 = 1re piste aux, 6099 = nombre,
 -- 6100 + (L-1)*8 + (a-1) = send du looper : > 0 ouvert, < 0 ferme (niveau garde), 0 = pas d'envoi ; 6228 + ... = aux -> looper).
--- Une pastille par aux en bas a gauche de la forme d'onde : nom de la piste aux + niveau ; < devant le nom (cadre orange) = l'aux revient dans ce looper.
+-- Une pastille par aux, en colonne a droite de la ligne (apres le VU de sortie), les unes au-dessus des autres : nom de la piste aux + niveau ; < devant le nom (cadre orange) = l'aux revient dans ce looper.
 -- Souris : clic = ouvrir / fermer, glisser a gauche / a droite = niveau, clic droit = aux -> ce looper (on / off).
 VIS.AUXN = { t = -10, n = {} }
 function VIS.aux_names(now_t)
@@ -90,28 +90,34 @@ function VIS.aux_names(now_t)
   end
   return A.n
 end
-function VIS.aux_badges(i, ds, wx, wy, ww, wh, fs)
+function VIS.aux_badges(i, ds, bx, by0, bw, bht)
   local names = VIS.aux_names(reaper.time_precise())
   local R = VIS.R[i]; R.ab = {}
-  if #names == 0 or wh < fs * 2.6 then return end
-  local bf = math.max(9, math.floor(fs * .82))
+  local n = #names
+  if n == 0 or bw <= 0 then return end
+  local gap = 2
+  local bh = math.floor((bht - gap * (n - 1)) / n)               -- les n sends les uns au-dessus des autres, sur toute la hauteur
+  if bh < 6 then return end
+  local bf = math.max(8, math.min(15, bh - 3))
   setfont(bf, false)
   local vs = VIS.s; VIS.s = 1                                     -- les pastilles gardent leur couleur (Out Vol baisse = grise ailleurs)
-  local bx, bh = wx + 4, bf + 5
-  local by = wy + wh - bh - 3
-  for a = 1, #names do
+  for a = 1, n do
     local v = read(6100 + (ds - 1) * 8 + (a - 1), 0)
     local rx = read(6228 + (ds - 1) * 8 + (a - 1), 0) > .5
     local lvl = math.abs(v)
-    local txt = (rx and "<" or "") .. names[a] .. " " .. ((v == 0) and "-" or string.format("%d%%", math.floor(lvl * 100 + .5)))
-    local tw = gfx.measurestr(txt) + 10
-    if bx + tw > wx + ww * .7 then break end
-    if v > 0 then rect(bx, by, tw, bh, .10, .42, .48, .92, 1); rect(bx, by + bh - 3, (tw) * math.min(1, lvl), 3, .35, .95, 1, 1, 1)
-    else rect(bx, by, tw, bh, .12, .12, .14, .80, 1) end
-    if rx then rect(bx, by, tw, bh, .98, .70, .25, 1, 0) end
-    text(bx + 5, by + 2, txt, bf, v > 0 and .90 or .55, v > 0 and 1 or .57, v > 0 and 1 or .62, false)
-    R.ab[#R.ab + 1] = { x = bx, y = by, w = tw, h = bh, a = a, v = v }
-    bx = bx + tw + 4
+    local by = by0 + (a - 1) * (bh + gap)
+    local pct = (v == 0) and "-" or string.format("%d%%", math.floor(lvl * 100 + .5))
+    local nm = (rx and "<" or "") .. names[a]
+    while #nm > 1 and gfx.measurestr(nm .. " " .. pct) > bw - 8 do nm = nm:sub(1, -2) end
+    if v > 0 then rect(bx, by, bw, bh, .10, .42, .48, .92, 1); rect(bx, by + bh - 3, bw * math.min(1, lvl), 3, .35, .95, 1, 1, 1)
+    else rect(bx, by, bw, bh, .12, .12, .14, .80, 1) end
+    if rx then rect(bx, by, bw, bh, .98, .70, .25, 1, 0) end
+    local th = select(2, gfx.measurestr("A"))
+    local ty = by + math.max(0, math.floor((bh - 3 - th) / 2))
+    local cr, cg, cb = v > 0 and .90 or .55, v > 0 and 1 or .57, v > 0 and 1 or .62
+    text(bx + 4, ty, nm, bf, cr, cg, cb, false)
+    text(bx + bw - 4 - gfx.measurestr(pct), ty, pct, bf, cr, cg, cb, false)
+    R.ab[#R.ab + 1] = { x = bx, y = by, w = bw, h = bh, a = a, v = v }
   end
   VIS.s = vs
 end
@@ -172,8 +178,9 @@ local function draw_row(i, x, y, w, h, now_t, s)
   if is_stop then rect(x, y, w, h, .07 + hc[1] * .07, .07 + hc[2] * .07, .08 + hc[3] * .07, 1, 1)
   else rect(x, y, w, h, .075 + hc[1] * .13, .075 + hc[2] * .13, .085 + hc[3] * .13, 1, 1) end
   local VW = math.max(4, math.min(8, math.floor(h * .07)))       -- VU d'entree (avant) / de sortie (apres)
-  local wx, wy, ww, wh = x + 6 + VW, y + 3, w - 12 - 2 * VW, h - 6
-  local vs = VIS.s; VIS.s = 1; VIS.vmeter(x + 5, wy, VW, wh, read(gb, 172)); VIS.s = vs; VIS.vmeter(x + w - 2 - VW, wy, VW, wh, read(gb, 173))
+  local AW = (read(6099, 0) >= 1) and math.floor(math.max(70, math.min(120, w * .085))) or 0   -- 27 nov. : colonne des sends aux, a droite
+  local wx, wy, ww, wh = x + 6 + VW, y + 3, w - 12 - 2 * VW - (AW > 0 and AW + 4 or 0), h - 6
+  local vs = VIS.s; VIS.s = 1; VIS.vmeter(x + 5, wy, VW, wh, read(gb, 172)); VIS.s = vs; VIS.vmeter(wx + ww + 4, wy, VW, wh, read(gb, 173))
   -- fond de la forme d'onde teinte de la couleur du looper : a l'arret, et un peu plus sombre en lecture (la forme d'onde ressort)
   local wbg = is_stop and {.05 + hc[1] * .10, .05 + hc[2] * .10, .06 + hc[3] * .10} or {.035 + hc[1] * .11, .035 + hc[2] * .11, .042 + hc[3] * .11}
   rect(wx, wy, ww, wh, wbg[1], wbg[2], wbg[3], 1, 1)
@@ -314,7 +321,7 @@ local function draw_row(i, x, y, w, h, now_t, s)
   local tx = wx + 6
   for _, pt in ipairs(parts) do text(tx, wy + 4, pt[1], fs, pt[2], pt[3], pt[4], true); tx = tx + pt.w + gapw end
 
-  VIS.aux_badges(i, ds_i, wx, wy, ww, wh, fs)                     -- 27 nov. : sends vers les aux (en bas a gauche)
+  VIS.aux_badges(i, ds_i, x + w - AW - 2, wy, AW, wh)              -- 27 nov. : sends vers les aux (colonne a droite, apres le VU de sortie)
 
   -- tout a droite : M (maitre), S (esclave) ou F (libre), meme logique que le 8 Panel
   do
