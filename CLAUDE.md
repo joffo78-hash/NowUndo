@@ -436,15 +436,14 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (entrée : son réglage propre ; looper : gmem 6100..). `VL.aux_pad_apply`, `VL.aux_sel_cmd`.
 - Commandes `NowUndo_VLcmd/q` : `topin_<on|off|tog>`, `auxsel_<a>_<on|off|tog>`. MIDI Learn : `act:top_in` (onglet Pages), `act:auxsel_1..4`
   (Output). Rush : **`inputs`** / `inputs on` / `inputs off` (toggle = miroir de gmem 6063), palette « Groupes / pages ».
-- **RÈGLE DES SENDS (27 nov., version finale demandée : « seulement avant la sortie du premier rec les input ou les loopers qui entrent
-  définissent l'état des aux du recorder »)** : tant qu'un looper n'a pas de boucle (vide, attente 7, 1er REC 1), ses sends vers les aux
-  **suivent en continu** ses sources (`VL.aux_follow_src` : entrées routées = leur réglage propre, in mute ignoré ; loopers routés vers lui
-  `S.routing.l_l[src][dst]` = leur send ; plus grand niveau ouvert par aux, aucune source ouverte = fermé ; sans aucune source routée = rien
-  touché). Dès la sortie du 1er REC : **figés** (overdub, réglage des entrées : rien ne change ; réglage à la main du looper possible).
-  **Plus d'imposition looper → entrée** (`LPF.aux_imposed` n'est plus appelé) et plus de copie au passage en REC (`VL.aux_copy_on_rec` inutilisé) :
-  chaque entrée garde ses propres sends (in mute les coupe toujours). Les essais intermédiaires du 27 nov. (réglage explicite prioritaire,
-  recopie entrée → looper) ont été retirés.
-- `VL.BUILD = "27nov-15h"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+- **RÈGLE DES SENDS (27 nov., FINALE, dite par l'utilisateur : « rien dans le looper : looper suit l'état des sends de ses inputs À LA LETTRE.
+  Une fois que le premier rec est lancé tu touches plus à rien jusqu'au clear où tu enlèves tout. Et tu me laisses désactiver les sends »)** :
+  looper **vide** (pas de boucle et pas en 7 / 1 / 8) = ses sends = ceux de ses sources (`VL.aux_follow_src` : entrées routées = réglage propre,
+  loopers routés vers lui = leur send ; plus grand niveau ouvert par aux ; aucune ouverte = fermé). Sans aucune source routée : rien touché.
+  **Dès le 1er REC lancé (état 7, 1 ou 8) et jusqu'au Clear : on ne touche plus à rien** (réglage à la main libre, fermer compris).
+  **Clear** (passage boucle → vide, `VL.AUX.empty`) : tout est enlevé puis le looper suit de nouveau ses sources. Plus d'imposition looper → entrée,
+  plus de copie au REC (`VL.aux_copy_on_rec` / `LPF.aux_imposed` inutilisés). Les essais intermédiaires du 27 nov. ont été retirés.
+- `VL.BUILD = "27nov-15h05"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)

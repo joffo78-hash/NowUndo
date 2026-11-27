@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-15h"           -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-15h05"         -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -736,7 +736,7 @@ end
 --  * AUX -> LOOPER (rush "l3 from aux2") : envoi de la piste aux vers le looper (reechantillonner une reverb) ; refuse si
 --    le looper envoie deja vers cette aux (boucle de feedback).
 --  * ouverture / fermeture avec un fondu de ~60 ms (pas de clic) ; les queues continuent sur l'aux.
-VL.AUX = VL.AUX or { w = {}, ramps = {}, prev = {}, t = 0, own = {}, own_t = {} }
+VL.AUX = VL.AUX or { w = {}, ramps = {}, prev = {}, empty = {}, t = 0, own = {}, own_t = {} }
 VL.AUX.KEY = "P_EXT:nowundo_aux_own"
 VL.AUX.FADE = 0.06
 
@@ -886,12 +886,12 @@ end
 -- 27 nov. : sends d'un looper qui n'a pas encore de boucle = ceux de ses sources (plus grand niveau ouvert par aux ; aucune source
 -- ouverte = ferme). Sources : entrees routees (reglage propre, le « in mute » ne compte pas) et loopers routes vers lui (send reel).
 -- Sans aucune source : on ne touche a rien (reglage a la main garde).
-function VL.aux_follow_src(i, tracks)
+function VL.aux_follow_src(i, tracks, cleared)
   local ltr = tracks.loopers[i]
   local ins, lps = {}, {}
   for k = 1, NIN do if S.routing.in_l[k][i] and tracks.inputs[k] then ins[#ins + 1] = k end end
   for j = 1, NLOOP do if j ~= i and S.routing.l_l[j] and S.routing.l_l[j][i] and tracks.loopers[j] then lps[#lps + 1] = j end end
-  if #ins == 0 and #lps == 0 then return end
+  if #ins == 0 and #lps == 0 and not cleared then return end      -- aucune source : reglage a la main libre (sauf juste apres un Clear)
   for a = 1, LPF.aux_count() do
     local aux, best = LPF.aux_track(a), nil
     if aux and not LPF.aux_get(aux, ltr) then             -- pas si l'aux revient dans ce looper (feedback)
@@ -924,10 +924,13 @@ function VL.update_aux_follow()
   local tracks = VL.resolve_tracks(false)
   local A = VL.AUX
   -- 1) 27 nov. (demande de l'utilisateur) : tant que le 1er REC n'est pas sorti (looper vide, attente, 1er REC), les sends du
-  --    looper vers les aux SUIVENT ses sources (entrees et loopers routes vers lui) ; une fois la boucle posee, ils ne bougent plus
+  --    looper vers les aux SUIVENT ses sources A LA LETTRE (entrees et loopers routes vers lui ; aucune source ouverte = ferme).
+  --    Des que le 1er REC est LANCE (attente 7, REC 1, sortie 8) et jusqu'au Clear : on ne touche plus a rien (reglage a la main libre).
   for i = 1, NLOOP do
     local st = S.loopers[i] and S.loopers[i].state
-    if tracks.loopers[i] and (st == 1 or st == 7 or not LPF.aux_has_loop(i)) then VL.aux_follow_src(i, tracks) end
+    local empty = st ~= 1 and st ~= 7 and st ~= 8 and not LPF.aux_has_loop(i)
+    if tracks.loopers[i] and empty then VL.aux_follow_src(i, tracks, A.empty[i] == false) end   -- Clear (boucle -> vide) : on enleve tout
+    A.empty[i] = empty
     A.prev[i] = st
   end
   -- 2) entrees : in mute > impose par un looper avec boucle > sends propres
