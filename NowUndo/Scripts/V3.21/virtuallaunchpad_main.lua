@@ -44,9 +44,9 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-12h"           -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-B1in"          -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
-VL.BUILD = "0.9.24-op-mute-parent+macros+RGES" -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
+-- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
 VL._held_loopers = {}             -- [looper]=t_appui ; chord Yamaha (rangee du haut)
 local function dbg(fmt, ...)
@@ -182,6 +182,9 @@ local function new_state()
     exclusive = false,              -- mode EXCLU : un seul groupe joue ; changement au synchro point commun
     super = false,                  -- SUPER EXCLU (appui long) : les loopers seuls se comportent comme des groupes
     group_of = {},                  -- group_of[looper] = 0..4 (un looper ne peut etre que dans UN groupe)
+    top_in = false,                 -- 27 nov. : rangee du haut = selection des ENTREES (bascule in/looper)
+    in_group_of = {},               -- groupes d'entrees : in_group_of[entree] = 0..4
+    sel_in_group = 0,               -- groupe de l'entree selectionnee (0 = aucun)
     launch = false,                 -- mode Launch
     armed = {},                     -- actions armees {action, args, targets, key}
     fighter_page = 1,               -- page logique du Twister
@@ -1261,7 +1264,10 @@ function VL.publish_fx_source()
   local source = clamp(S.fx_source or (NIN + clamp(S.sel_looper or 1, 1, NLOOP)), 1, NIN + NLOOP)
   reaper.SetExtState("nowundo_vl", "fx_source", tostring(source), false)
   if source <= NIN then S.sel_input = source end            -- 27 nov. : derniere entree choisie = ENTREE SELECTIONNEE
-  if reaper.gmem_write and not VL.mirror_mode then reaper.gmem_write(6062, VL.sel_in()) end
+  if reaper.gmem_write and not VL.mirror_mode then
+    reaper.gmem_write(6062, VL.sel_in())
+    reaper.gmem_write(6063, S.top_in and 1 or 0)          -- 27 nov. : 1 = rangee du haut en mode ENTREES
+  end
 end
 -- entree selectionnee (rushes "in aux2 0.5", "in fx 2", "in mute" : n = 0 dans les commandes) ; publiee en gmem 6062
 function VL.sel_in() return clamp(S.sel_input or 1, 1, NIN) end
@@ -1286,7 +1292,7 @@ function VL.select_looper(i)
   S.sel_looper = clamp(i, 1, NLOOP)
   VL.tw_follow_sel()
   follow_group()
-  S.fx_source = NIN + S.sel_looper
+  if not S.top_in then S.fx_source = NIN + S.sel_looper end   -- 27 nov. : en mode ENTREES, effets / sends restent sur l'entree
   VL.publish_fx_source()
   log("info", "looper %d selectionne", S.sel_looper)
   if VL.follow_looper_window then VL.follow_looper_window() end   -- une fenetre looper ouverte bascule sur le nouveau
@@ -1295,7 +1301,7 @@ function VL.step_looper(d)
   S.sel_looper = ((S.sel_looper - 1 + d) % NLOOP) + 1
   VL.tw_follow_sel()
   follow_group()
-  S.fx_source = NIN + S.sel_looper
+  if not S.top_in then S.fx_source = NIN + S.sel_looper end   -- 27 nov. : en mode ENTREES, effets / sends restent sur l'entree
   VL.publish_fx_source()
   log("info", "looper %d selectionne", S.sel_looper)
   if VL.follow_looper_window then VL.follow_looper_window() end
@@ -1353,6 +1359,135 @@ function VL.group_members(g)
   local m = {}
   for i = 1, NLOOP do if S.group_of[i] == g then m[#m + 1] = i end end
   return m
+end
+
+-- 27 nov. : rangee du haut = selection des ENTREES (bascule « in/looper » : pad B1 de la page 1, MIDI Learn, rush « inputs »).
+-- Groupes d'entrees (memes gestes que les loopers : chord, Ctrl / HOLD, pad GROUP maintenu), memorises (nowundo_vl/in_groups).
+-- L'entree selectionnee (et son groupe) est la cible des pads d'effets D5-D8 et des pads de sends C5-C8.
+function VL.in_load()
+  local s = (reaper and reaper.GetExtState) and reaper.GetExtState("nowundo_vl", "in_groups") or ""
+  local k = 0
+  for v in s:gmatch("%d+") do k = k + 1; if k <= NIN then S.in_group_of[k] = clamp(tonumber(v), 0, NGROUP) end end
+  for j = 1, NIN do S.in_group_of[j] = S.in_group_of[j] or 0 end
+  S.sel_in_group = S.in_group_of[VL.sel_in()] or 0
+end
+function VL.in_save()
+  if VL.mirror_mode or not (reaper and reaper.SetExtState) then return end
+  local p = {}
+  for j = 1, NIN do p[j] = tostring(S.in_group_of[j] or 0) end
+  reaper.SetExtState("nowundo_vl", "in_groups", table.concat(p, ","), true)
+end
+function VL.in_members(g)
+  local m = {}
+  for k = 1, NIN do if g > 0 and S.in_group_of[k] == g then m[#m + 1] = k end end
+  return m
+end
+function VL.in_first_empty() for g = 1, NGROUP do if #VL.in_members(g) == 0 then VL._in_chord[g] = nil return g end end end
+VL._in_chord = {}
+function VL.in_assign(k, g, via_chord)
+  if g > 0 and not via_chord then VL._in_chord[g] = nil end
+  S.in_group_of[k] = g
+  if k == VL.sel_in() then S.sel_in_group = g end
+  VL.in_save()
+  log("info", "entree %d -> groupe d'entrees %d", k, g)
+end
+function VL.in_dissolve(g)
+  if not g or g <= 0 or not VL._in_chord[g] then return end
+  local m = VL.in_members(g)
+  if #m > 1 then return end
+  VL._in_chord[g] = nil
+  if #m == 1 then VL.in_assign(m[1], 0, true) end
+end
+function VL.select_input(k)
+  S.sel_input = clamp(k, 1, NIN)
+  S.sel_in_group = S.in_group_of[S.sel_input] or 0
+  S.fx_source = S.sel_input
+  VL.publish_fx_source()
+  log("info", "entree %d selectionnee", S.sel_input)
+end
+function VL.in_select_group(g)
+  if S.sel_in_group == g then                         -- re-appui : on sort du groupe (entree sans groupe suivante)
+    for d = 1, NIN do
+      local k = ((VL.sel_in() - 1 + d) % NIN) + 1
+      if (S.in_group_of[k] or 0) == 0 then VL.select_input(k) return end
+    end
+    return
+  end
+  local m = VL.in_members(g)
+  if #m > 0 then VL.select_input(m[1]) end
+end
+-- chord : entree maintenue (anchor) + appui sur une autre = ajoute / retire du groupe (groupe libre si anchor sans groupe)
+function VL.in_chord(anchor, target)
+  if anchor == target then return end
+  local ga, gt = S.in_group_of[anchor] or 0, S.in_group_of[target] or 0
+  if ga > 0 then
+    if gt == ga then VL.in_assign(target, 0, true); VL.in_dissolve(ga)
+    else VL.in_assign(target, ga, true); VL.in_dissolve(gt) end
+  else
+    local g = VL.in_first_empty()
+    if not g then return end
+    VL.in_assign(anchor, g, true); VL.in_assign(target, g, true); VL._in_chord[g] = true
+    if gt > 0 then VL.in_dissolve(gt) end
+  end
+  VL.select_input(anchor)
+end
+function VL.set_top_in(on)
+  if on == nil then on = not S.top_in end
+  S.top_in = on and true or false
+  if S.top_in then VL.select_input(VL.sel_in())
+  else S.fx_source = NIN + clamp(S.sel_looper or 1, 1, NLOOP); VL.publish_fx_source() end
+  log("info", "rangee du haut : %s", S.top_in and "ENTREES" or "LOOPERS")
+end
+-- source des pads d'effets / de sends : (kind, id, liste des cibles {kind, id}) ; le groupe (looper ou entree) suit,
+-- sauf pad GROUP maintenu (inhibe groupe)
+function VL.src_targets()
+  local source = clamp(S.fx_source or (NIN + clamp(S.sel_looper or 1, 1, NLOOP)), 1, NIN + NLOOP)
+  local kind, id = (source <= NIN) and "input" or "looper", (source <= NIN) and source or (source - NIN)
+  local list = { { kind, id } }
+  if not (VL.group_inhibit and VL.group_inhibit()) then
+    local m
+    if kind == "looper" then local g = S.group_of[id] or 0; m = g ~= 0 and VL.group_members(g)
+    else local g = S.in_group_of[id] or 0; m = g ~= 0 and VL.in_members(g) end
+    if m and #m > 0 then list = {}; for _, x in ipairs(m) do list[#list + 1] = { kind, x } end end
+  end
+  return kind, id, list
+end
+-- pads de sends C5-C8 (aux 1-4) : mode toggle / gate par pad (PAGE 1 maintenue + pad = bascule), comme les pads FX
+function VL.aux_pad_mode(a)
+  local v = (reaper and reaper.GetExtState) and reaper.GetExtState("VirtualLaunchpad_FX_Mirror", "auxmode_" .. a) or ""
+  return v == "gate" and "gate" or "toggle"
+end
+function VL.aux_pad_set_mode(a, m)
+  if reaper and reaper.SetExtState then reaper.SetExtState("VirtualLaunchpad_FX_Mirror", "auxmode_" .. a, m, true) end
+end
+-- etat du send a de la source : true ouvert, false ferme, nil = pas d'aux (lu dans le tableau de bord publie 10x / s)
+function VL.aux_src_open(kind, id, a)
+  if a > LPF.aux_count() then return nil end
+  if kind == "input" then
+    local own = VL.AUX.own[id]
+    if own and own[a] then return own[a].on end
+    return (reaper.gmem_read and (reaper.gmem_read(6164 + (id - 1) * 8 + (a - 1)) or 0) > 0) or false
+  end
+  return (reaper.gmem_read and (reaper.gmem_read(6100 + (id - 1) * 8 + (a - 1)) or 0) > 0) or false
+end
+function VL.aux_pad_apply(list, a, open)
+  for _, tg in ipairs(list) do
+    if tg[1] == "looper" then VL.aux_cmd("aux_l_" .. tg[2] .. "_" .. a .. "_" .. (open and "on" or "off"))
+    else VL.aux_cmd("aux_in_" .. tg[2] .. "_" .. a .. "_" .. (open and "on" or "off")) end
+    local key = (tg[1] == "looper" and "l" or "in") .. tg[2] .. ":" .. a
+    if tg[1] == "looper" and reaper.gmem_write and not VL.mirror_mode then         -- LED a jour sans attendre la publication
+      local w = VL.AUX.w[key]
+      if w then reaper.gmem_write(6100 + (tg[2] - 1) * 8 + (a - 1), w.open and math.max(1e-4, w.vol) or -math.max(1e-4, w.vol)) end
+    end
+  end
+end
+-- commande externe (MIDI Learn) auxsel_<a>_<on|off|tog> : meme geste que le pad de send
+function VL.aux_sel_cmd(a, m)
+  local kind, id, list = VL.src_targets()
+  local cur = VL.aux_src_open(kind, id, a)
+  if cur == nil then return end
+  local open = (m == "on") or (m == "tog" and not cur)
+  VL.aux_pad_apply(list, a, open)
 end
 
 -- cibles d'une action : groupe actif ET non vide -> uniquement les membres du groupe
@@ -2545,7 +2680,8 @@ bind(1, 5, 7, fn(function() if pedal_capture_action("drop_group") then return en
                  function() local R = VL.DROP.run; return R and ((R.phase == "cap" and not R.exit) and "armed" or "on") or "idle" end),
                fn(function() VL.drop_cancel() end))   -- V3.27 : appui long = annuler le drop en cours
 PAD_LABEL[1]["5,7"] = "DROP : 1er appui = capture, 2e = fin au tour en cours (tout est garde), long = annuler"; PAD_RGB[1]["5,7"] = 0xFF66CC
-bind(1, 5, 8, act("full_loop"))
+-- 27 nov. : ex FULL LOOP (reste au MIDI Learn / Twister) -> IN / LOOPER : la rangee du haut selectionne les entrees
+bind(1, 5, 8, fn(function() VL.set_top_in() end, function() return S.top_in and "on" or "idle" end))
 -- Miroirs FX : helpers (les binds sont UNIQUEMENT sur D5-D8 = 5,5..5,8 plus bas).
 -- Maintenir PAGE 1 (5,9) puis appuyer sur D5-D8 pour changer le mode Toggle/Gate du slot.
 local FX_MIRROR_EXT = "VirtualLaunchpad_FX_Mirror"
@@ -2564,9 +2700,20 @@ bind(1, 6, 2, fn(function() VL.scn_cmd("prev") end, function() return "idle" end
 bind(1, 6, 3, fn(function() VL.scn_cmd("next") end, function() return "idle" end))
 PAD_LABEL[1]["6,1"] = "VALIDER (scenario)"; PAD_LABEL[1]["6,2"] = "PAS PRECEDENT (scenario)"; PAD_LABEL[1]["6,3"] = "PAS SUIVANT (scenario)"
 PAD_RGB[1]["6,1"] = 0x33DD66; PAD_RGB[1]["6,2"] = 0x66CCFF; PAD_RGB[1]["6,3"] = 0x66CCFF
-bind(1, 6, 4, act("speed_step", -12)); bind(1, 6, 5, act("speed_step", 12))
-bind(1, 6, 6, act("pitch_step", -12)); bind(1, 6, 7, act("pitch_step", 12))
-bind(1, 6, 8, act("link"))
+-- 27 nov. : speed / pitch -12 / +12 retires (MIDI Learn / Twister), LINK en C4, C5-C8 = sends vers les aux 1-4
+bind(1, 6, 4, act("link"))
+PAD_RGB[1]["6,4"] = PAD_RGB[1]["6,8"] or PAD_RGB[1]["6,4"]
+for a = 1, 4 do
+  local sb = fn(function() VL.aux_sel_cmd(a, "tog") end, function()
+    local kind, id = VL.src_targets()
+    local o = VL.aux_src_open(kind, id, a)
+    if o == nil then return "off" end
+    return o and "on" or "idle"
+  end)
+  sb.aux_slot = a
+  bind(1, 6, 4 + a, sb)
+  PAD_RGB[1]["6," .. (4 + a)] = 0x22D3C5
+end
 bind(1, 7, 1, act("auto"));    bind(1, 7, 3, act("restart"));  bind(1, 7, 4, act("reverse"), act("auto_rev"), true)
 bind(1, 7, 5, act("cloud"));   bind(1, 7, 6, act("slicer"));   bind(1, 7, 7, act("redo")); bind(1, 7, 8, act("undo"))
 -- EXCLU : un seul groupe joue ; changement de groupe au synchro point commun (ancien pad CLEAR ALL)
@@ -2946,7 +3093,11 @@ function VL.ext_cmd_poll()
       if lp and lp >= 1 and lp <= NPAGE and S.page ~= lp then VL.set_page(lp) end
       local pk = tonumber(name:match("^p4page_(%d+)$"))
       if pk and VL.set_layer("rp" .. pk) and S.page ~= 4 then VL.set_page(4) end
-      if name:match("^aux") then VL.aux_cmd(name) end                       -- 26 nov. : sends aux (rushes)
+      local tim = name:match("^topin_(%a+)$")                              -- 27 nov. : IN / LOOPER (MIDI Learn, rush "inputs")
+      if tim then VL.set_top_in((tim == "on") or (tim == "tog" and not S.top_in)) end
+      local asa, asm = name:match("^auxsel_(%d+)_(%a+)$")                 -- 27 nov. : send aux a de la selection (pad C5-C8)
+      if asa then VL.aux_sel_cmd(tonumber(asa), asm)
+      elseif name:match("^aux") then VL.aux_cmd(name) end                   -- 26 nov. : sends aux (rushes)
       local mk, mm = name:match("^inmute_(%d+)_(%a+)$")                    -- V3.27 : rush "in1 mute" / "in1 mute off"
       mk = tonumber(mk); if mk == 0 then mk = VL.sel_in() end
       if mk and mk >= 1 and mk <= NIN then VL.set_input_mute(mk, mm) end
@@ -3025,18 +3176,7 @@ do
       if source <= NIN then return "input", source end
       return "looper", source - NIN
     end
-    local function fx_targets()
-      local kind, id = fx_target()
-      if kind == "looper" then
-        local g = S.group_of[id] or 0
-        if g ~= 0 then
-          local list = {}
-          for _, m in ipairs(VL.group_members(g)) do list[#list + 1] = { "looper", m } end
-          if #list > 0 then return list end
-        end
-      end
-      return { { kind, id } }
-    end
+    local function fx_targets() local _, _, list = VL.src_targets() return list end   -- 27 nov. : groupe de loopers OU d'entrees
     local function fx_pad_action()
       local kind, id = fx_target()
       local value = not S.fx[kind][id][slot]
@@ -3055,6 +3195,8 @@ do
     PAD_RGB[1]["5," .. (4 + n)] = 0xFF2DA0
   end
 end
+-- B1 = IN / LOOPER (pose en 5,8 puis deplace par MOVE)
+PAD_LABEL[1]["7,1"] = "IN / LOOPER (rangee du haut)"; PAD_RGB[1]["7,1"] = 0x2D9BFF
 -- D2 label (action deja deplacee par MOVE depuis 6,2)
 PAD_LABEL[1]["5,2"] = "PAS PRECEDENT (scenario)"
 PAD_RGB[1]["5,2"] = 0x66CCFF
@@ -3209,6 +3351,17 @@ function VL.pad_label(page, row, col)
       return "FX SLOT " .. slot .. " " .. mode
     end
   end
+  if row == 0 and col >= 1 and col <= NIN and S.top_in then               -- 27 nov. : rangee du haut en mode ENTREES
+    local g = S.in_group_of[col] or 0
+    return "IN " .. col .. (g > 0 and (" G" .. g) or "")
+  end
+  if page == 1 and row == 6 and col == 4 then return "LINK PITCH / SPEED" end
+  if page == 1 and row == 6 and col >= 5 and col <= 8 then
+    local a = col - 4
+    local kind, id = VL.src_targets()
+    return "SEND " .. a .. " " .. (kind == "input" and "IN" or "L") .. id .. " " .. VL.aux_pad_mode(a):upper()
+  end
+  if page == 1 and row == 7 and col == 1 then return S.top_in and "IN / LOOPER : ENTREES" or "IN / LOOPER : LOOPERS" end
   if row == 8 and col == 9 then return "Launchpad PAGE 4 " .. cur_layer().name end
   if page == 1 and row == 1 and col >= 1 and col <= 8 then
     local label = looper_status(col)
@@ -3495,6 +3648,8 @@ function VL.ctrl_held() return ctrl_hold end
 function VL.group_pad_tap(g)
   if vhold or ctrl_hold then
     if edit_group == g then edit_group = nil else edit_group = g end   -- (pas de "and nil or" : nil est faux en Lua)
+  elseif S.top_in then
+    VL.in_select_group(g)                            -- 27 nov. : mode ENTREES = groupes d'entrees
   else
     VL.select_group(g)
   end
@@ -3508,7 +3663,8 @@ local function held_group()
     if d then return g, g .. ",9" end
   end
   if (vhold or ctrl_hold) and edit_group then return edit_group, nil end
-  if (vhold or ctrl_hold) and S.sel_group > 0 then return S.sel_group, nil end
+  local sg = S.top_in and S.sel_in_group or S.sel_group
+  if (vhold or ctrl_hold) and sg > 0 then return sg, nil end
 end
 function VL.held_group() return (held_group()) end
 
@@ -3579,6 +3735,37 @@ function VL.with_page(p, f)
   end
   if not ok then error(err, 0) end
 end
+-- 27 nov. : rangee du haut en mode ENTREES. Pad GROUP maintenu = l'entree entre / sort de ce groupe ; Ctrl / HOLD = geste
+-- de groupe (1re entree libre -> nouveau groupe) ; entree maintenue + autre entree = chord ; sinon selection de l'entree.
+function VL.in_top_press(k, t, key, b)
+  local gkey
+  for g = 1, NGROUP do if down[g .. ",9"] then gkey = g break end end
+  down[key] = { t = t, b = b, short_done = true, long_fired = true, consumed = true }
+  if gkey then
+    down[gkey .. ",9"].consumed = true
+    VL.in_assign(k, (S.in_group_of[k] == gkey) and 0 or gkey)
+  elseif vhold or ctrl_hold then
+    local ses = VL._ctrl_sess
+    if edit_group then VL.in_assign(k, (S.in_group_of[k] == edit_group) and 0 or edit_group)
+    elseif not (ses and ses.inp) then
+      local g = S.in_group_of[k] or 0
+      if g == 0 then g = VL.in_first_empty() or 0; if g > 0 then VL.in_assign(k, g) end end
+      VL._ctrl_sess = { g = g, inp = true }
+      VL.select_input(k)
+    elseif ses.g > 0 then VL.in_assign(k, (S.in_group_of[k] == ses.g) and 0 or ses.g) end
+  else
+    local anchor, at
+    for j, tj in pairs(VL._held_in) do
+      if j ~= k and down["0," .. j] and (not at or tj < at) then anchor, at = j, tj end
+    end
+    VL._held_in[k] = t
+    if anchor then VL.in_chord(anchor, k)
+    else VL.select_input(k); down[key].in_long = k; down[key].long_fired = false end   -- appui long = in mute (VL.tick)
+  end
+  VL.sync_out()
+end
+VL._held_in = {}
+
 function VL.on_pad_pressed(row, col, t)
   t = t or now()
   if VL._mom and not (col == 9 and row == NGROUP + VL._mom.p) then VL._mom.used = true end   -- page temporaire utilisee
@@ -3592,6 +3779,7 @@ function VL.on_pad_pressed(row, col, t)
   local key = row .. "," .. col
   local b = BIND[S.page][key]
   if not b then return end
+  if row == 0 and S.top_in and col >= 1 and col <= NIN then VL.in_top_press(col, t, key, b) return end
 
   -- === Chord Yamaha (rangee du haut) : AVANT tout autre traitement ===
   -- Maintenir un looper puis en enfoncer un autre = grouper / degrouper.
@@ -3666,6 +3854,22 @@ function VL.on_pad_pressed(row, col, t)
                   snap = pnt.snap and pnt.snap() or nil }
   else
     local tt = t or now()
+    if b.short and b.short.aux_slot then             -- 27 nov. : pads de sends C5-C8 (toggle / gate, PAGE 1 maintenue = mode)
+      local a = b.short.aux_slot
+      if down["5,9"] then
+        VL.aux_pad_set_mode(a, VL.aux_pad_mode(a) == "toggle" and "gate" or "toggle")
+        down[key] = { t = tt, b = b, short_done = true, fx_mode_switch = true }
+        VL.sync_out()
+        return
+      end
+      local kind, id, list = VL.src_targets()
+      local mode = VL.aux_pad_mode(a)
+      local cur = VL.aux_src_open(kind, id, a)
+      down[key] = { t = tt, b = b, short_done = true, aux_pad = true, aux_slot = a, aux_mode = mode, aux_targets = list }
+      if cur ~= nil then VL.aux_pad_apply(list, a, mode == "gate" or not cur) end
+      VL.sync_out()
+      return
+    end
     if b.short and b.short.fx_mirror_slot then
       local slot = b.short.fx_mirror_slot
       local source = clamp(S.fx_source or (NIN + clamp(S.sel_looper or 1, 1, NLOOP)), 1, NIN + NLOOP)
@@ -3682,12 +3886,7 @@ function VL.on_pad_pressed(row, col, t)
       local kind, id = (source <= NIN) and "input" or "looper", (source <= NIN) and source or (source - NIN)
       local mode = fx_mirror_mode(source, slot)
       -- cibles : le looper selectionne, ou tous les loopers de son groupe (capturees a l'appui)
-      local targets = { { kind, id } }
-      if kind == "looper" and (S.group_of[id] or 0) ~= 0 then
-        targets = {}
-        for _, m in ipairs(VL.group_members(S.group_of[id])) do targets[#targets + 1] = { "looper", m } end
-        if #targets == 0 then targets = { { kind, id } } end
-      end
+      local _, _, targets = VL.src_targets()           -- 27 nov. : groupe de loopers OU d'entrees
       down[key] = { t = tt, b = b, short_done = true, fx_mirror = true, fx_slot = slot,
                     fx_source = source, fx_kind = kind, fx_id = id, fx_mode = mode, fx_targets = targets }
       local newval = (mode == "gate") and true or (not S.fx[kind][id][slot])
@@ -3714,6 +3913,7 @@ end
 -- le pointeur (bouton enfonce) entre sur un autre pad pendant un geste de peinture
 function VL.on_pad_dragged(row, col)
   if not paint or paint.page ~= S.page then return end
+  if row == 0 and S.top_in then return end
   local key = row .. "," .. col
   local b = BIND[S.page][key]
   local pnt = b and b.short.paint
@@ -3730,8 +3930,13 @@ function VL.on_pad_released(row, col, t)
   local d = down[key]
   down[key] = nil
   -- Toujours liberer le tracker chord, meme si release/long a court-circuite le handler
-  if row == 0 and col >= 1 and col <= NLOOP then VL._held_loopers[col] = nil end
+  if row == 0 and col >= 1 and col <= NLOOP then VL._held_loopers[col] = nil; VL._held_in[col] = nil end
   if not d then return end
+  if d.aux_pad then                                  -- 27 nov. : send en Gate = ferme au relachement (cibles capturees a l'appui)
+    if d.aux_mode == "gate" then VL.aux_pad_apply(d.aux_targets, d.aux_slot, false) end
+    VL.sync_out()
+    return
+  end
   if d.fx_mirror then
     -- En Gate, le relachement coupe exactement la source capturee a l'appui,
     -- meme si la selection FX a change entre-temps.
@@ -3769,6 +3974,11 @@ function VL.tick(t)
   VL.fire_pump(t)
   local fired = false
   for _, d in pairs(down) do
+    if d.in_long and not d.long_fired and d.t and (t - d.t) >= LONG_PRESS_S then   -- 27 nov. : appui long sur une entree = in mute
+      d.long_fired = true
+      VL.set_input_mute(d.in_long, "tog")
+      fired = true
+    end
     -- appui long sur une cellule de matrice SEULE : annule la bascule, execute l'action longue (parent, etc.)
     if d.paint and d.first and (d.b.long or (d.pnt and d.pnt.on_long)) and not d.long_fired and paint and paint.first == d.key
        and (paint.n or 1) == 1 and d.t and (t - d.t) >= LONG_PRESS_S then
@@ -4188,7 +4398,21 @@ function VL.build_frame()
   --   sinon                           : looper selectionne allume
   local hg = held_group()
   local ag = (S.sel_group > 0 and #VL.group_members(S.sel_group) > 0) and S.sel_group or nil
-  for i = 1, NLOOP do
+  if S.top_in then                                   -- 27 nov. : mode ENTREES (meme logique d'affichage, groupes d'entrees)
+    local sg = (S.sel_in_group > 0 and #VL.in_members(S.sel_in_group) > 0) and S.sel_in_group or nil
+    for k = 1, NIN do
+      local g = S.in_group_of[k] or 0
+      local base = (g > 0) and GROUP_COL[g] or 0x99FF66   -- entree sans groupe : vert (loopers : jaune)
+      if VL.input_parent_cut and VL.input_parent_cut(k) then base = 0x2D5BFF end   -- in mute : bleu, comme la page 2
+      local sel = VL.sel_in() == k
+      if hg then put(0, k, base, (g == hg) and "on" or "idle")
+      elseif sg then
+        if g == sg then put(0, k, base, sel and "member_cursor" or "on") else put(0, k, base, sel and "cursor" or "idle") end
+      else put(0, k, base, sel and "on" or "idle") end
+    end
+    ag, hg = nil, hg
+  end
+  for i = 1, (S.top_in and 0 or NLOOP) do
     local g = S.group_of[i]
     local base = (g > 0) and GROUP_COL[g] or rgb["0," .. i] or COL.looper   -- looper groupe : couleur de son groupe
     local sel = S.sel_looper == i
@@ -4201,7 +4425,7 @@ function VL.build_frame()
       put(0, i, base, sel and "on" or "idle")                           -- aucun groupe actif : membres attenues
     end
   end
-  for g = 1, NGROUP do put(g, 9, GROUP_COL[g], ((hg or S.sel_group) == g) and "on" or "idle") end
+  for g = 1, NGROUP do put(g, 9, GROUP_COL[g], ((hg or (S.top_in and S.sel_in_group or S.sel_group)) == g) and "on" or "idle") end
   for p = 1, NPAGE do put(NGROUP + p, 9, rgb[(NGROUP + p) .. ",9"] or COL.page, S.page == p and "on" or "idle") end
 
   if page == 1 then
@@ -5674,6 +5898,7 @@ function VL.reset()
   S = new_state()
   VL.S = S
   LPF.init_presets()
+  VL.in_load()
   VL.last = {}
   for k in pairs(down) do down[k] = nil end
   log("info", "Virtual Launchpad %s (build %s) initialise depuis %s", VL.VERSION, VL.BUILD, tostring(({ reaper.get_action_context() })[2]))

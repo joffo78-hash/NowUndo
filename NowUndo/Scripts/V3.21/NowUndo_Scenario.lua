@@ -479,7 +479,15 @@ local function compile(text, forced, toggle, gate_off)
     local gq, gerr = H._go(act:lower())                 -- V3.27 : go lp 2 | go 4c | go t3
     local tgs, tgn = act:lower():match("^(.-)%s*%f[%a]to%s+g%s*%(?%s*(%d+)%s*%)?$")   -- V3.27 : l3 to g2 (g0 = sans groupe)
     local fxs, fxa, fxm = act:lower():match("^(.-)%s*%f[%a]from%s+aux%s*(%d)%s*(%a*)$")   -- 26 nov. : l3 from aux2 = aux2 -> looper 3
-    if gq or gerr then
+    local inw = act:lower():match("^inputs%s*(%a*)$")   -- 27 nov. : inputs [on|off] = rangee du haut du Launchpad en mode ENTREES
+    if inw then
+      if inw ~= "" and onoff(inw) == nil then errs[#errs + 1] = "[" .. act .. "] inputs, inputs on, inputs off attendu"
+      else
+        local md = (inw == "") and (tmode and "tog" or "on") or (onoff(inw) and "on" or "off")
+        if H._omode then md = (md == "off") and "on" or "off" end
+        items[#items + 1] = { glob = "go", qname = "topin_" .. md }
+      end
+    elseif gq or gerr then
       if gerr then errs[#errs + 1] = "[" .. act .. "] " .. gerr
       elseif not H._omode then items[#items + 1] = { glob = "go", qname = gq } end
     elseif tgn then
@@ -2065,7 +2073,7 @@ ED.CATS = {
   { "Cloud",          { "cdens...", "cchaos...", "cspread...", "cpitch...", "cpos...", "clfo...", "clfodepth..." } },
   { "Slicer",         { "ssteps...", "srate...", "sgrid...", "sdecay...", "sattack...", "spitch...", "smax..." } },
   { "Global",         { "clearall", "clearallfull", "sync", "unsync", "syncall", "unsyncall", "r(n)...", "g(n)..." } },
-  { "Groupes / pages", { "to...", "go..." } },     -- V3.27 : l3 to g2 | go lp 1, go 4c, go t1
+  { "Groupes / pages", { "to...", "go...", "inputs" } },     -- V3.27 (+ 27 nov. : inputs = rangee du haut en entrees) : l3 to g2 | go lp 1, go 4c, go t1
   { "Sends aux",      { "aux1...", "aux2...", "aux3...", "aux4...", "from..." } },   -- 26 nov. : l1 aux2 0.5 | l3 from aux2
 }
 ED.VALS = {
@@ -2589,6 +2597,7 @@ local function mac_active(m, targets)
   local t = {}
   for w in act:gmatch("%S+") do t[#t + 1] = (w:gsub("%*[%d%./]*$", "")) end
   if #t == 0 then return false end
+  if t[1] == "inputs" then return rd(6063) > 0.5 end -- 27 nov. : mode ENTREES du Launchpad
   if t[1] == "in" and #t > 1 and (t[2]:match("^e%d") or t[2] == "mute" or t[2]:match("^aux%d")) then   -- 27 nov. : entree selectionnee (gmem 6062)
     targets = { 100 + math.max(1, math.floor(rd(6062) + .5)) }; table.remove(t, 1)
   elseif is_tgt(t[1]) and #t > 1 then                -- V3.27 : cible ecrite dans le rush (l2, g1, all...) : c'est elle qu'on verifie
@@ -2674,6 +2683,7 @@ H._mirror = function(m)
   local inp = w[1] and w[1]:match("^in?[%d%(]") ~= nil
   if w[1] and is_tgt(w[1]) then table.remove(w, 1) end
   if inp and w[1] and w[1]:match("^mute") then return true end        -- mute d'une entree : suit la piste
+  if w[1] == "inputs" then return true end            -- 27 nov. : allume = rangee du haut en mode ENTREES (gmem 6063)
   if w[1] == "d" or w[1] == "d*" then return true end  -- interrupteur A / D : suit le mode reel (allume = D)
   if w[1] == "in" and w[2] and w[2]:match("^aux%d") then return true end   -- 27 nov. : send de l'entree selectionnee
   if w[1] and (w[1]:match("^aux%d") or w[1] == "from") then return true end -- 27 nov. : sends aux : suit l'etat reel du send

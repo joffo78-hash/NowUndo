@@ -422,6 +422,23 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   sur la cible du moment (sélection) : pad allumé seulement si le send du looper sélectionné est ouvert ; un appui inverse l'état réel.
   Tests `tools/tcellmode.lua` (Launchpad), `tools/taux_mirror.lua` (Scenario), `tools/tbands.js` (web, Playwright). Non testé dans REAPER.
 
+## 27 nov. : page 1 du Launchpad = IN / LOOPER + sends C5-C8 (non testé dans REAPER)
+
+- **B1 (ex FULL LOOP, qui reste au MIDI Learn / Twister) = IN / LOOPER** : la rangée du haut passe en **sélection des entrées** (IN1..IN8,
+  vert ; groupe = couleur du groupe ; **in mute = bleu** comme la page 2). `S.top_in`, `VL.set_top_in`, publié en gmem **6063** (1 = entrées).
+  Gestes comme les loopers : tap = sélection (`VL.select_input`), **appui long = in mute** (`VL.set_input_mute(k, "tog")` via `d.in_long` dans
+  `VL.tick`), chord (entrée tenue + autre), Ctrl / HOLD (1re entrée libre = nouveau groupe), pad GROUP maintenu + entrée = entre / sort.
+  **Groupes d'entrées** séparés (`S.in_group_of`, `VL.in_members`, `VL.in_assign`, `VL.in_chord`, mémorisés `nowundo_vl/in_groups`) ;
+  pads GROUP en mode entrées = groupes d'entrées (`VL.in_select_group`). Sélectionner un looper en mode entrées ne change pas la source FX.
+- **Cible des pads FX D5-D8 et sends C5-C8** = `VL.src_targets()` (source `S.fx_source` + son groupe, looper OU entrée ; pad GROUP tenu = sans groupe).
+- **Rangée C** : speed / pitch ±12 retirés (MIDI Learn / Twister) ; **C4 = LINK** ; **C5-C8 = sends vers aux 1-4** (`aux_slot`, toggle ou gate,
+  **PAGE 1 maintenue + pad = bascule du mode**, ExtState `VirtualLaunchpad_FX_Mirror/auxmode_<a>`) ; LED = état du send de la source
+  (entrée : son réglage propre ; looper : gmem 6100..). `VL.aux_pad_apply`, `VL.aux_sel_cmd`.
+- Commandes `NowUndo_VLcmd/q` : `topin_<on|off|tog>`, `auxsel_<a>_<on|off|tog>`. MIDI Learn : `act:top_in` (onglet Pages), `act:auxsel_1..4`
+  (Output). Rush : **`inputs`** / `inputs on` / `inputs off` (toggle = miroir de gmem 6063), palette « Groupes / pages ».
+- `VL.BUILD = "27nov-B1in"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+- Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par

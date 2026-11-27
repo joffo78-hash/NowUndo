@@ -156,6 +156,11 @@ local acts = {
   A("act:drop_group", "Drop ON / OFF (1er = capture, 2e = fin au tour en cours, tout est garde ; groupe ou looper seul)", "Transport", "drop_group"),
   A("act:warp", "Warp ON/OFF (attaques calees sur la grille)", "Modes", "warp", nil, true),   -- V3.26
   A("act:dub_raw", "Dub A / D (bascule : A compense / D brut)", "Modes", "dub_raw", nil, true),   -- V3.27
+  A("act:top_in", "IN / LOOPER : rangee du haut du Launchpad = entrees ou loopers (bascule)", "Pages", "top_in"),   -- 27 nov.
+  A("act:auxsel_1", "Send aux 1 de la selection (entree ou looper + groupe, bascule)", "Output", "auxsel", 1),
+  A("act:auxsel_2", "Send aux 2 de la selection (entree ou looper + groupe, bascule)", "Output", "auxsel", 2),
+  A("act:auxsel_3", "Send aux 3 de la selection (entree ou looper + groupe, bascule)", "Output", "auxsel", 3),
+  A("act:auxsel_4", "Send aux 4 de la selection (entree ou looper + groupe, bascule)", "Output", "auxsel", 4),
 }
 for _, a in ipairs(acts) do TARGETS[#TARGETS + 1] = a end
 
@@ -403,7 +408,7 @@ local ACT_TAB = {
   reverse = "Playback", auto_rev = "Playback", one_shot = "Playback", link = "Playback", warp = "Playback",
   speed_step = "Playback", pitch_step = "Playback", reset = "Playback",
   beat_repeat = "Loop", full_loop = "Loop", quantise_inout = "Loop",
-  slicer = "Slicer", cloud = "Cloud", mute = "Output",
+  slicer = "Slicer", cloud = "Cloud", mute = "Output", top_in = "Pages", auxsel = "Output",
 }
 local PAR_TAB = { density = "Transport", dens_len = "Transport", io_frac = "Loop", fade = "Loop", mix = "Output", degrad = "Output",
   stereo = "Output", fdbk = "Output", out_vol = "Output", sl_mix = "Slicer", cl_mix = "Cloud", br_mix = "Loop",
@@ -892,6 +897,12 @@ end
 
 local SCN_CMD = { scn_validate = "validate", scn_prev = "prev", scn_next = "next", scn_capture = "toggle" }
 local function fire_action(action, args, looper, follow)
+  if action == "top_in" or action == "auxsel" then   -- 27 nov. : IN / LOOPER et sends de la selection -> Launchpad
+    local c = action == "top_in" and "topin_tog" or ("auxsel_" .. tostring(args or 1) .. "_tog")
+    local cur = reaper.GetExtState("NowUndo_VLcmd", "q")
+    reaper.SetExtState("NowUndo_VLcmd", "q", cur .. string.format("%s\t%.3f\n", c, reaper.time_precise()), false)
+    return
+  end
   if action == "rec_dub_toggle" or action == "drop_group" then   -- [REC>DUB] / drop : file de commandes lue par le Launchpad
     local cur = reaper.GetExtState("NowUndo_VLcmd", "q")
     reaper.SetExtState("NowUndo_VLcmd", "q", cur .. string.format("%s\t%.3f\n", action, reaper.time_precise()), false)
