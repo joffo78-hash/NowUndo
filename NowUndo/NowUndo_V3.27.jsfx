@@ -2579,7 +2579,7 @@ loop(3,
       cmd == 6 ? ( play_mode = (play_mode == 1 ? 0 : 1); slider6 = play_mode; play_mode == 1 ? ( cloud_on = 0; slider23 = 0; ); ) :
       cmd == 7 ? ( cloud_on = !cloud_on; slider23 = cloud_on; cloud_on && play_mode == 1 ? ( play_mode = 0; slider6 = 0; ); ) :
       cmd == 8 ? ( link_on = !link_on; slider7 = link_on; ) :
-      cmd == 9 ? ( state_target = (state == 4 ? 2 : 4); ) :
+      cmd == 9 ? ( state_target = ((state == 4 || state == 5) ? 2 : (auto_on ? 5 : 4)); ) :   // 27 nov. : Auto actif = Replace attend un signal (comme le bouton du JSFX)
       cmd == 10 ? ( state_target = (state == 5 ? 2 : 5); ) :
       cmd == 11 ? ( do_clear(1); state_target = 0; ) :
       cmd == 13 ? ( state_target = (state == 6 ? 2 : 6); ) : // Multiply

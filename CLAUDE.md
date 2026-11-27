@@ -498,6 +498,9 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
 - Correction : **plancher de bruit de l'entrée** suivi en continu (`ar_ne` enveloppe, `ar_nf` plancher : descend en 50 ms, remonte en 2 s près du plancher, en
   30 s quand on joue ; départ 0,01) ; ouverture seulement si l'entrée dépasse aussi **le plancher + 10 dB** (`ar_nf * 3.16`), fermeture sous plancher + 6 dB.
   Banc : souffle 0,02 / seuil 0,01 → plus rien d'écrasé ; une note jouée remplace toujours (écart 0,8) ; seuil 0,15 et silence inchangés. Non testé dans REAPER.
+- **Suite (19h15, demandé : « quand Auto est activé le Replace n'opère pas tant qu'aucun signal est détecté, comme avant »)** : la commande **9 (Replace)** venue du
+  Launchpad / MIDI Learn / rushes passe maintenant en **Auto-Replace (état 5) si Auto est actif** (comme le bouton du JSFX « A-Rep ») ; re-appui (état 4 ou 5) = Play.
+  Launchpad `L.replace` = état 4 ou 5 ; rush `replace` (`H.replace`, miroir) = état 4 ou 5. Banc `tautorep.py . auto` OK. Confirmé « ça marche » par l'utilisateur (19h19).
 
 ## Ce qui a été fait (session de nov. 2026, résumé)
 

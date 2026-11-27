@@ -43,14 +43,16 @@ step(secs(0.6))
 def snap():
     base = int(m.v_left_buf); return [A.M[base + k] for k in range(L)]
 before = snap()
-cmd(10); step(secs(3.0))
+RC = 9 if var.startswith('auto') else 10
+if RC == 9: cmd(19); step(2)   # bouton Auto du looper
+cmd(RC); step(secs(3.0))
 st = m.v_state
-cmd(10); step(secs(0.3))
+cmd(RC); step(secs(0.3))
 after = snap()
 diff = max(abs(a - c) for a, c in zip(before, after))
 # puis on JOUE pendant l'auto-replace (doit remplacer) : note forte dans un trou de la boucle
 before2 = after
-inp[0] = True; cmd(10); step(secs(1.0)); cmd(10); inp[0] = False; step(secs(0.2))
+inp[0] = True; cmd(RC); step(secs(1.0)); cmd(RC); inp[0] = False; step(secs(0.2))
 after2 = snap()
 d2 = max(abs(a - c) for a, c in zip(before2, after2))
 print("   jeu pendant l'auto-replace : ecart %.3f" % d2, "OK (remplace)" if d2 > 0.1 else "RIEN REMPLACE")

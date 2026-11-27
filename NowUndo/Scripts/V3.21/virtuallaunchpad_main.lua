@@ -484,7 +484,7 @@ function VL.poll_looper_feedback()
       -- cle toggle "rec" : true tant que on est dans le cycle rec/dub/wait-sync
       L.rec       = (st == 1 or st == 3 or st == 7 or st == 8)
       L.playing   = (st == 2 or st == 3 or st == 4 or st == 5 or st == 6)
-      L.replace   = (st == 4)
+      L.replace   = (st == 4 or st == 5)   -- 27 nov. : Replace avec Auto = auto-replace (etat 5)
       L.multiply  = (st == 6)
       L.rev      = (reaper.gmem_read(base + 17) or 0) > 0.5
       L.pingpong = (reaper.gmem_read(base + 18) or 0) > 0.5

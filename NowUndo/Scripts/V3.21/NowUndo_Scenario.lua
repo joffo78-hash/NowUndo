@@ -141,7 +141,7 @@ local function cmdonly(cmd)
 end
 
 H.rec      = tog(1,  function(F) return F.rec end)
-H.replace  = tog(9,  function(F) return F.st == 4 end)
+H.replace  = tog(9,  function(F) return F.st == 4 or F.st == 5 end)   -- 27 nov. : avec Auto, Replace = etat 5
 H.autorep  = tog(10, function(F) return F.st == 5 end)
 H.multiply = tog(13, function(F) return F.st == 6 end)
 H.rev      = tog(4,  function(F) return F.rev end)
@@ -2589,7 +2589,7 @@ end
 -- etat ON/OFF d'une macro TOGGLE (pour allumer son pad sur le Launchpad) : on regarde la 1re action de la macro
 -- sur le(s) looper(s) cible(s) ; ON = tous les loopers cibles sont dans l'etat "enregistre" (rev actif, in = valeur, ...)
 local PROBE = {
-  rec = function(F) return F.rec end, replace = function(F) return F.st == 4 end, autorep = function(F) return F.st == 5 end,
+  rec = function(F) return F.rec end, replace = function(F) return F.st == 4 or F.st == 5 end, autorep = function(F) return F.st == 5 end,
   multiply = function(F) return F.st == 6 end, rev = function(F) return F.rev end, pp = function(F) return F.pp end,
   slicer = function(F) return F.slicer end, cloud = function(F) return F.cloud end, link = function(F) return F.link end,
   auto = function(F) return F.auto end, oneshot = function(F) return F.oneshot end, br = function(F) return F.br end, mute = function(F) return F.mute end, play = function(F) return F.playing end,
