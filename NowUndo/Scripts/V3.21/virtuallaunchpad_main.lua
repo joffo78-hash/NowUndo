@@ -3221,6 +3221,13 @@ function VL.pad_label(page, row, col)
   return PAD_LABEL[page] and PAD_LABEL[page][row .. "," .. col]
 end
 
+-- 27 nov. : "t" (toggle) / "g" (gate) pour un pad de rush de la page 4, sinon nil
+function VL.cell_band(page, row, col)
+  if page ~= 4 or not row or row < 1 or col > 8 then return nil end
+  local spec = cur_layer().cells[row .. "," .. col]
+  return spec and spec.band and spec.band() or nil
+end
+
 local function p1col(key, fallback) return PAD_RGB[1][key] or fallback or COL.default end
 local function ui_sel(fnc) return fn(fnc) end
 
@@ -3258,7 +3265,7 @@ local MACRO_EXT = "NowUndo_Macros"
 VL.macros = { by_id = {}, layout = {}, rev = nil, last_poll = -1e9, last_rev = -1e9, flash = {}, on = {}, on_s = nil }
 
 function LPF.macros_parse(txt)
-  local by_id, layout, pages = {}, {}, {}
+  local by_id, layout, pages, lmode = {}, {}, {}, {}
   for line in (txt or ""):gmatch("[^\r\n]+") do
     local f = {}
     for w in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = w end
@@ -3266,13 +3273,14 @@ function LPF.macros_parse(txt)
       by_id[math.floor(tonumber(f[2]))] = { id = math.floor(tonumber(f[2])), color = math.floor(tonumber(f[3]) or 0xAAAAAA), name = f[4] or "", text = f[5] or "", toggle = (f[6] == "1"), all = (f[7] == "1"), gate = (f[8] == "1") }
     elseif f[1] == "L" and tonumber(f[2]) and tonumber(f[3]) then
       layout[math.floor(tonumber(f[2]))] = math.floor(tonumber(f[3]))
+      if f[4] == "n" or f[4] == "t" or f[4] == "g" then lmode[math.floor(tonumber(f[2]))] = f[4] end   -- 27 nov. : mode de la case
     elseif f[1] == "P" and tonumber(f[2]) then
       pages[math.floor(tonumber(f[2]))] = f[3] or ""
     end
   end
   local np = 0; for k in pairs(pages) do if k > np then np = k end end
   for k = 1, math.min(np, 26) do pages[k] = pages[k] or "" end
-  return by_id, layout, pages
+  return by_id, layout, pages, lmode
 end
 
 function VL.macros_poll(t)
@@ -3296,7 +3304,7 @@ function VL.macros_poll(t)
   local rev = reaper.GetExtState(MACRO_EXT, "rev")
   if rev == M.rev then return end
   M.rev = rev
-  M.by_id, M.layout, M.pages = LPF.macros_parse(reaper.GetExtState(MACRO_EXT, "set"))
+  M.by_id, M.layout, M.pages, M.lmode = LPF.macros_parse(reaper.GetExtState(MACRO_EXT, "set"))
   if #M.pages == 0 then M.pages = { "Rushes" } end
   for k = 1, 26 do LAYERS[k].name = string.char(96 + k) .. " " .. (M.pages[k] or "") end   -- nom affiche dans le menu
   if not VL.p4_moff() or (VL.p4_moff() // 64 + 1) > #M.pages then S.p4_layer = "rp1" end
@@ -3327,45 +3335,48 @@ end
 -- Reecrit la disposition (lignes L) dans l'ExtState partage ; fn(lay) modifie lay : case -> id de macro
 function VL.macros_layout_edit(fn)
   local lines, lay = {}, {}
+  local lm = {}
   for line in (reaper.GetExtState(MACRO_EXT, "set") or ""):gmatch("[^\r\n]+") do
-    local kind, c, id = line:match("^(%a)\t(%d+)\t(%d+)")
-    if kind == "L" then lay[tonumber(c)] = tonumber(id) else lines[#lines + 1] = line end
+    local kind, c, id, md = line:match("^(%a)\t(%d+)\t(%d+)\t?([ntg]?)")
+    if kind == "L" then lay[tonumber(c)] = tonumber(id); if md ~= "" then lm[tonumber(c)] = md end else lines[#lines + 1] = line end
   end
-  fn(lay)
+  fn(lay, lm)
   local cells = {}
   for c in pairs(lay) do cells[#cells + 1] = c end
   table.sort(cells)
-  for _, c in ipairs(cells) do lines[#lines + 1] = "L\t" .. c .. "\t" .. lay[c] end
+  for _, c in ipairs(cells) do lines[#lines + 1] = "L\t" .. c .. "\t" .. lay[c] .. (lm[c] and ("\t" .. lm[c]) or "") end
   local rev = string.format("%.4f", reaper.time_precise())
   reaper.SetExtState(MACRO_EXT, "set", table.concat(lines, "\n"), true)
   reaper.SetExtState(MACRO_EXT, "rev", rev, false)
   VL.macros.layout = lay
+  VL.macros.lmode = lm
   VL.macros.rev = rev
 end
 
 -- Depose des macros (ids) sur une case : la 1re sur la case visee, les suivantes dans les cases libres qui suivent.
 -- Case occupee : echange si la macro deposee etait deja sur le Launchpad, sinon l'occupant va dans la 1re case libre.
 function VL.macro_drop(ids, cell)
-  VL.macros_layout_edit(function(lay)
+  VL.macros_layout_edit(function(lay, lm)
     local function cell_of(id) for c, i in pairs(lay) do if i == id then return c end end end
     local p0 = ((cell - 1) // 64) * 64                 -- V3.27 : on reste dans la sous-page visee
     local function free_from(c) while c <= p0 + 64 and lay[c] do c = c + 1 end; return c end
     local nextc = cell
     for n, id in ipairs(ids) do
       local old = cell_of(id)
+      local om = old and lm[old]                     -- 27 nov. : le mode de la case suit le rush deplace
       if n == 1 then
-        local occ = lay[cell]
-        if old then lay[old] = nil end
+        local occ, ocm = lay[cell], lm[cell]
+        if old then lay[old] = nil; lm[old] = nil end
         if occ and occ ~= id then
-          if old then lay[old] = occ
-          else local c = free_from(p0 + 1); if c <= p0 + 64 then lay[c] = occ end end
+          if old then lay[old] = occ; lm[old] = ocm
+          else local c = free_from(p0 + 1); if c <= p0 + 64 then lay[c] = occ; lm[c] = ocm end end
         end
-        lay[cell] = id
+        lay[cell] = id; lm[cell] = om
       else
-        if old then lay[old] = nil end
+        if old then lay[old] = nil; lm[old] = nil end
         local c = free_from(nextc + 1)
         if c > p0 + 64 then c = free_from(p0 + 1) end
-        if c <= p0 + 64 then lay[c] = id; nextc = c end
+        if c <= p0 + 64 then lay[c] = id; lm[c] = om; nextc = c end
       end
     end
   end)
@@ -3375,10 +3386,11 @@ end
 -- Deplace une macro d'une case a une autre (echange si la case visee est occupee)
 function VL.macro_move(from, to)
   if from == to then return end
-  VL.macros_layout_edit(function(lay)
+  VL.macros_layout_edit(function(lay, lm)
     local a, b = lay[from], lay[to]
     if not a then return end
     lay[to] = a; lay[from] = b
+    lm[to], lm[from] = lm[from], lm[to]
   end)
   log("info", "macro deplacee : case %d -> %d", from, to)
 end
@@ -3386,6 +3398,17 @@ end
 function VL.macro_at(cell)
   local id = VL.macros.layout[cell]
   return id and VL.macros.by_id[id] or nil
+end
+-- 27 nov. : mode d'une case : celui choisi pour la case (clic droit), sinon celui du rush ("n" normal, "t" toggle, "g" gate)
+function VL.cell_mode(cell)
+  local m = VL.macro_at(cell)
+  if not m then return nil end
+  local x = (VL.macros.lmode or {})[cell]
+  if x then return x end
+  return m.gate and "g" or (m.toggle and "t" or "n")
+end
+function VL.set_cell_mode(cell, md)                  -- md = "n" / "t" / "g", ou nil = mode du rush
+  VL.macros_layout_edit(function(lay, lm) if lay[cell] then lm[cell] = md end end)
 end
 
 -- gst : "on" (appui) / "off" (relachement) pour une macro GATE ; tg : cibles imposees (celles de l'appui)
@@ -3397,7 +3420,7 @@ function VL.macro_fire(cell, gst, tg)
   local hb = tonumber(reaper.GetExtState("NowUndo_Scn", "alive")) or 0
   if reaper.time_precise() - hb > 2 then log("warn", "macro '%s' : le script NowUndo_Scenario ne tourne pas", LPF.macro_label(m)) end
   local cur = reaper.GetExtState("NowUndo_Scn", "mcr")
-  reaper.SetExtState("NowUndo_Scn", "mcr", cur .. string.format("%d\t%s\t%.3f\t%s\n", m.id, table.concat(tg, ","), reaper.time_precise(), gst or ""), false)
+  reaper.SetExtState("NowUndo_Scn", "mcr", cur .. string.format("%d\t%s\t%.3f\t%s\t%s\t%d\n", m.id, table.concat(tg, ","), reaper.time_precise(), gst or "", VL.cell_mode(cell) or "", cell), false)
   log("info", "macro '%s' -> %s %s", LPF.macro_label(m), table.concat(tg, ","), gst or "")
 end
 
@@ -3405,7 +3428,7 @@ function VL.macro_press(cell)
   local m = VL.macro_at(cell)
   if not m then return end
   if VL.ctrl_held and VL.ctrl_held() then VL.macro_unplace(cell); return end   -- Ctrl + clic : retire du Launchpad
-  if m.gate then
+  if VL.cell_mode(cell) == "g" then
     VL.macros.gate_tg = VL.macros.gate_tg or {}
     VL.macros.gate_tg[cell] = VL.targets()            -- le relachement visera les memes loopers
     VL.macro_fire(cell, "on", VL.macros.gate_tg[cell])
@@ -3416,7 +3439,7 @@ end
 
 function VL.macro_release(cell)
   local m = VL.macro_at(cell)
-  if not m or not m.gate then return end
+  if not m or VL.cell_mode(cell) ~= "g" then return end
   local tg = VL.macros.gate_tg and VL.macros.gate_tg[cell]
   if VL.macros.gate_tg then VL.macros.gate_tg[cell] = nil end
   VL.macro_fire(cell, "off", tg)   -- gate : relachement = tout OFF (pas une bascule)
@@ -3433,9 +3456,12 @@ function VL.macro_cell_def(cell)
       if (VL.macros.flash[cell] or 0) > now() then return "armed" end
       local mm = VL.macro_at(cell)
       if VL.macros.pend and VL.macros.pend[mm.id] then return "armed" end   -- action(s) en attente du point de synchro : clignote
-      if mm.toggle or mm.gate then return VL.macros.on[mm.id] and "on" or "idle" end
+      local md = VL.cell_mode(cell)
+      if md == "t" then return VL.macros.on[mm.id] and "on" or "idle" end
+      if md == "g" then return (VL.macros.gate_tg and VL.macros.gate_tg[cell]) and "on" or "idle" end   -- gate : allume tant qu'on tient
       return "on"
-    end }
+    end,
+    band = function() local md = VL.cell_mode(cell); return (md == "t" or md == "g") and md or nil end }
 end
 -- V3.27 : page 4 = sous-pages de rushes a..z (id "rp1".."rp26", cases (k-1)*64 + 1..64). Les pages existantes, leurs
 -- noms et leur ordre viennent du script Scenario (lignes P de NowUndo_Macros/set) ; seules celles-ci sont proposees.
@@ -4599,11 +4625,16 @@ function VL.web_publish(t)
     end
   end
   local hg = held_group and held_group() or 0
-  local meta = string.format("page=%d;layer=%s;hold=%d;layers=%s",
+  local bands = {}                                   -- 27 nov. : barres toggle / gate des pads de rushes
+  for row = 1, 8 do for col = 1, 8 do
+    local b = VL.cell_band(WEB.page or S.page, row, col)
+    if b then bands[#bands + 1] = row .. "," .. col .. b end
+  end end
+  local meta = string.format("page=%d;layer=%s;hold=%d;layers=%s;band=%s",
     WEB.page or S.page or 1,
     tostring(S.p4_layer or "fx"),
     tonumber(hg) or 0,
-    table.concat(layers, ","))
+    table.concat(layers, ","), table.concat(bands, "."))
   if meta ~= WEB.last_meta or reaper.GetExtState(WEB.section, "web_meta") ~= meta then
     WEB.last_meta = meta
     reaper.SetExtState(WEB.section, "web_meta", meta, false)
@@ -5316,9 +5347,23 @@ local HOLD = {
       local r, c = pad_at(gfx.mouse_x, gfx.mouse_y, CELL, OX, OY)
       if r and r >= 1 and c <= 8 then
         local cell = VL.p4_moff() + (r - 1) * 8 + c
-        reaper.SetExtState("NowUndo_Scn", "lp_new", string.format("%d\t%d\t%.3f", cell, VL.macros.layout[cell] or 0, reaper.time_precise()), false)
-        local hb = tonumber(reaper.GetExtState("NowUndo_Scn", "alive")) or 0
-        if reaper.time_precise() - hb > 2 then log("warn", "clic droit : lance le script NowUndo_Scenario pour creer / editer un rush") end
+        local edit = true
+        local m = VL.macro_at(cell)
+        if m then                                    -- 27 nov. : case occupee = menu : editer le rush / mode de CETTE case
+          local own = m.gate and "Gate" or (m.toggle and "Toggle" or "Normal")
+          local cm = (VL.macros.lmode or {})[cell]
+          local function ck(x) return (cm == x) and "!" or "" end
+          gfx.x, gfx.y = gfx.mouse_x, gfx.mouse_y
+          local ch = gfx.showmenu("Editer le rush|" .. ((cm == nil) and "!" or "") .. "Mode du rush (" .. own .. ")|"
+                                  .. ck("n") .. "Normal sur ce pad|" .. ck("t") .. "Toggle sur ce pad|" .. ck("g") .. "Gate sur ce pad")
+          edit = (ch == 1)
+          if ch >= 2 and ch <= 5 then VL.set_cell_mode(cell, ({ false, "n", "t", "g" })[ch - 1] or nil) end
+        end
+        if edit then
+          reaper.SetExtState("NowUndo_Scn", "lp_new", string.format("%d\t%d\t%.3f", cell, VL.macros.layout[cell] or 0, reaper.time_precise()), false)
+          local hb = tonumber(reaper.GetExtState("NowUndo_Scn", "alive")) or 0
+          if reaper.time_precise() - hb > 2 then log("warn", "clic droit : lance le script NowUndo_Scenario pour creer / editer un rush") end
+        end
       end
     end
     VL._rwas = rpress
@@ -5458,6 +5503,14 @@ local HOLD = {
           local pad_s = 3 * s          -- marge intérieure
           gfx.set(c[1] / 255, c[2] / 255, c[3] / 255, 1)
           gfx.rect(x + pad_s, y + pad_s, CELL - pad_s * 2, CELL - pad_s * 2, 1)
+          local band = VL.cell_band(S.page, row, col)              -- 27 nov. : barre a gauche = toggle, a droite = gate
+          if band then
+            local bw = math.max(3, math.floor(4 * s))
+            gfx.set(1, 1, 1, 0.85)
+            gfx.rect(band == "t" and (x + pad_s) or (x + CELL - pad_s - bw), y + pad_s, bw, CELL - pad_s * 2, 1)
+            gfx.set(0, 0, 0, 0.6)
+            gfx.rect(band == "t" and (x + pad_s + bw) or (x + CELL - pad_s - bw - 1), y + pad_s, 1, CELL - pad_s * 2, 1)
+          end
 
           local label = VL.pad_label(S.page, row, col)
           if label then

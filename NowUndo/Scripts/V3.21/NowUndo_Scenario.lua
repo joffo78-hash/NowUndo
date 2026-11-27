@@ -1747,12 +1747,25 @@ local function mac_serialize()
   local cells = {}
   for c in pairs(layout) do cells[#cells + 1] = c end
   table.sort(cells)
-  for _, c in ipairs(cells) do t[#t + 1] = "L\t" .. c .. "\t" .. layout[c] end
+  for _, c in ipairs(cells) do t[#t + 1] = "L\t" .. c .. "\t" .. layout[c] .. ((H._lmode or {})[c] and ("\t" .. H._lmode[c]) or "") end
   for k, nm in ipairs(H._pages) do t[#t + 1] = "P\t" .. k .. "\t" .. nm end
   return table.concat(t, "\n")
 end
+-- 27 nov. : mode PAR CASE du Launchpad (4e champ de la ligne L : n = normal, t = toggle, g = gate ; absent = mode du rush)
+H._cmode = function(cell, m)                       -- mode effectif d'une case : "n" / "t" / "g"
+  local x = cell and (H._lmode or {})[cell]
+  if x then return x end
+  return (m and m.gate) and "g" or ((m and m.toggle) and "t" or "n")
+end
+H._as = function(m, mode)                          -- le rush vu avec le mode d'une case (n / t / g) : meme rush, autre comportement
+  if not mode or mode == "" then return m end
+  local tg, gt = mode == "t", mode == "g"
+  if (m.toggle and true or false) == tg and (m.gate and true or false) == gt then return m end
+  return setmetatable({ toggle = tg, gate = gt }, { __index = m })
+end
 local function mac_deserialize(txt)
   local list, lay, seen, pages = {}, {}, {}, nil
+  local lm = {}
   for line in (txt or ""):gmatch("[^\r\n]+") do
     local f = {}
     for w in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = w end
@@ -1764,6 +1777,7 @@ local function mac_deserialize(txt)
       end
     elseif f[1] == "L" and tonumber(f[2]) and tonumber(f[3]) then
       lay[math.floor(tonumber(f[2]))] = math.floor(tonumber(f[3]))
+      if f[4] == "n" or f[4] == "t" or f[4] == "g" then lm[math.floor(tonumber(f[2]))] = f[4] end
     elseif f[1] == "P" and tonumber(f[2]) then
       local k = math.floor(tonumber(f[2]))
       if k >= 1 and k <= H._PMAX then pages = pages or {}; pages[k] = mac_clean(f[3]) end
@@ -1773,15 +1787,17 @@ local function mac_deserialize(txt)
   for c, id in pairs(lay) do                       -- disposition : seulement des macros existantes
     if c < 1 or c > H._PMAX * 64 or not seen[id] then lay[c] = nil elseif c > maxc then maxc = c end
   end
+  for c in pairs(lm) do if not lay[c] then lm[c] = nil end end
   local had_p = pages ~= nil
   pages = pages or {}
   local np = #pages; for k in pairs(pages) do if k > np then np = k end end
   np = math.max(np, math.ceil(maxc / 64), 1)
   for k = 1, np do if not pages[k] or pages[k] == "" then pages[k] = (k == 1 and not had_p) and "Rushes" or ("Rushes " .. k) end end
-  return list, lay, pages, had_p
+  return list, lay, pages, had_p, lm
 end
-local function mac_apply(list, lay, pages)
+local function mac_apply(list, lay, pages, lm)
   macros, layout, mac_next_id = list, lay, 1
+  H._lmode = lm or {}
   if pages then H._pages = pages; H._pg = math.min(H._pg, #pages) end
   for _, m in ipairs(macros) do
     if m.id >= mac_next_id then mac_next_id = m.id + 1 end
@@ -1899,7 +1915,7 @@ do                                                  -- chargement au demarrage
   local model = reaper.GetExtState(MAC_EXT, "model")
   local txt = (model ~= "" and H._read(model)) or H._read("_autosave.txt") or ""
   if txt == "" then txt = reaper.GetExtState(MAC_EXT, "set") end
-  local list, lay, pages, had_p = mac_deserialize(txt)
+  local list, lay, pages, had_p, lm = mac_deserialize(txt)
   if not had_p then
     -- V3.27 : ancienne disposition (Rushes / Rushes 2) -> sous-pages b, c ; la page a = RC-505 en rushes (cree une fois)
     local nl = {}
@@ -1911,7 +1927,7 @@ do                                                  -- chargement au demarrage
     mac_apply(list, lay, pages)
     H._rc505()
   else
-    mac_apply(list, lay, pages)
+    mac_apply(list, lay, pages, lm)
   end
   if reaper.GetExtState(MAC_EXT, "fx_page") ~= "1" then H._fxpage(); reaper.SetExtState(MAC_EXT, "fx_page", "1", true) end
   mac_save()                                        -- publie tout de suite pour le Launchpad
@@ -2281,7 +2297,7 @@ function ED.create(text)
   reaper.SetExtState("NowUndo_Scn", "typing", "0", false)
   local m = mac_add(text, ok2 and nm or "", nil)
   if m and ED.cell then                                            -- V3.27 : cree par clic droit sur une case du Launchpad
-    if not layout[ED.cell] then layout[ED.cell] = m.id; mac_save() end
+    if not layout[ED.cell] then layout[ED.cell] = m.id; if H._lmode then H._lmode[ED.cell] = nil end; mac_save() end
     ED.cell = nil
   end
   if m then msg = m.err and ("Rush cree mais invalide : " .. m.err) or ("Rush cree : " .. mac_label(m)); msg_err = m.err ~= nil end
@@ -2308,7 +2324,7 @@ local function mac_delete()
   local keep = {}
   for _, m in ipairs(macros) do if not rm[m.id] then keep[#keep + 1] = m end end
   macros = keep
-  for c, id in pairs(layout) do if rm[id] then layout[c] = nil end end
+  for c, id in pairs(layout) do if rm[id] then layout[c] = nil; if H._lmode then H._lmode[c] = nil end end end
   msel, mcur, manchor = {}, 0, 0
   mac_save()
   msg = #ms .. " rush(es) supprime(s)."; msg_err = false
@@ -2332,7 +2348,7 @@ function ED.mcut()
   local keep = {}
   for _, m in ipairs(macros) do if not rm[m.id] then keep[#keep + 1] = m end end
   macros = keep
-  for c, id in pairs(layout) do if rm[id] then layout[c] = nil end end
+  for c, id in pairs(layout) do if rm[id] then layout[c] = nil; if H._lmode then H._lmode[c] = nil end end end
   msel, mcur, manchor = {}, 0, 0
   mac_save()
   msg = #H._mclip .. " rush(es) coupe(s) : Ctrl+V pour les coller."; msg_err = false
@@ -2532,11 +2548,25 @@ local function mac_active(m, targets)
   local t = {}
   for w in act:gmatch("%S+") do t[#t + 1] = (w:gsub("%*[%d%./]*$", "")) end
   if #t == 0 then return false end
-  if t[1] == "in" and #t > 1 and (t[2]:match("^e%d") or t[2] == "mute") then   -- 27 nov. : entree selectionnee (gmem 6062)
+  if t[1] == "in" and #t > 1 and (t[2]:match("^e%d") or t[2] == "mute" or t[2]:match("^aux%d")) then   -- 27 nov. : entree selectionnee (gmem 6062)
     targets = { 100 + math.max(1, math.floor(rd(6062) + .5)) }; table.remove(t, 1)
   elseif is_tgt(t[1]) and #t > 1 then                -- V3.27 : cible ecrite dans le rush (l2, g1, all...) : c'est elle qu'on verifie
     local tt = parse_target(t[1]); if not tt then return false end
     targets = tt; table.remove(t, 1)
+  end
+  -- 27 nov. : sends aux = MIROIR de l'etat reel (gmem 6100.. loopers, 6164.. entrees, 6228.. aux -> looper, publies par le Launchpad)
+  local axn = tonumber((t[1] or ""):match("^aux(%d)$")) or ((t[1] == "from") and tonumber((t[2] or ""):match("^aux(%d)$")))
+  if axn then
+    if m.all then targets = {}; for i = 1, NLOOP do targets[i] = i end end
+    local off = (t[1] ~= "from" and t[2] == "off") or (t[1] == "from" and t[3] == "off")
+    for _, i in ipairs(targets) do
+      local v
+      if t[1] == "from" then v = (i <= NLOOP) and rd(6228 + (i - 1) * 8 + axn - 1) or 0
+      elseif i > 100 then v = rd(6164 + (i - 101) * 8 + axn - 1)
+      else v = rd(6100 + (i - 1) * 8 + axn - 1) end
+      if (v > 0) == off then return false end
+    end
+    return #targets > 0
   end
   local key = split_key(t[1]:match("[^/]+") or "")
   if not key then return false end
@@ -2604,6 +2634,8 @@ H._mirror = function(m)
   if w[1] and is_tgt(w[1]) then table.remove(w, 1) end
   if inp and w[1] and w[1]:match("^mute") then return true end        -- mute d'une entree : suit la piste
   if w[1] == "d" or w[1] == "d*" then return true end  -- interrupteur A / D : suit le mode reel (allume = D)
+  if w[1] == "in" and w[2] and w[2]:match("^aux%d") then return true end   -- 27 nov. : send de l'entree selectionnee
+  if w[1] and (w[1]:match("^aux%d") or w[1] == "from") then return true end -- 27 nov. : sends aux : suit l'etat reel du send
   return w[1] ~= nil and w[1]:match("^e[1-4]") ~= nil
 end
 local mac_on_t, mac_on_s = 0, nil
@@ -2620,7 +2652,11 @@ local function mac_poll()
   if t - mac_on_t > 0.12 then                                      -- pads toggle du Launchpad : ON = plein feu, OFF = attenue
     mac_on_t = t
     local tg, ids = sel_targets(), {}
-    for _, m in ipairs(macros) do
+    local tcell, byid = {}, {}                                     -- 27 nov. : rushes poses en TOGGLE sur au moins une case
+    for _, m in ipairs(macros) do byid[m.id] = m end
+    for c, id in pairs(layout) do if byid[id] and H._cmode(c, byid[id]) == "t" then tcell[id] = true end end
+    for _, m0 in ipairs(macros) do
+      local m = (not m0.toggle and tcell[m0.id]) and H._as(m0, "t") or m0
       if m.toggle then
         local _, e = H._live_find(m.id)
         if H._mirror(m) then if mac_active(m, tg) then ids[#ids + 1] = m.id end
@@ -2643,8 +2679,9 @@ local function mac_poll()
     reaper.SetExtState(CAPEXT, "alive", string.format("%.3f", t), false)
   end
   if reaper.GetExtState(MAC_EXT, "rev") ~= mac_my_rev then       -- modifie ailleurs (Ctrl+clic sur un pad du Launchpad)
-    local list, lay, pages = mac_deserialize(reaper.GetExtState(MAC_EXT, "set"))
+    local list, lay, pages, _, lm = mac_deserialize(reaper.GetExtState(MAC_EXT, "set"))
     macros, layout = list, lay
+    H._lmode = lm
     H._pages = pages; H._pg = math.min(H._pg, #pages)
     mac_next_id = 1
     for _, m in ipairs(macros) do
@@ -2661,8 +2698,10 @@ local function mac_poll()
   reaper.SetExtState(CAPEXT, "mcr", "", false)
   for line in q:gmatch("[^\n]+") do
     local id, tg, ts, gst = line:match("^(%d+)\t([%d,]*)\t([%d%.]+)\t?(%a*)")
+    local cmode = line:match("^%d+\t[%d,]*\t[%d%.]+\t%a*\t([ntg])")   -- 27 nov. : mode de la case du Launchpad (n / t / g)
     if id and t - tonumber(ts) < 2 then
       local m = mac_find(tonumber(id))
+      if m and cmode then m = H._as(m, cmode) end
       if m then
         local targets = {}
         for n in tg:gmatch("%d+") do
@@ -2709,10 +2748,10 @@ local function mac_import()
   local f = io.open(file, "r")
   if not f then msg = "Lecture impossible"; msg_err = true; return end
   local txt = f:read("*a"); f:close()
-  local list, lay, pages = mac_deserialize(txt)
+  local list, lay, pages, _, lm = mac_deserialize(txt)
   if #list == 0 then msg = "Aucun rush dans ce fichier."; msg_err = true; return end
   if #macros > 0 and reaper.MB("Remplacer les " .. #macros .. " macros actuelles (et leur disposition) par les " .. #list .. " du fichier ?", "Dripsody - rushes", 4) ~= 6 then return end
-  mac_apply(list, lay, pages); mac_save()
+  mac_apply(list, lay, pages, lm); mac_save()
   last_export = file:match("([^/\\]+)$") or last_export
   msg = "Importe : " .. last_export .. "  (" .. #list .. " rushes)"; msg_err = false
 end
@@ -2783,8 +2822,8 @@ H._model_menu = function(x, y)
     local txt = H._read(cur)
     if not txt then msg = "Modele introuvable : " .. cur; msg_err = true; return end
     if reaper.MB("Remplacer les rushes actuels par le modele " .. cur .. " ?", "Dripsody - rushes", 4) ~= 6 then return end
-    local list, lay, pages = mac_deserialize(txt)
-    mac_apply(list, lay, pages); mac_save(); msg = "Modele recharge : " .. cur; msg_err = false
+    local list, lay, pages, _, lm = mac_deserialize(txt)
+    mac_apply(list, lay, pages, lm); mac_save(); msg = "Modele recharge : " .. cur; msg_err = false
   elseif k == 4 then
     reaper.SetExtState(MAC_EXT, "model", "", true); msg = "Aucun modele : on reprend la derniere seance."; msg_err = false
   end
@@ -2809,12 +2848,13 @@ H._pg_del = function()
   if #H._pages <= 1 then msg = "Il faut garder au moins une page."; msg_err = true; return end
   local k = H._pg
   if reaper.MB("Supprimer la page " .. H._pg_label(k) .. " ? Ses pads sont retires du Launchpad (les rushes restent dans la liste) ; les pages suivantes remontent d'une lettre.", "NowUndo - pages de rushes", 4) ~= 6 then return end
-  local nl = {}
+  local nl, nm = {}, {}
   for c, id in pairs(layout) do
     local pg = math.ceil(c / 64)
-    if pg < k then nl[c] = id elseif pg > k then nl[c - 64] = id end
+    local d = (pg < k) and c or ((pg > k) and c - 64 or nil)
+    if d then nl[d] = id; nm[d] = (H._lmode or {})[c] end
   end
-  layout = nl
+  layout = nl; H._lmode = nm
   table.remove(H._pages, k)
   H._pg = math.min(k, #H._pages); mac_save()
   msg = "Page supprimee."; msg_err = false

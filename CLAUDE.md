@@ -392,6 +392,22 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   sélectionner seule) et un rush d'usine disparaissait. Maintenant les copies sont retirées par identité ; au chargement, un id en double reçoit un id
   neuf (`mac_apply`). Test `tools/tdup.lua` (ancienne version : 6 échecs, nouvelle : OK).
 
+## 27 nov. : MODE PAR CASE du Launchpad (normal / toggle / gate) + toggles des sends = miroir de l'état réel
+
+- **Mode par case** (demandé : « utiliser plusieurs fois le même rush avec des comportements différents ») : 4e champ de la ligne `L case id [n|t|g]`
+  (`n` normal, `t` toggle, `g` gate ; absent = mode du rush). Launchpad : `LPF.macros_parse` → `VL.macros.lmode`, `VL.cell_mode(cell)`,
+  `VL.set_cell_mode(cell, md)` ; `VL.macros_layout_edit(fn(lay, lm))` garde les modes (le mode suit le rush déplacé / glissé) ; appui / relâchement /
+  état du pad selon le mode de la case (gate = allumé tant qu'on tient). **Clic droit sur un pad occupé de la page 4** = menu « Editer le rush | Mode du
+  rush (x) | Normal / Toggle / Gate sur ce pad » (case vide = nouveau rush, inchangé). **Barres** : à gauche = toggle, à droite = gate (fenêtre :
+  `VL.cell_band` ; web : `band=1,2g.1,3t` dans `web_meta`, classes CSS `band-t` / `band-g`) ; le vrai Launchpad n'affiche qu'une couleur.
+  `mcr` (Launchpad → Scenario) = `id\tcibles\ttemps\tgst\tmode\tcase` ; Scenario : `H._as(m, mode)` (le rush vu avec le mode de la case, proxy),
+  `H._cmode`, `H._lmode` (lu / écrit avec la disposition, suit la suppression d'une page) ; liste `on` = rushes toggle OU posés en toggle sur une case.
+  Limite : l'état toggle est par rush (pile `H._live` par id) : un même rush en toggle sur deux cases partage son état.
+- **Toggles des sends = miroir** (demandé : « si j'active l'aux 1 dans L1 par un rush et que je vais sur L2 le rush est toujours actif ») : `H._mirror`
+  inclut `aux1..aux4`, `from auxN`, `in auxN` ; `mac_active` lit l'état réel publié par le Launchpad (6100.. loopers, 6164.. entrées, 6228.. aux → looper)
+  sur la cible du moment (sélection) : pad allumé seulement si le send du looper sélectionné est ouvert ; un appui inverse l'état réel.
+  Tests `tools/tcellmode.lua` (Launchpad), `tools/taux_mirror.lua` (Scenario), `tools/tbands.js` (web, Playwright). Non testé dans REAPER.
+
 ## Ce qui a été fait (session de nov. 2026, résumé)
 
 - **JSFX** : V3.19 anti-clics ; V3.20 slicer précis, largeur Cloud = Stereo, Rec Density aléatoire, Auto-Replace par
