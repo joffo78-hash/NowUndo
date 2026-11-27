@@ -5503,13 +5503,15 @@ local HOLD = {
           local pad_s = 3 * s          -- marge intérieure
           gfx.set(c[1] / 255, c[2] / 255, c[3] / 255, 1)
           gfx.rect(x + pad_s, y + pad_s, CELL - pad_s * 2, CELL - pad_s * 2, 1)
-          local band = VL.cell_band(S.page, row, col)              -- 27 nov. : barre a gauche = toggle, a droite = gate
+          local band = VL.cell_band(S.page, row, col)              -- 27 nov. : triangle dans l'angle haut : bleu a gauche = toggle, violet a droite = gate
           if band then
-            local bw = math.max(3, math.floor(4 * s))
-            gfx.set(1, 1, 1, 0.85)
-            gfx.rect(band == "t" and (x + pad_s) or (x + CELL - pad_s - bw), y + pad_s, bw, CELL - pad_s * 2, 1)
-            gfx.set(0, 0, 0, 0.6)
-            gfx.rect(band == "t" and (x + pad_s + bw) or (x + CELL - pad_s - bw - 1), y + pad_s, 1, CELL - pad_s * 2, 1)
+            local ts = math.max(8, math.floor(CELL * 0.28))
+            local x0, y0, x1 = x + pad_s, y + pad_s, x + CELL - pad_s - 1
+            gfx.set(0, 0, 0, 0.7)                                  -- liseré sombre (lisible sur un pad clair)
+            if band == "t" then gfx.triangle(x0, y0, x0 + ts + 1, y0, x0, y0 + ts + 1)
+            else gfx.triangle(x1, y0, x1 - ts - 1, y0, x1, y0 + ts + 1) end
+            if band == "t" then gfx.set(0.25, 0.55, 1, 1); gfx.triangle(x0, y0, x0 + ts, y0, x0, y0 + ts)
+            else gfx.set(0.70, 0.35, 1, 1); gfx.triangle(x1, y0, x1 - ts, y0, x1, y0 + ts) end
           end
 
           local label = VL.pad_label(S.page, row, col)

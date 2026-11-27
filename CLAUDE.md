@@ -398,7 +398,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (`n` normal, `t` toggle, `g` gate ; absent = mode du rush). Launchpad : `LPF.macros_parse` → `VL.macros.lmode`, `VL.cell_mode(cell)`,
   `VL.set_cell_mode(cell, md)` ; `VL.macros_layout_edit(fn(lay, lm))` garde les modes (le mode suit le rush déplacé / glissé) ; appui / relâchement /
   état du pad selon le mode de la case (gate = allumé tant qu'on tient). **Clic droit sur un pad occupé de la page 4** = menu « Editer le rush | Mode du
-  rush (x) | Normal / Toggle / Gate sur ce pad » (case vide = nouveau rush, inchangé). **Barres** : à gauche = toggle, à droite = gate (fenêtre :
+  rush (x) | Normal / Toggle / Gate sur ce pad » (case vide = nouveau rush, inchangé). **Triangles** dans l'angle haut (27 nov., demandé) : bleu à gauche = toggle, violet à droite = gate (fenêtre :
   `VL.cell_band` ; web : `band=1,2g.1,3t` dans `web_meta`, classes CSS `band-t` / `band-g`) ; le vrai Launchpad n'affiche qu'une couleur.
   `mcr` (Launchpad → Scenario) = `id\tcibles\ttemps\tgst\tmode\tcase` ; Scenario : `H._as(m, mode)` (le rush vu avec le mode de la case, proxy),
   `H._cmode`, `H._lmode` (lu / écrit avec la disposition, suit la suppression d'une page) ; liste `on` = rushes toggle OU posés en toggle sur une case.
