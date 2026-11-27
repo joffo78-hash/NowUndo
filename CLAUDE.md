@@ -445,9 +445,9 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   plus de copie au REC (`VL.aux_copy_on_rec` / `LPF.aux_imposed` inutilisés). Les essais intermédiaires du 27 nov. ont été retirés.
 - **Le looper SÉLECTIONNÉ donne ses sends à ses entrées (27 nov., corrigé par l'utilisateur : « c'est pas à l'affectation, c'est le looper
   sélectionné qui donne son niveau d'aux »)** : `VL.aux_sel_give` : si le looper sélectionné a une boucle (ou un REC lancé), les entrées routées
-  vers lui prennent ses sends à l'identique (ouvert / fermé + niveau) **au moment de la sélection et chaque fois que ses sends changent**
+  vers lui prennent EXACTEMENT ses sends (ouvert / fermé + niveau ; les aux que le looper n’a pas sont enlevées, réouvrables à la main) **au moment de la sélection et chaque fois que ses sends changent**
   (signature `VL.AUX.give`) ; entre deux, les entrées restent réglables librement. (L'essai « à l'affectation » `aux_route_pickup` est retiré.)
-- `VL.BUILD = "27nov-15h15"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+- `VL.BUILD = "27nov-15h20"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)

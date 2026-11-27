@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-15h15"         -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-15h20"         -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -945,7 +945,7 @@ function VL.aux_sel_give(tracks)
       local own = LPF.aux_own(k, itr)
       for a = 1, LPF.aux_count() do
         local x = vals[a]
-        if x.vol or x.on then own[a] = { on = x.on, vol = x.vol or own[a].vol } end
+        own[a] = { on = x.on, vol = x.vol or own[a].vol }      -- les aux que le looper n'a pas sont enlevees (reouvrables a la main)
       end
       LPF.aux_own_save(k, itr)
     end
