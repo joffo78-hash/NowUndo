@@ -1754,8 +1754,7 @@ end
 -- 27 nov. : mode PAR CASE du Launchpad (4e champ de la ligne L : n = normal, t = toggle, g = gate ; absent = mode du rush)
 H._cmode = function(cell, m)                       -- mode effectif d'une case : "n" / "t" / "g"
   local x = cell and (H._lmode or {})[cell]
-  if x then return x end
-  return (m and m.gate) and "g" or ((m and m.toggle) and "t" or "n")
+  return x or "n"                                    -- 27 nov. : plus de mode global du rush : un pad sans mode = normal
 end
 H._as = function(m, mode, cell)                    -- le rush vu depuis une case : son mode (n / t / g) et son propre etat (lid = id@case)
   if (not mode or mode == "") and not cell then return m end
@@ -1912,6 +1911,18 @@ end
 -- Data/NowUndo_Macros/ (vide = aucun : on reprend la derniere seance, _autosave.txt). Le FICHIER est lu en priorite :
 -- la memoire de REAPER peut ne relire qu'une partie d'un texte long. Le modele n'est jamais reecrit automatiquement.
 H._read = function(fn) local f = io.open(MDIR .. fn, "r"); if not f then return nil end; local t = f:read("*a"); f:close(); return t end
+-- 27 nov. : le mode toggle / gate n'est plus un reglage du rush mais du PAD : une fois, le mode des rushes deja poses est recopie
+-- sur leurs pads (rien ne change pour eux) ; un pad sans mode = normal. (Le drapeau du rush ne sert plus qu'au MIDI du rush.)
+H._lmode_mig = function()
+  H._lmode = H._lmode or {}
+  local byid, n = {}, 0
+  for _, m in ipairs(macros) do byid[m.id] = m end
+  for c, id in pairs(layout) do
+    local m = byid[id]
+    if m and not H._lmode[c] and (m.toggle or m.gate) then H._lmode[c] = m.gate and "g" or "t"; n = n + 1 end
+  end
+  if n > 0 then mac_save() end
+end
 do                                                  -- chargement au demarrage
   local model = reaper.GetExtState(MAC_EXT, "model")
   local txt = (model ~= "" and H._read(model)) or H._read("_autosave.txt") or ""
@@ -1931,6 +1942,7 @@ do                                                  -- chargement au demarrage
     mac_apply(list, lay, pages, lm)
   end
   if reaper.GetExtState(MAC_EXT, "fx_page") ~= "1" then H._fxpage(); reaper.SetExtState(MAC_EXT, "fx_page", "1", true) end
+  H._lmode_mig()
   mac_save()                                        -- publie tout de suite pour le Launchpad
 end
 H._msave = mac_save
@@ -3196,26 +3208,15 @@ local function mac_draw(W, Hh, down)
         gfx.set(((m.color >> 16) & 255) / 255, ((m.color >> 8) & 255) / 255, (m.color & 255) / 255, 1)
         gfx.rect(x0 + 26, y + 3, 14, RH - 6)
         gfx.set(1, 1, 1, 0.35); gfx.rect(x0 + 26, y + 3, 14, RH - 6, 0)
-        if m.toggle then gfx.set(0.10, 0.60, 0.70, 1) else gfx.set(0.20, 0.20, 0.25, 1) end
+        -- 27 nov. : plus de cases T / G ici : le mode normal / toggle / gate se regle PAR PAD (clic droit sur le pad du Launchpad)
+        if m.all then gfx.set(0.75, 0.45, 0.10, 1) else gfx.set(0.20, 0.20, 0.25, 1) end      -- case A : mode ALL (les 8 loopers)
         gfx.rect(x0 + 44, y + 3, 18, RH - 6)
         gfx.set(1, 1, 1, 0.30); gfx.rect(x0 + 44, y + 3, 18, RH - 6, 0)
         gfx.setfont(2, "Arial", 12, 'b')
-        if m.toggle then gfx.set(1, 1, 1, 1) else gfx.set(1, 1, 1, 0.35) end
-        gfx.x, gfx.y = x0 + 49, y + 5; gfx.drawstr("T")
-        if m.gate then gfx.set(0.55, 0.30, 0.70, 1) else gfx.set(0.20, 0.20, 0.25, 1) end      -- case G : mode GATE (appui/relachement)
-        gfx.rect(x0 + 64, y + 3, 18, RH - 6)
-        gfx.set(1, 1, 1, 0.30); gfx.rect(x0 + 64, y + 3, 18, RH - 6, 0)
-        gfx.setfont(2, "Arial", 12, 'b')
-        if m.gate then gfx.set(1, 1, 1, 1) else gfx.set(1, 1, 1, 0.35) end
-        gfx.x, gfx.y = x0 + 69, y + 5; gfx.drawstr("G")
-        if m.all then gfx.set(0.75, 0.45, 0.10, 1) else gfx.set(0.20, 0.20, 0.25, 1) end      -- case A : mode ALL (les 8 loopers)
-        gfx.rect(x0 + 84, y + 3, 18, RH - 6)
-        gfx.set(1, 1, 1, 0.30); gfx.rect(x0 + 84, y + 3, 18, RH - 6, 0)
-        gfx.setfont(2, "Arial", 12, 'b')
         if m.all then gfx.set(1, 1, 1, 1) else gfx.set(1, 1, 1, 0.35) end
-        gfx.x, gfx.y = x0 + 89, y + 5; gfx.drawstr("A")
+        gfx.x, gfx.y = x0 + 49, y + 5; gfx.drawstr("A")
         -- triangle de lecture : lance cette macro sur le looper / groupe selectionne
-        local px = x0 + 106
+        local px = x0 + 66
         local hov = mx >= px and mx < px + 20 and my >= y and my < y + RH
         local fl = (mflash[m.id] or 0) > now_t
         if fl then gfx.set(0.35, 0.85, 0.45, 1) elseif hov then gfx.set(0.20, 0.60, 0.30, 1) else gfx.set(0.14, 0.34, 0.20, 1) end
@@ -3226,8 +3227,8 @@ local function mac_draw(W, Hh, down)
         gfx.setfont(2, "Arial", 13, 'b')
         if m.err then gfx.set(1, 0.35, 0.35, 1)
         elseif (m.name or "") == "" or m.name:match("^Macro %d+$") then gfx.set(1, 1, 1, 0.65) else gfx.set(1, 1, 1, 0.97) end
-        gfx.x, gfx.y = x0 + 132, y + 5
-        gfx.drawstr(fit(mac_label(m), cw - 132 - 104))
+        gfx.x, gfx.y = x0 + 92, y + 5
+        gfx.drawstr(fit(mac_label(m), cw - 92 - 104))
         if (m.midi or "") ~= "" or H._learn == m.id then                 -- V3.27 : rush appris en MIDI
           gfx.setfont(2, "Arial", 11, 'b')
           if H._learn == m.id then gfx.set(1, 0.45, 0.2, (now_t * 3) % 1 < 0.5 and 1 or 0.3) else gfx.set(1, 0.55, 0.95, 1) end
@@ -3257,23 +3258,13 @@ local function mac_draw(W, Hh, down)
 
         if click and mx >= x0 and mx < x0 + cw and my >= y and my < y + RH then
           local t = reaper.time_precise()
-          if mx >= x0 + 26 and mx < x0 + 102 and H._ro(msel[m.id] and sel_ids() or { m }) then
-            -- rush d'usine : couleur / T / G / A verrouilles (message affiche par H._ro)
+          if mx >= x0 + 26 and mx < x0 + 62 and H._ro(msel[m.id] and sel_ids() or { m }) then
+            -- rush d'usine : couleur / A verrouilles (message affiche par H._ro)
           elseif mx >= x0 + 26 and mx < x0 + 40 then                     -- pastille : couleur suivante de la palette
             local k = 0
             for q, col in ipairs(PALETTE) do if col == m.color then k = q end end
             m.color = PALETTE[k % #PALETTE + 1]; mac_save()
-          elseif mx >= x0 + 44 and mx < x0 + 62 then                     -- case T : mode toggle (toute la selection si la macro en fait partie)
-            local nv = not m.toggle
-            if msel[m.id] then for _, o in ipairs(sel_ids()) do o.toggle = nv; mac_check(o) end else m.toggle = nv; mac_check(m) end
-            mac_save()
-            msg = nv and "Mode TOGGLE : on/off s'inversent, les valeurs basculent enregistree <-> defaut." or "Mode TOGGLE retire."; msg_err = false
-          elseif mx >= x0 + 64 and mx < x0 + 82 then                     -- case G : mode GATE
-            local nv = not m.gate
-            if msel[m.id] then for _, o in ipairs(sel_ids()) do o.gate = nv end else m.gate = nv end
-            mac_save()
-            msg = nv and "Mode GATE : le pad Launchpad active a l'appui et desactive au relachement." or "Mode GATE retire."; msg_err = false
-          elseif mx >= x0 + 84 and mx < x0 + 102 then                    -- case A : mode ALL
+          elseif mx >= x0 + 44 and mx < x0 + 62 then                     -- case A : mode ALL
             local nv = not m.all
             if msel[m.id] then for _, o in ipairs(sel_ids()) do o.all = nv end else m.all = nv end
             mac_save()

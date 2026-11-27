@@ -47,10 +47,10 @@ EXT["NowUndo_Macros/set"] = table.concat({ "NOWUNDO_MACROS 1",
   "L\t1\t5", "L\t2\t5\tg", "L\t3\t5\tt", "L\t4\t6\tn", "P\t1\tRushes" }, "\n")
 EXT["NowUndo_Macros/rev"] = "1"
 CLOCK = CLOCK + 1; VL.macros_poll(CLOCK)
-check("mode c1 (celui du rush 5 = normal)", VL.cell_mode(1), "n")
+check("mode c1 (pas de mode = normal)", VL.cell_mode(1), "n")
 check("mode c2 (gate sur la case)", VL.cell_mode(2), "g")
 check("mode c3 (toggle sur la case)", VL.cell_mode(3), "t")
-check("mode c4 (rush toggle mis en normal)", VL.cell_mode(4), "n")
+check("mode c4 (normal)", VL.cell_mode(4), "n")
 local function mcr() local q = EXT["NowUndo_Scn/mcr"] or ""; EXT["NowUndo_Scn/mcr"] = ""; return (q:gsub("\t%d+%.%d%d%d\t", "\tT\t"):gsub("\n", " | ")) end
 VL.macro_press(1); check("appui c1", mcr(), "5\t1\tT\t\tn\t1 | ")
 VL.macro_press(2); check("appui c2 (gate : on)", mcr(), "5\t1\tT\ton\tg\t2 | ")

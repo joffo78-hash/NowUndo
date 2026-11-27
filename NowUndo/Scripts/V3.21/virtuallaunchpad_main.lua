@@ -3400,9 +3400,7 @@ end
 function VL.cell_mode(cell)
   local m = VL.macro_at(cell)
   if not m then return nil end
-  local x = (VL.macros.lmode or {})[cell]
-  if x then return x end
-  return m.gate and "g" or (m.toggle and "t" or "n")
+  return (VL.macros.lmode or {})[cell] or "n"          -- 27 nov. : plus de mode global du rush (le Scenario a recopie l'ancien sur les pads)
 end
 function VL.set_cell_mode(cell, md)                  -- md = "n" / "t" / "g", ou nil = mode du rush
   VL.macros_layout_edit(function(lay, lm) if lay[cell] then lm[cell] = md end end)
@@ -5347,14 +5345,12 @@ local HOLD = {
         local edit = true
         local m = VL.macro_at(cell)
         if m then                                    -- 27 nov. : case occupee = menu : editer le rush / mode de CETTE case
-          local own = m.gate and "Gate" or (m.toggle and "Toggle" or "Normal")
-          local cm = (VL.macros.lmode or {})[cell]
+          local cm = VL.cell_mode(cell)
           local function ck(x) return (cm == x) and "!" or "" end
           gfx.x, gfx.y = gfx.mouse_x, gfx.mouse_y
-          local ch = gfx.showmenu("Editer le rush|" .. ((cm == nil) and "!" or "") .. "Mode du rush (" .. own .. ")|"
-                                  .. ck("n") .. "Normal sur ce pad|" .. ck("t") .. "Toggle sur ce pad|" .. ck("g") .. "Gate sur ce pad")
+          local ch = gfx.showmenu("Editer le rush|" .. ck("n") .. "Normal|" .. ck("t") .. "Toggle|" .. ck("g") .. "Gate")
           edit = (ch == 1)
-          if ch >= 2 and ch <= 5 then VL.set_cell_mode(cell, ({ false, "n", "t", "g" })[ch - 1] or nil) end
+          if ch >= 2 and ch <= 4 then VL.set_cell_mode(cell, ({ "n", "t", "g" })[ch - 1]) end
         end
         if edit then
           reaper.SetExtState("NowUndo_Scn", "lp_new", string.format("%d\t%d\t%.3f", cell, VL.macros.layout[cell] or 0, reaper.time_precise()), false)

@@ -409,6 +409,10 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   ses autres pads ; occupant d'une case visée → 1re case libre de la sous-page). **Un état par pad** : le proxy `H._as(m, mode, case)` porte `lid = id@case`,
   la pile `H._live` est indexée par `lid` (sinon id = déclenchement MIDI / scénario) ; liste `on` = jetons `id@case` (pads) et `id` (rush) ; le Launchpad
   allume un pad toggle si `on[id@case]` ou `on[id]`. Scenario : « LP c1.3+2 » (1re case + nombre d'autres pads), vérification du dépôt = un pad de plus.
+  **Plus de mode global du rush (27 nov., demandé)** : les cases **T / G** de la liste du Scenario sont **retirées** (reste A ; ▶ en x0+66, nom en x0+92) ;
+  le mode se règle **seulement par pad** (clic droit : Éditer le rush | Normal | Toggle | Gate) ; **pad sans mode = normal** (`VL.cell_mode`, `H._cmode`).
+  Migration une fois au démarrage du Scenario (`H._lmode_mig`) : le mode des rushes déjà posés est recopié sur leurs pads. Le drapeau toggle / gate du rush
+  ne sert plus qu'au **MIDI du rush** (pas de case). Test `tools/ttogpad.lua`.
 - **Toggles des sends = miroir** (demandé : « si j'active l'aux 1 dans L1 par un rush et que je vais sur L2 le rush est toujours actif ») : `H._mirror`
   inclut `aux1..aux4`, `from auxN`, `in auxN` ; `mac_active` lit l'état réel publié par le Launchpad (6100.. loopers, 6164.. entrées, 6228.. aux → looper)
   sur la cible du moment (sélection) : pad allumé seulement si le send du looper sélectionné est ouvert ; un appui inverse l'état réel.
