@@ -78,39 +78,33 @@ lstate(1, 7, 0); run(0.2); lstate(1, 1, 0); run(0.2)
 check("REC L1 : L1 -> aux2 copie de IN1 (0.5)", st(LP(1), 2), "OUV0.50")
 check("REC L1 : L1 -> aux3 ferme (IN1 aux3 ferme)", st(LP(1), 3), "fer1.00")
 lstate(1, 2, 96000); run(0.2)
--- 4) le looper avec boucle impose ses sends a IN1 : on change le send propre de IN1, L1 l'impose toujours
+-- 4) 27 nov. : la boucle est posee -> les sends de L1 ne bougent plus ; l'entree garde les siens (plus d'imposition)
 cmd("aux_in_1_2_200"); run(0.3)
-check("27 nov. : boucle qui tourne : IN1 aux2 0.2 ne baisse pas L1 (0.5 impose)", st(IN(1), 2) .. st(LP(1), 2), "OUV0.50OUV0.50")
+check("boucle posee : IN1 aux2 0.2 -> IN1 0.2, L1 reste 0.5", st(IN(1), 2) .. st(LP(1), 2), "OUV0.20OUV0.50")
+cmd("aux_in_1_2_off"); run(0.3)
+check("boucle posee : IN1 ferme -> L1 garde son send", st(IN(1), 2) .. st(LP(1), 2), "fer0.20OUV0.50")
 cmd("aux_l_1_2_800"); run(0.3)
-check("l1 aux2 0.8 : L1 change -> IN1 suit (0.8)", st(IN(1), 2), "OUV0.80")
--- 5) reglage manuel de l'entree pendant qu'elle est imposee : remis en place
-snd(IN(1), AUX(2)).D_VOL = 0.1; run(0.3)
-check("reglage manuel de IN1 impose : remis a 0.8", st(IN(1), 2), "OUV0.80")
--- 6) in mute : sends de l'entree coupes, remis a la sortie du mute
+check("l1 aux2 0.8 : IN1 ne suit pas", st(IN(1), 2) .. st(LP(1), 2), "fer0.20OUV0.80")
+-- 5) in mute : coupe les sends de l'entree, remis ensuite
+cmd("aux_in_1_2_200"); run(0.3)
 IN(1).info.B_MAINSEND = 0; run(0.3)
-check("in mute IN1 : aux2 ferme", st(IN(1), 2), "fer0.80")
+check("in mute IN1 : aux2 ferme", st(IN(1), 2), "fer0.20")
 IN(1).info.B_MAINSEND = 1; run(0.3)
-check("fin du in mute : aux2 rouvert (impose 0.8)", st(IN(1), 2), "OUV0.80")
--- 7) looper vide : IN1 retrouve son send propre (0.2)
-lstate(1, 0, 0); run(0.3)
-check("L1 vide : IN1 retrouve son send propre (0.2)", st(IN(1), 2), "OUV0.20")
--- 8) reglage manuel de l'entree libre = devient son reglage propre
-snd(IN(1), AUX(2)).D_VOL = 0.33; run(0.3)
-local _, own = IN(1).str["P_EXT:nowundo_aux_own"] ~= nil, IN(1).str["P_EXT:nowundo_aux_own"] or ""
-check("reglage manuel de IN1 libre : memorise (0.33)", tostring(own:match("^%d:[%d%.]+ 1:0%.33") ~= nil), "true")
--- 9) l'overdub ne change rien
-lstate(2, 1, 0); run(0.2); lstate(2, 2, 96000); run(0.2)       -- L2 : REC (IN1 aux2 0.33 ; IN2 rien) -> L2 aux2 0.33
-check("REC L2 : plus grand niveau des entrees (IN1 0.33)", st(LP(2), 2), "OUV0.33")
-cmd("aux_in_2_2_900"); run(0.2)
-lstate(2, 3, 96000); run(0.2); lstate(2, 2, 96000); run(0.2)    -- overdub
-check("overdub L2 : sends gardes (27 nov. : IN2 0.9 recopie sur L2)", st(LP(2), 2), "OUV0.90")
--- 10) priorite : IN1 alimente L1 (boucle, aux2 0.5) et L2 (boucle, aux2 0.33) ; L2 selectionne -> 0.33 ; L1 en overdub -> 0.5
-lstate(1, 2, 96000); cmd("aux_l_1_2_500"); S.sel_looper = 2; run(0.3)
-check("IN1 -> 2 loopers (27 nov. : niveau recopie)", st(IN(1), 2), "OUV0.90")
-lstate(1, 3, 96000); run(0.3)
-check("... mais le looper en overdub (L1) passe devant", st(IN(1), 2), "OUV0.50")
-lstate(1, 2, 96000); S.sel_looper = 5; run(0.3)
-check("... aucun selectionne (27 nov. : niveau recopie)", st(IN(1), 2), "OUV0.90")
+check("fin du in mute : aux2 rouvert", st(IN(1), 2), "OUV0.20")
+-- 6) avant la sortie du 1er REC : le looper SUIT ses sources en continu
+lstate(2, 0, 0); run(0.3)                                        -- L2 vide, alimente par IN1 (0.2) et IN2 (rien)
+check("L2 vide : suit IN1 (0.2)", st(LP(2), 2), "OUV0.20")
+cmd("aux_in_2_2_900"); run(0.3)
+check("L2 vide : IN2 0.9 -> plus grand niveau (0.9)", st(LP(2), 2), "OUV0.90")
+lstate(2, 1, 0); cmd("aux_in_2_2_off"); run(0.3)
+check("L2 en 1er REC : IN2 ferme -> L2 revient a IN1 (0.2)", st(LP(2), 2), "OUV0.20")
+lstate(2, 2, 96000); run(0.2); cmd("aux_in_1_2_off"); run(0.3)
+check("L2 sorti du 1er REC : ne suit plus (reste 0.2)", st(LP(2), 2), "OUV0.20")
+lstate(2, 3, 96000); cmd("aux_in_1_2_700"); run(0.3); lstate(2, 2, 96000); run(0.2)
+check("overdub : ne change rien", st(LP(2), 2), "OUV0.20")
+-- 7) un looper route vers un looper vide compte comme source
+lstate(4, 0, 0); S.routing.l_l[1][4] = true; run(0.3)
+check("L1 -> L4 (vide) : L4 prend le send de L1 (0.8)", st(LP(4), 2), "OUV0.80")
 -- 11) aux -> looper, et garde-fou du feedback
 cmd("auxrx_3_4_on"); run(0.3)
 check("l3 from aux4 : aux4 -> L3 ouvert", (function() local s = snd(AUX(4), LP(3)) return s and (s.B_MUTE == 0 and "OUV" or "fer") or "-" end)(), "OUV")

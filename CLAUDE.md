@@ -436,11 +436,14 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (entrée : son réglage propre ; looper : gmem 6100..). `VL.aux_pad_apply`, `VL.aux_sel_cmd`.
 - Commandes `NowUndo_VLcmd/q` : `topin_<on|off|tog>`, `auxsel_<a>_<on|off|tog>`. MIDI Learn : `act:top_in` (onglet Pages), `act:auxsel_1..4`
   (Output). Rush : **`inputs`** / `inputs on` / `inputs off` (toggle = miroir de gmem 6063), palette « Groupes / pages ».
-- **Send d'une entrée recopié sur ses loopers (27 nov., demandé : « pas de décalage entre ma pré-écoute et la restitution du looper »)** :
-  ouvrir / fermer / régler un send d'entrée (pad C5-C8 en mode IN, rush `in aux2`, `aux_in_…`) fait la même chose sur les loopers qui
-  reçoivent cette entrée (`S.routing.in_l`, dans `VL.aux_cmd`), sauf si l'aux revient déjà dans ce looper (feedback). L'imposition
-  looper → entrée reste (elle retombe alors sur le même réglage). **Looper avec une boucle qui tourne (demandé : « sinon je perds l'effet »)** :
-  l'entrée peut seulement OUVRIR son send ou le MONTER (plus grand des deux niveaux), jamais le fermer ni le baisser ; looper vide ou en 1er REC = suit tout.
+- **RÈGLE DES SENDS (27 nov., version finale demandée : « seulement avant la sortie du premier rec les input ou les loopers qui entrent
+  définissent l'état des aux du recorder »)** : tant qu'un looper n'a pas de boucle (vide, attente 7, 1er REC 1), ses sends vers les aux
+  **suivent en continu** ses sources (`VL.aux_follow_src` : entrées routées = leur réglage propre, in mute ignoré ; loopers routés vers lui
+  `S.routing.l_l[src][dst]` = leur send ; plus grand niveau ouvert par aux, aucune source ouverte = fermé ; sans aucune source routée = rien
+  touché). Dès la sortie du 1er REC : **figés** (overdub, réglage des entrées : rien ne change ; réglage à la main du looper possible).
+  **Plus d'imposition looper → entrée** (`LPF.aux_imposed` n'est plus appelé) et plus de copie au passage en REC (`VL.aux_copy_on_rec` inutilisé) :
+  chaque entrée garde ses propres sends (in mute les coupe toujours). Les essais intermédiaires du 27 nov. (réglage explicite prioritaire,
+  recopie entrée → looper) ont été retirés.
 - `VL.BUILD = "27nov-B1in"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 

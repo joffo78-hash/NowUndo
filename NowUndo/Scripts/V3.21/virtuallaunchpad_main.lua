@@ -883,16 +883,51 @@ function VL.aux_copy_on_rec(i, tracks)
   log("info", "L%d REC : sends des entrees copies (%s)", i, #names > 0 and table.concat(names, " ") or "aucun")
 end
 
+-- 27 nov. : sends d'un looper qui n'a pas encore de boucle = ceux de ses sources (plus grand niveau ouvert par aux ; aucune source
+-- ouverte = ferme). Sources : entrees routees (reglage propre, le « in mute » ne compte pas) et loopers routes vers lui (send reel).
+-- Sans aucune source : on ne touche a rien (reglage a la main garde).
+function VL.aux_follow_src(i, tracks)
+  local ltr = tracks.loopers[i]
+  local ins, lps = {}, {}
+  for k = 1, NIN do if S.routing.in_l[k][i] and tracks.inputs[k] then ins[#ins + 1] = k end end
+  for j = 1, NLOOP do if j ~= i and S.routing.l_l[j] and S.routing.l_l[j][i] and tracks.loopers[j] then lps[#lps + 1] = j end end
+  if #ins == 0 and #lps == 0 then return end
+  for a = 1, LPF.aux_count() do
+    local aux, best = LPF.aux_track(a), nil
+    if aux and not LPF.aux_get(aux, ltr) then             -- pas si l'aux revient dans ce looper (feedback)
+      for _, k in ipairs(ins) do
+        local o = LPF.aux_own(k, tracks.inputs[k])[a]
+        if o and o.on and (not best or o.vol > best) then best = o.vol end
+      end
+      for _, j in ipairs(lps) do
+        local w = VL.AUX.w["l" .. j .. ":" .. a]
+        local o, v = LPF.aux_get(tracks.loopers[j], aux)
+        if w then o, v = w.open, w.vol end
+        if o and v and (not best or v > best) then best = v end
+      end
+      local key = "l" .. i .. ":" .. a
+      local w = VL.AUX.w[key]
+      local co, cv = LPF.aux_get(ltr, aux)
+      if w then co, cv = w.open, w.vol end
+      local want_on = best ~= nil
+      if co ~= want_on or (want_on and math.abs((cv or 0) - best) > 1e-4) then
+        if want_on or cv then LPF.aux_apply(ltr, aux, want_on, best or cv or 1, key) end
+      end
+    end
+  end
+end
+
 -- coeur : applique les regles a toutes les entrees (appele en continu par VL.tick et a chaque changement de routing)
 function VL.update_aux_follow()
   if VL.config.follow_aux_sends == false then return end
   if not (reaper and reaper.CountTracks) or VL.mirror_mode then return end
   local tracks = VL.resolve_tracks(false)
   local A = VL.AUX
-  -- 1) copie au REC (transition vers l'etat 1 = REC ; le 1er passage au demarrage ne compte pas)
+  -- 1) 27 nov. (demande de l'utilisateur) : tant que le 1er REC n'est pas sorti (looper vide, attente, 1er REC), les sends du
+  --    looper vers les aux SUIVENT ses sources (entrees et loopers routes vers lui) ; une fois la boucle posee, ils ne bougent plus
   for i = 1, NLOOP do
     local st = S.loopers[i] and S.loopers[i].state
-    if st == 1 and A.prev[i] ~= nil and A.prev[i] ~= 1 then VL.aux_copy_on_rec(i, tracks) end
+    if tracks.loopers[i] and (st == 1 or st == 7 or not LPF.aux_has_loop(i)) then VL.aux_follow_src(i, tracks) end
     A.prev[i] = st
   end
   -- 2) entrees : in mute > impose par un looper avec boucle > sends propres
@@ -901,7 +936,7 @@ function VL.update_aux_follow()
     if tr then
       local own = LPF.aux_own(k, tr)
       local cut = reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND") == 0
-      local imp = LPF.aux_imposed(k, tracks)
+      local imp = nil                                   -- 27 nov. : plus d'imposition looper -> entree (chaque entree garde ses sends)
       for a = 1, LPF.aux_count() do
         local aux = LPF.aux_track(a)
         if aux then
@@ -999,20 +1034,7 @@ function VL.aux_cmd(name)
       if lvl then if lvl > 0 then o.vol = lvl / 1000; o.on = true else o.on = false end
       elseif v == "on" then o.on = true elseif v == "off" then o.on = false elseif v == "tog" then o.on = not o.on end
       LPF.aux_own_save(n, tracks.inputs[n])
-      -- 27 nov. : le send d'une entree est recopie sur les loopers qui recoivent cette entree (pre-ecoute = restitution du looper)
-      for i = 1, NLOOP do
-        local ltr = tracks.loopers[i]
-        if S.routing.in_l[n][i] and ltr and not LPF.aux_get(aux, ltr) then
-          if not LPF.aux_has_loop(i) or LPF.aux_recording(i) and (S.loopers[i].state == 1) then
-            LPF.aux_apply(ltr, aux, o.on, o.vol, "l" .. i .. ":" .. a)       -- looper vide / 1er REC : il suit l'entree
-          elseif o.on then                                                   -- boucle qui tourne : on peut ouvrir, jamais fermer
-            local lo, lv = LPF.aux_get(ltr, aux)
-            LPF.aux_apply(ltr, aux, true, (lo and lv) and math.max(lv, o.vol) or o.vol, "l" .. i .. ":" .. a)
-          end
-        end
-      end
-      log("info", "IN%d -> aux%d : %s%s", n, a, o.on and string.format("%.2f", o.vol) or "ferme",
-          LPF.aux_imposed(n, tracks) and " (impose par un looper pour l'instant)" or "")
+      log("info", "IN%d -> aux%d : %s", n, a, o.on and string.format("%.2f", o.vol) or "ferme")
       VL.update_aux_follow()
     end
     return true

@@ -111,15 +111,11 @@ check("IN1 in mute : aux ferme (in mute coupe tout)", st(IN(1), 4), "-")
 tap(0, 3); cmd("auxsel_4_on"); run(0.3)
 check("auxsel_4_on : IN3 + IN5 (groupe) -> aux4", st(IN(3), 4) .. st(IN(5), 4), "OUV1.00OUV1.00")
 print(fails == 0 and "TOUT OK" or (fails .. " ECHEC(S)"))
--- 27 nov. : le send d'une entree est recopie sur les loopers qui la recoivent
+-- 27 nov. : looper vide alimente par IN3 : il suit le send de IN3 ; apres la sortie du 1er REC il ne bouge plus
 S.routing.in_l[3][2] = true
-local b2 = 1000 + 1 * 600; GM[b2 + 2] = 2; GM[b2 + 46] = 96000
-run(0.3)
+local b2 = 1000 + 1 * 600; GM[b2 + 2] = 0; GM[b2 + 46] = 0
 cmd("topin_on"); tap(0, 3); cmd("auxsel_1_on"); run(0.3)
-check("IN3 -> L2 : send 1 ouvert sur IN3 et sur L2", st(IN(3), 1) .. st(LP(2), 1), "OUV1.00OUV1.00")
-cmd("auxsel_1_off"); run(0.3)
-check("boucle qui tourne : fermer l'entree garde le send du looper", st(LP(2), 1), "OUV1.00")
-GM[b2 + 46] = 0; GM[b2 + 2] = 0; run(0.3)
-cmd("auxsel_2_on"); run(0.3); cmd("auxsel_2_off"); run(0.3)
-check("looper vide : il suit l'entree (ouvre puis ferme)", st(IN(3), 2) .. st(LP(2), 2), "fer1.00fer1.00")
+check("L2 vide : suit IN3 -> aux1", st(IN(3), 1) .. st(LP(2), 1), "OUV1.00OUV1.00")
+GM[b2 + 2] = 2; GM[b2 + 46] = 96000; run(0.3); cmd("auxsel_1_off"); run(0.3)
+check("boucle posee : IN3 ferme, L2 garde", st(IN(3), 1) .. st(LP(2), 1), "fer1.00OUV1.00")
 print(fails == 0 and "TOUT OK (2)" or (fails .. " ECHEC(S)"))
