@@ -912,12 +912,7 @@ function VL.update_aux_follow()
             own[a] = { on = o, vol = v or own[a].vol }   -- reglage manuel dans REAPER pendant que l'entree est libre : devient le sien
             LPF.aux_own_save(k, tr)
           end
-          A.ovr = A.ovr or {}
-          A.impv = A.impv or {}
-          local iv = imp and ((imp[a].on and 1 or -1) * imp[a].vol) or nil
-          if not imp or (A.impv[key] ~= nil and iv ~= nil and math.abs(A.impv[key] - iv) > 1e-4) then A.ovr[key] = nil end   -- le looper change ses sends (ou n'impose plus) : il reprend la main
-          A.impv[key] = iv
-          local base = (imp and not A.ovr[key] and imp[a]) or own[a]   -- 27 nov. : reglage explicite de l'entree = passe avant l'imposition
+          local base = (imp and imp[a]) or own[a]
           local want = cut and { on = false, vol = base.vol } or base   -- in mute : ferme, le niveau voulu reste pret pour la reouverture
           local wvol = (want.on or cut) and want.vol or own[a].vol
           if A.ramps[key] then
@@ -1004,7 +999,6 @@ function VL.aux_cmd(name)
       if lvl then if lvl > 0 then o.vol = lvl / 1000; o.on = true else o.on = false end
       elseif v == "on" then o.on = true elseif v == "off" then o.on = false elseif v == "tog" then o.on = not o.on end
       LPF.aux_own_save(n, tracks.inputs[n])
-      VL.AUX.ovr = VL.AUX.ovr or {}; VL.AUX.ovr["in" .. n .. ":" .. a] = true   -- 27 nov. : l'entree gagne meme si un looper impose
       log("info", "IN%d -> aux%d : %s%s", n, a, o.on and string.format("%.2f", o.vol) or "ferme",
           LPF.aux_imposed(n, tracks) and " (impose par un looper pour l'instant)" or "")
       VL.update_aux_follow()

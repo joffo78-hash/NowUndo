@@ -111,12 +111,3 @@ check("IN1 in mute : aux ferme (in mute coupe tout)", st(IN(1), 4), "-")
 tap(0, 3); cmd("auxsel_4_on"); run(0.3)
 check("auxsel_4_on : IN3 + IN5 (groupe) -> aux4", st(IN(3), 4) .. st(IN(5), 4), "OUV1.00OUV1.00")
 print(fails == 0 and "TOUT OK" or (fails .. " ECHEC(S)"))
--- 27 nov. : entree alimentant un looper avec boucle : le pad de l'entree passe avant l'imposition
-S.routing.in_l[3][2] = true
-local b2 = 1000 + 1 * 600; GM[100 + 1] = 1; GM[b2 + 2] = 2; GM[b2 + 46] = 96000
-run(0.3)
-cmd("topin_on"); tap(0, 3); cmd("auxsel_1_on"); run(0.3)
-check("IN3 alimente L2 (boucle) : pad send 1 ouvre IN3 -> aux1", st(IN(3), 1), "OUV1.00")
-cmd("auxsel_1_off"); run(0.3)
-check("... et le referme", st(IN(3), 1), "fer1.00")
-print(fails == 0 and "TOUT OK (2)" or (fails .. " ECHEC(S)"))
