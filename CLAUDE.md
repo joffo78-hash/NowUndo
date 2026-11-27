@@ -484,7 +484,7 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   (1 In seul, 5 fenêtre décalée, 2 Out seul, 3 Width, 4 pleine) agissent sur la fenêtre fictive (**même règle In / Out / Width**) ; publiée en
   `112000 + (looper*3 + part)*20` **+4** longueur fictive (0 dès qu'il y a une boucle), **+5** In, **+6** Width (unités fictives). **`+44/+45/+46` restent à 0**
   (rien d'autre ne croit qu'il y a une boucle). Fin du 1er REC (`finish_rec`) : fenêtre appliquée à la boucle puis oubliée ; Full Loop (cmd 22 / edit 4) et
-  Clear d'un looper vide = remise à pleine boucle.
+  Clear d'un looper vide = remise à pleine boucle. **Quantize gardé** (`pre_q` / `pre_mw` : In / Out fictifs calés sur 1/divisions de `loop_quant`, largeur mini = 1 case).
 - Scripts : fonction **globale `NU_IO(b, 44|45|46)`** (copiée dans Launchpad, Twister, MIDI Learn, Scenario, Twister_Web) = vraie boucle, sinon valeurs fictives.
   Utilisée aux endroits qui écrivent / affichent In / Out : Twister (`read_fb` 44/45/46 ; l'anneau « Clear = boucle / vide » de la page 9 lit la vraie longueur),
   MIDI Learn (`io_write`, page 1, reset), rushes `in` / `out` (`F.iolen/iost/iow`), Launchpad `loop_in_step`, pont web (`read_state`, `set_io`, reset).

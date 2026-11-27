@@ -905,7 +905,7 @@ function finish_rec(new_state) local(ms_off, k) (
   active_part == 1 ? master_pos1 = 0 : active_part == 2 ? master_pos2 = 0 : master_pos3 = 0;
   // 27 nov. : In / Out pre-regles pendant que le looper etait vide -> appliques a la nouvelle boucle, puis oublies
   (pre_s > 0.0001 || pre_e < 0.9999) ? (
-    loop_start = floor(pre_s * length); loop_width = max(1, floor((pre_e - pre_s) * length)); loop_width = min(loop_width, length - loop_start);
+    loop_start = floor(pre_s * length + 0.5); loop_width = max(1, floor((pre_e - pre_s) * length + 0.5)); loop_width = min(loop_width, length - loop_start);   // deja calees sur le Quantize au reglage
     smooth_start = loop_start; smooth_width = loop_width;
   );
   pre_s = 0; pre_e = 1;
@@ -1541,6 +1541,9 @@ function quant_val(q) ( q == 0 ? 0 : q == 1 ? 2 : q == 2 ? 3 : q == 3 ? 4 : q ==
 function loop_max_len() ( length > 0 ? length : (state == 1 ? pos : buf_len); );
 function quant_grid() local(ml, qv) ( ml = loop_max_len(); qv = quant_val(loop_quant); (qv > 0 && ml > 0) ? ml / qv : 0; );
 function min_width() local(g) ( g = quant_grid(); g > 0 ? g : srate * 0.05; );
+// 27 nov. : looper vide (In / Out pre-regles en fraction) : meme Quantize que la boucle (grille = 1 / divisions)
+function pre_q(fr) local(qv) ( qv = quant_val(loop_quant); qv > 0 ? floor(fr * qv + 0.5) / qv : fr; );
+function pre_mw() local(qv) ( qv = quant_val(loop_quant); qv > 0 ? 1 / qv : 0.01; );
 function apply_quant_start(val_s) local(ml, g) ( ml = loop_max_len(); g = quant_grid(); g > 0 ? val_s = floor(val_s / g + 0.5) * g; max(0, min(val_s, ml - min_width())); );
 function apply_quant_width(val_w, s_pos) local(ml, g, mw) ( ml = loop_max_len(); g = quant_grid(); mw = min_width(); g > 0 ? val_w = floor(val_w / g + 0.5) * g; max(mw, min(val_w, max(mw, ml - s_pos))); );
 
@@ -2638,11 +2641,11 @@ loop(3,
     length <= 0 ? (
       // 27 nov. (demande) : looper VIDE = longueur fictive pre_L ; In / Out gardes en fraction, appliques a la fin du 1er REC.
       // Meme regle que d'habitude : 1 = In seul (Out reste), 5 = fenetre decalee (ecart garde), 2 = Out seul, 3 = Width, 4 = pleine boucle.
-      pre_w = pre_e - pre_s;
-      edit_cmd == 1 ? pre_s = max(0, min(gmem[gmem_base + 161] / pre_L, pre_e - 0.01)) :
-      edit_cmd == 5 ? ( pre_s = max(0, min(gmem[gmem_base + 161] / pre_L, 1 - pre_w)); pre_e = pre_s + pre_w; ) :
-      edit_cmd == 2 ? pre_e = max(pre_s + 0.01, min(gmem[gmem_base + 162] / pre_L, 1)) :
-      edit_cmd == 3 ? pre_e = max(pre_s + 0.01, min(pre_s + gmem[gmem_base + 162] / pre_L, 1)) :
+      pre_w = pre_e - pre_s; pre_m = pre_mw();
+      edit_cmd == 1 ? pre_s = max(0, min(pre_q(gmem[gmem_base + 161] / pre_L), pre_e - pre_m)) :
+      edit_cmd == 5 ? ( pre_s = max(0, min(pre_q(gmem[gmem_base + 161] / pre_L), 1 - pre_w)); pre_e = pre_s + pre_w; ) :
+      edit_cmd == 2 ? pre_e = max(pre_s + pre_m, min(pre_q(gmem[gmem_base + 162] / pre_L), 1)) :
+      edit_cmd == 3 ? pre_e = max(pre_s + pre_m, min(pre_s + pre_q(gmem[gmem_base + 162] / pre_L), 1)) :
       edit_cmd == 4 ? ( pre_s = 0; pre_e = 1; );
     ) : (
       br_on && edit_cmd == 1 ? edit_cmd = 5;   // BR : la fraction (écart) ne change pas quand In bouge
