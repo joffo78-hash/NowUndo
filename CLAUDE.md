@@ -454,7 +454,11 @@ Idées proposées pas faites : recherche texte + tags perso dans les rushes ; re
   mis dès que l'état est 1..8 ou qu'une des 3 parts a une longueur (`LPF.aux_any_len`), retiré seulement au vrai Clear (état 0, plus aucune longueur,
   looper vivant). Avant : le test exigeait le battement `100+i` → un looper qui joue pouvait être vu vide et suivre ses entrées.
   18h40 : « vide » = ni REC lancé (1, 7, 8) ni longueur sur une part (un état 2..6 à vide reste vide), retour à vide sans exiger le battement.
-- `VL.BUILD = "27nov-18h40"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
+- **27nov-diag1** (l'utilisateur : « dans REAPER le looper 2 a bien l'aux actif », banc OK) : source routée = routing du Launchpad **ou** envoi REAPER ouvert
+  (`LPF.aux_routed`, routing fait à la main) ; doublons d'envois vers une même aux : `LPF.aux_get` = ouvert si l'un l'est, fermer les ferme tous
+  (`LPF.aux_mute_dups`) ; diagnostic sans message `Dripsody_aux_diag.txt` (dossier de REAPER, écrit à chaque commande de send d'une entrée : état, longueur,
+  busy, sources, sends de chaque looper, sends propres des entrées). Si le bug reste : demander ce fichier.
+- `VL.BUILD = "27nov-diag1"` (une 2e ligne `VL.BUILD = "0.9.24…"` écrasait le marqueur depuis le début : retirée).
 - Tests : `tools/tinmode.lua` (Launchpad), `tools/tinputs_rush.lua` (rush) ; taux / tcellmode inchangés OK.
 
 ## Ce qui a été fait (session de nov. 2026, résumé)

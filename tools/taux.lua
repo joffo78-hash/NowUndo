@@ -180,4 +180,14 @@ lstate(2, 1, 0); run(0.2); lstate(2, 2, 48000); run(0.2); lstate(2, 0, 0); run(0
 check("L2 apres Clear (arrete, vide) suit IN1 (ferme)", st(LP(2), 2):sub(1,3), "fer")
 cmd("aux_in_1_2_on"); run(0.4)
 check("... et rouvre", st(LP(2), 2):sub(1,3), "OUV")
+-- 27 nov. diag1 : routing fait a la main dans REAPER (IN3 -> L7 sans le Launchpad) et doublon d'envoi L7 -> aux3
+lstate(7, 0, 0); run(0.2)
+reaper.CreateTrackSend(IN(3), LP(7)); IN(3).sends[#IN(3).sends].B_MUTE = 0
+reaper.CreateTrackSend(LP(7), AUX(3)); LP(7).sends[#LP(7).sends].B_MUTE = 0
+reaper.CreateTrackSend(LP(7), AUX(3)); LP(7).sends[#LP(7).sends].B_MUTE = 0
+cmd("aux_in_3_3_on"); run(0.3); cmd("aux_in_3_3_off"); run(0.5)
+local n_open = 0; for _, x in ipairs(LP(7).sends) do if x.dst == AUX(3) and x.B_MUTE == 0 then n_open = n_open + 1 end end
+check("routing a la main + doublon : L7 ferme tous ses envois aux3", tostring(n_open), "0")
+cmd("aux_in_3_3_on"); run(0.5)
+check("... et rouvre", st(LP(7), 3):sub(1,3), "OUV")
 print(fails == 0 and "TOUT OK" or (fails .. " ECHEC(S)"))

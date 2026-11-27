@@ -44,7 +44,7 @@
 ]]
 
 local VL = {}
-VL.BUILD = "27nov-18h40"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
+VL.BUILD = "27nov-diag1"       -- affiche en tete de la barre d'etat : verifie quelle copie du script tourne vraiment
 VL.VERSION = "0.9.0"            -- NE PAS CHANGER : le miroir / la remote web refusent l'etat synchronise si la version differe
 -- (ancien build : "0.9.24-op-mute-parent+macros+RGES") -- operationnel + mute AUTOMUTE + parent bleu (depuis 0.9.20)
 VL.debug = false                  -- true : messages de diagnostic dans la console REAPER
@@ -747,7 +747,31 @@ function LPF.aux_track(a) return LPF.track_by_index_1based((VL.config.aux_track_
 function LPF.aux_get(src, dst)
   local idx = LPF.find_send(src, dst)
   if not idx then return false, nil, nil end
+  if send_val(src, idx, "B_MUTE") ~= 0 then                -- 27 nov. : un 2e envoi vers la meme piste (fait a la main) peut etre ouvert
+    local ns = reaper.GetTrackNumSends(src, 0)
+    for j = idx + 1, ns - 1 do
+      if reaper.GetTrackSendInfo_Value(src, 0, j, "P_DESTTRACK") == dst and send_val(src, j, "B_MUTE") == 0 then
+        return true, send_val(src, j, "D_VOL"), idx
+      end
+    end
+  end
   return send_val(src, idx, "B_MUTE") == 0, send_val(src, idx, "D_VOL"), idx
+end
+-- ferme TOUS les envois src -> dst sauf idx (doublons)
+function LPF.aux_mute_dups(src, dst, idx)
+  local ns = reaper.GetTrackNumSends(src, 0)
+  for j = 0, ns - 1 do
+    if j ~= idx and reaper.GetTrackSendInfo_Value(src, 0, j, "P_DESTTRACK") == dst and send_val(src, j, "B_MUTE") == 0 then
+      reaper.SetTrackSendInfo_Value(src, 0, j, "B_MUTE", 1)
+    end
+  end
+end
+-- 27 nov. : source routee = routing du Launchpad OU envoi REAPER ouvert (routing fait a la main)
+function LPF.aux_routed(src_tr, dst_tr, flag)
+  if flag then return true end
+  if not (src_tr and dst_tr) then return false end
+  local idx = LPF.find_send(src_tr, dst_tr)
+  return idx ~= nil and send_val(src_tr, idx, "B_MUTE") == 0
 end
 
 -- applique l'etat voulu d'un envoi src -> dst (ouvert / ferme + volume), avec fondu a l'ouverture et a la fermeture
@@ -779,7 +803,8 @@ function LPF.aux_apply(src, dst, open, vol, key)
       reaper.SetTrackSendInfo_Value(src, 0, idx, "D_VOL", vol)
     end
   elseif idx and cur_open then
-    A.ramps[key] = { src = src, dst = dst, v0 = cur_vol or 0, v1 = 0, t0 = reaper.time_precise(), close = true, final = vol }
+    if send_val(src, idx, "B_MUTE") ~= 0 then LPF.aux_mute_dups(src, dst, -1)   -- seul un doublon etait ouvert : ferme
+    else A.ramps[key] = { src = src, dst = dst, v0 = cur_vol or 0, v1 = 0, t0 = reaper.time_precise(), close = true, final = vol } end
   end
   A.w[key] = { open = open, vol = vol }
 end
@@ -798,6 +823,7 @@ function VL.aux_ramps(t)
         if r.close then                                -- ferme : mute, puis on remet le niveau (reouverture au dernier niveau)
           reaper.SetTrackSendInfo_Value(r.src, 0, idx, "B_MUTE", 1)
           reaper.SetTrackSendInfo_Value(r.src, 0, idx, "D_VOL", r.final or r.v0)
+          LPF.aux_mute_dups(r.src, r.dst, idx)
         end
         A.ramps[key] = nil
       end
@@ -897,9 +923,11 @@ function VL.aux_follow_src(i, tracks, cleared)
   A.fsig = A.fsig or {}
   local ltr = tracks.loopers[i]
   local ins = {}
-  for k = 1, NIN do if S.routing.in_l[k][i] and tracks.inputs[k] then ins[#ins + 1] = k end end
+  for k = 1, NIN do if tracks.inputs[k] and LPF.aux_routed(tracks.inputs[k], ltr, S.routing.in_l[k][i]) then ins[#ins + 1] = k end end
   local lps = {}
-  for j = 1, NLOOP do if j ~= i and S.routing.l_l[j] and S.routing.l_l[j][i] and tracks.loopers[j] then lps[#lps + 1] = j end end
+  for j = 1, NLOOP do
+    if j ~= i and tracks.loopers[j] and LPF.aux_routed(tracks.loopers[j], ltr, S.routing.l_l[j] and S.routing.l_l[j][i]) then lps[#lps + 1] = j end
+  end
   if #ins == 0 and #lps == 0 and not cleared then A.fsig[i] = nil return end
   local want, sig = {}, {}
   for a = 1, LPF.aux_count() do
@@ -1049,6 +1077,45 @@ end
 -- 27 nov. : tableau de bord des sends (lu par 8Waves, plus tard le web) : gmem 6098 = 1re piste aux, 6099 = nombre ;
 -- 6100 + (i-1)*8 + (a-1) = send du looper i vers l'aux a, 6164 + (k-1)*8 + (a-1) = send REEL de l'entree k
 -- (niveau > 0 = ouvert, -niveau = ferme avec ce niveau en memoire, 0 = pas d'envoi) ; 6228 + (i-1)*8 + (a-1) = 1 si aux a -> looper i
+-- 27 nov. : diagnostic sans message (fichier Dripsody_aux_diag.txt du dossier de REAPER, 40 dernieres commandes)
+function VL.aux_diag(tag, tracks)
+  if VL_TEST or not (reaper.GetResourcePath and io and io.open) then return end
+  local A, L = VL.AUX, {}
+  L[#L + 1] = string.format("== %s  %s  build %s  sel L%s", os.date("%H:%M:%S"), tag, tostring(VL.BUILD), tostring(S.sel_looper))
+  for i = 1, NLOOP do
+    local ltr = tracks.loopers[i]
+    if ltr then
+      local ins, lps, ss = {}, {}, {}
+      for k = 1, NIN do if tracks.inputs[k] and LPF.aux_routed(tracks.inputs[k], ltr, S.routing.in_l[k][i]) then ins[#ins + 1] = "IN" .. k .. (S.routing.in_l[k][i] and "" or "(reaper)") end end
+      for j = 1, NLOOP do if j ~= i and tracks.loopers[j] and LPF.aux_routed(tracks.loopers[j], ltr, S.routing.l_l[j] and S.routing.l_l[j][i]) then lps[#lps + 1] = "L" .. j end end
+      for a = 1, LPF.aux_count() do
+        local aux = LPF.aux_track(a)
+        local o, v = false, nil
+        if aux then o, v = LPF.aux_get(ltr, aux) end
+        local nd = 0
+        if aux then for j = 0, reaper.GetTrackNumSends(ltr, 0) - 1 do if reaper.GetTrackSendInfo_Value(ltr, 0, j, "P_DESTTRACK") == aux then nd = nd + 1 end end end
+        ss[#ss + 1] = "aux" .. a .. "=" .. (v == nil and "-" or ((o and "ON" or "off") .. string.format("%.2f", v))) .. (nd > 1 and ("x" .. nd) or "") .. (A.ramps["l" .. i .. ":" .. a] and ((A.ramps["l" .. i .. ":" .. a].close) and "(se ferme)" or "(s'ouvre)") or "")
+      end
+      local st = S.loopers[i] and S.loopers[i].state
+      L[#L + 1] = string.format("L%d etat %s len %s busy %s | sources %s %s | %s", i, tostring(st),
+        tostring(S.loopers[i] and S.loopers[i].length), tostring(A.busy and A.busy[i]), table.concat(ins, ","), table.concat(lps, ","), table.concat(ss, " "))
+    end
+  end
+  for k = 1, NIN do
+    local own = A.own[k]
+    if own then
+      local ss = {}
+      for a = 1, LPF.aux_count() do ss[#ss + 1] = "aux" .. a .. "=" .. ((own[a] and own[a].on) and "ON" or "off") end
+      L[#L + 1] = "IN" .. k .. " propre : " .. table.concat(ss, " ")
+    end
+  end
+  A.diag = A.diag or {}
+  A.diag[#A.diag + 1] = table.concat(L, "\n")
+  while #A.diag > 40 do table.remove(A.diag, 1) end
+  local f = io.open(reaper.GetResourcePath() .. "/Dripsody_aux_diag.txt", "w")
+  if f then f:write(table.concat(A.diag, "\n\n"), "\n") f:close() end
+end
+
 function VL.aux_publish(tracks)
   if not reaper.gmem_write then return end
   local A = VL.AUX
@@ -1105,6 +1172,7 @@ function VL.aux_cmd(name)
       LPF.aux_own_save(n, tracks.inputs[n])
       log("info", "IN%d -> aux%d : %s", n, a, o.on and string.format("%.2f", o.vol) or "ferme")
       VL.update_aux_follow()
+      VL.aux_diag("IN" .. n .. " aux" .. a .. " " .. (o.on and "on" or "off"), tracks)
     end
     return true
   end
